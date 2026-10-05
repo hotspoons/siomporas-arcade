@@ -12,7 +12,7 @@
   "apps/corridor/src/game/world/zones.ts": "08425107115e1419",
   "apps/corridor/src/game/stunt/stunts.ts": "7a08a97fd4404d77",
   "apps/corridor/src/game/traffic/trafficsets.ts": "e96f1d40aa42bd84",
-  "apps/corridor/src/game/vehicle/vehicles.ts": "4c6a7935d1f489fe",
+  "apps/corridor/src/game/vehicle/vehicles.ts": "0344afb53d2898ba",
   "apps/corridor/src/game/session/objectives.ts": "03f5dd5ffec3612d",
   "apps/corridor/src/game/session/gamepolicy.ts": "bfeb34a026ec6ed1",
   "apps/corridor/src/editor/store/schema.ts": "63df418ad75d9b06",

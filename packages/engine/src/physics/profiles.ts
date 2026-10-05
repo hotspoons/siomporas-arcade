@@ -504,6 +504,59 @@ export const PROFILES: Record<string, DriveProfile> = {
 export type ProfileId = keyof typeof PROFILES
 
 /**
+ * Every NUMERIC key of `DriveProfile`, for a validator that has to tell a real override from a
+ * typo at runtime.
+ *
+ * `Object.keys(PROFILES.street)` cannot answer this: the optional keys (`driveShare`,
+ * `tractionFloor`, `chassisFriction`) are `undefined` on every concrete profile, so a car that
+ * legitimately overrides one would be rejected. The `Record<Exclude<…>, true>` type is what keeps
+ * this list honest — add a numeric field to `DriveProfile` and this stops compiling until it is here.
+ */
+const NUMERIC_KEY_MAP: Record<Exclude<keyof DriveProfile, 'id' | 'name' | 'note' | 'drive'>, true> = {
+  suspensionRest: true,
+  suspensionTravel: true,
+  suspensionStiffness: true,
+  compression: true,
+  relaxation: true,
+  maxSuspensionForce: true,
+  gripFront: true,
+  gripRear: true,
+  sideStiffness: true,
+  offroadGrip: true,
+  powerPerKg: true,
+  topSpeed: true,
+  brakePerKg: true,
+  handbrakePerKg: true,
+  reverse: true,
+  steerMax: true,
+  steerRate: true,
+  steerAtSpeed: true,
+  steerFullSpeed: true,
+  counterSteer: true,
+  yawAssist: true,
+  yawGripLimited: true,
+  driftHold: true,
+  driftYaw: true,
+  slideDecay: true,
+  rollingPerKg: true,
+  dragPerKg: true,
+  downforcePerKg: true,
+  fanPerKg: true,
+  fanRearBias: true,
+  airPitch: true,
+  airRoll: true,
+  airYaw: true,
+  airDamping: true,
+  antiRollPerKg: true,
+  rollResist: true,
+  landingTolerance: true,
+  driveShare: true,
+  tractionFloor: true,
+  chassisFriction: true,
+}
+export const DRIVE_PROFILE_NUMBER_KEYS: ReadonlySet<string> = new Set(Object.keys(NUMERIC_KEY_MAP))
+
+/**
  * A profile by id, with overrides on top.
  *
  * This is the shape the level document and the F6 panel both want: a level says `"profile":

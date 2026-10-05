@@ -30,10 +30,10 @@ import { Driver } from './traffic'
 import { dentObject, repairObject } from '../vehicle/dents'
 import type { Impact } from '@apex/engine/physics/world'
 import type { TrafficBody } from '../world/physics'
-import { OnRoad, Transform, Vehicle } from '../actors/actors'
+import { Doomed, OnRoad, Transform, Vehicle } from '../actors/actors'
 import { Driver as DriverC, driveSystem, makeDriver, rng, SpeedLimit } from './traffic'
 import { lanesPerDirection, planTraffic, type RoadChain, type TrafficSlot } from './trafficplan'
-import { TRAFFIC_LEVELS, Zones, type ZoneDoc } from '../world/zones'
+import { TRAFFIC_LEVELS, Zones, type Zone, type ZoneDoc } from '../world/zones'
 import { loadZones } from '../../editor/store/zonestore'
 import { assetsvc, type Build } from '../../assets/assetsvc'
 import { EMPTY_SET, pick, type TrafficSetDoc } from './trafficsets'
@@ -193,6 +193,21 @@ export class TrafficLayer {
   private models = new Map<string, { object: THREE.Object3D; doc: VehicleDoc }>()
   private drive: ((world: ActorWorld['world'], dt: number) => void) | null = null
   private slots: TrafficSlot[] = []
+  /** the zone file as authored, before the world floor; a live reseed rebuilds from these */
+  private fileZones: Zone[] = []
+  /** the level's own world floor (`spec.density`), 0 when it asked for none */
+  private levelFloor = 0
+  /** the live world floor from TRAFFIC_DENSITY: >0 overrides the level and puts traffic on every road */
+  private worldDensity = 0
+  /** what the knob last asked for; `tick` applies it on a throttle so a drag does not respawn per frame */
+  private pendingDensity = 0
+  private densityAt = 0
+  /** the level's own car cap, before TRAFFIC_MAX caps it again */
+  private maxSpec = Infinity
+  /** what to spawn from, kept so a reseed needs no asset reads */
+  private usable: { mix: TrafficSetDoc['mix']; obeyRate?: number; speedFactor?: number } = { mix: [] }
+  private obey = 0.97
+  private speedFactor = 1
   private built = false
   private byCollider = new Map<number, Shown>()
   private offImpact: (() => void) | null = null
@@ -247,14 +262,12 @@ export class TrafficLayer {
     this.rand = rand
     this.blind = !!spec.blind
     const doc: ZoneDoc = await loadZones(slug).catch(() => ({ version: 1, zones: [] }) as ZoneDoc)
-    const zones = [...doc.zones]
-    const floor = typeof spec.density === 'string' ? (TRAFFIC_LEVELS.find((l) => l.id === spec.density)?.density ?? (spec.density === 'rush' ? 0.8 : 0)) : spec.density ?? 0
-    if (floor > 0) {
-      // the whole world as one zone, UNDER the painted ones: `Zones.at` takes the first hit
-      const b = this.site.manifest.bbox
-      if (b) zones.push({ id: '__everywhere', name: 'the level', kind: 'traffic', polygon: [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]], traffic: { density: floor } })
-    }
-    this.zones.set(zones, rand)
+    this.fileZones = doc.zones
+    this.levelFloor = typeof spec.density === 'string' ? (TRAFFIC_LEVELS.find((l) => l.id === spec.density)?.density ?? (spec.density === 'rush' ? 0.8 : 0)) : spec.density ?? 0
+    // a knob already up is the world floor: it puts traffic everywhere, whether or not the level asked
+    this.worldDensity = T.TRAFFIC_DENSITY
+    this.pendingDensity = this.worldDensity
+    this.rebuildZones()
 
     // the set: which cars, and how common
     let set: TrafficSetDoc = EMPTY_SET
@@ -300,41 +313,13 @@ export class TrafficLayer {
       at: (s: number) => { const p = c.at(s).pos; return { x: p.x, y: -p.z } },
       dir: (s: number) => { const d = c.at(s).dir; return { x: d.x, y: -d.z } },
     }))
-    const max = Math.min(spec.max ?? Infinity, Math.round(T.TRAFFIC_MAX))
+    this.usable = usable
+    this.obey = usable.obeyRate ?? spec.obeyRate ?? 0.97
+    this.speedFactor = usable.speedFactor ?? spec.speedFactor ?? 1
+    this.maxSpec = spec.max ?? Infinity
     // the planner knows a carriageway from a two-way road (`twoWay` on the chain) and lanes it
-    this.slots = planTraffic(this.roads, this.zones, rand, { max })
-
-    const obey = usable.obeyRate ?? spec.obeyRate
-    const speedFactor = usable.speedFactor ?? spec.speedFactor ?? 1
-    for (const slot of this.slots) {
-      const road = this.roads[slot.chain]
-      if (!road) continue
-      const p = road.at(slot.s)
-      const d = road.dir(slot.s)
-      const which = usable.mix.length ? (pick(usable, rand) ?? usable.mix[0].vehicle) : '__default'
-      const m = this.models.get(which)!
-      const e = spawnVehicle(this.actors, { x: p.x, y: p.y, yaw: Math.atan2(d.y, d.x) }, { maxSpeed: road.limit_ms ?? 13.4 })
-      addComponent(this.actors.world, e, OnRoad)
-      OnRoad.chain[e] = slot.chain
-      OnRoad.s[e] = slot.s
-      OnRoad.lane[e] = slot.lane
-      OnRoad.dir[e] = slot.dir
-      Vehicle.lengthM[e] = m.doc.spec.length ?? 4.4
-      Vehicle.widthM[e] = m.doc.spec.width ?? 1.8
-      makeDriver(this.actors.world, e, rand, { obeyRate: usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? obey })
-      SpeedLimit.v[e] = (road.limit_ms ?? 13.4) * speedFactor
-      // a jam's cars start slow, an open road's at the limit — otherwise the first seconds are a pile-up
-      Vehicle.speed[e] = SpeedLimit.v[e] * (1 - slot.density) * 0.8
-
-      const mesh = m.object.clone(true)
-      mesh.name = `traffic:${which}`
-      this.group.add(mesh)
-      const half = { x: (m.doc.spec.length ?? 4.4) / 2, y: (m.doc.spec.height ?? 1.4) / 2, z: (m.doc.spec.width ?? 1.8) / 2 }
-      const body = this.physics ? this.physics.spawnKinematic(half) : null
-      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey: usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? obey ?? 0.97, lamps: trafficLamps(mesh, m.doc) }
-      if (body) this.byCollider.set(body.colliderHandle, shown)
-      this.shown.push(shown)
-    }
+    this.replan()
+    this.spawnSlots()
     this.count = this.shown.length
     /*
      * A HARD HIT KNOCKS A CAR LOOSE, AND DENTS IT. The world reports every impact above the
@@ -369,6 +354,90 @@ export class TrafficLayer {
     this.built = true
     this.place(true)
     return this.count
+  }
+
+  /**
+   * The TRAFFIC_DENSITY knob moved. Stored, not applied: `tick` reconciles it on a throttle, so
+   * dragging the slider does not respawn six hundred cars on every frame of the drag.
+   */
+  setWorldDensity(d: number): void {
+    this.pendingDensity = d
+  }
+
+  /**
+   * The zones to plan from: the file's own, PLUS the world floor as one zone UNDER them. `Zones.at`
+   * takes the first hit, so a painted jam still wins over the floor wherever it covers.
+   */
+  private rebuildZones(): void {
+    const zones = [...this.fileZones]
+    const floor = this.worldDensity > 0 ? this.worldDensity : this.levelFloor
+    if (floor > 0) {
+      const b = this.site.manifest.bbox
+      if (b) zones.push({ id: '__everywhere', name: 'the level', kind: 'traffic', polygon: [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]], traffic: { density: floor } })
+    }
+    this.zones.set(zones, this.rand)
+  }
+
+  /** Plan the cars for the current zones and density. */
+  private replan(): void {
+    const max = Math.min(this.maxSpec, Math.round(T.TRAFFIC_MAX))
+    this.slots = planTraffic(this.roads, this.zones, this.rand, { max })
+  }
+
+  /**
+   * Drop every car and put the plan back on the road. Entities are marked `Doomed` (the world reaps
+   * them at the end of its step) and their meshes and bodies are released now, so a density change
+   * costs one re-plan and one spawn, not a level reload.
+   */
+  private reseed(): void {
+    for (const s of this.shown) {
+      addComponent(this.actors.world, s.e, Doomed)
+      s.body?.free()
+      s.mesh.removeFromParent()
+    }
+    this.shown = []
+    this.wrecks = []
+    this.byCollider.clear()
+    this.wrecked = 0
+    this.count = 0
+    this.replan()
+    this.spawnSlots()
+    this.count = this.shown.length
+  }
+
+  /** Spawn one car per planned slot. The body of `load`'s spawn loop, now callable again. */
+  private spawnSlots(): void {
+    const { usable, rand } = this
+    for (const slot of this.slots) {
+      const road = this.roads[slot.chain]
+      if (!road) continue
+      const p = road.at(slot.s)
+      const d = road.dir(slot.s)
+      const which = usable.mix.length ? (pick(usable, rand) ?? usable.mix[0].vehicle) : '__default'
+      const m = this.models.get(which)!
+      const e = spawnVehicle(this.actors, { x: p.x, y: p.y, yaw: Math.atan2(d.y, d.x) }, { maxSpeed: road.limit_ms ?? 13.4 })
+      addComponent(this.actors.world, e, OnRoad)
+      OnRoad.chain[e] = slot.chain
+      OnRoad.s[e] = slot.s
+      OnRoad.lane[e] = slot.lane
+      OnRoad.dir[e] = slot.dir
+      Vehicle.lengthM[e] = m.doc.spec.length ?? 4.4
+      Vehicle.widthM[e] = m.doc.spec.width ?? 1.8
+      const obey = usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? this.obey
+      makeDriver(this.actors.world, e, rand, { obeyRate: obey })
+      SpeedLimit.v[e] = (road.limit_ms ?? 13.4) * this.speedFactor
+      // a jam's cars start slow, an open road's at the limit — otherwise the first seconds are a pile-up
+      Vehicle.speed[e] = SpeedLimit.v[e] * (1 - slot.density) * 0.8
+
+      const mesh = m.object.clone(true)
+      mesh.name = `traffic:${which}`
+      this.group.add(mesh)
+      const half = { x: (m.doc.spec.length ?? 4.4) / 2, y: (m.doc.spec.height ?? 1.4) / 2, z: (m.doc.spec.width ?? 1.8) / 2 }
+      const body = this.physics ? this.physics.spawnKinematic(half) : null
+      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey, lamps: trafficLamps(mesh, m.doc) }
+      if (body) this.byCollider.set(body.colliderHandle, shown)
+      this.shown.push(shown)
+    }
   }
 
   private onImpact(im: Impact): void {
@@ -610,6 +679,13 @@ export class TrafficLayer {
   /** Step the simulation and put every car where it now is. */
   tick(dt: number, eye: THREE.Vector3): void {
     if (!this.built) return
+    // the TRAFFIC_DENSITY knob, applied on a throttle: a drag re-plans a few times a second, not per frame
+    if (this.pendingDensity !== this.worldDensity && performance.now() - this.densityAt > 200) {
+      this.densityAt = performance.now()
+      this.worldDensity = this.pendingDensity
+      this.rebuildZones()
+      this.reseed()
+    }
     const t0 = performance.now()
     this.eyeSite.x = eye.x
     this.eyeSite.y = -eye.z

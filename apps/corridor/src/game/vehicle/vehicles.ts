@@ -24,7 +24,7 @@
 // how a car says "street, but grippier" and keeps tracking `street` when somebody improves it. A
 // flattened copy of all forty numbers is forty numbers that silently stop tracking, and nothing ever
 // says so.
-import { PROFILES, profile, type DriveProfile } from '@apex/engine/physics/profiles'
+import { DRIVE_PROFILE_NUMBER_KEYS, PROFILES, profile, type DriveProfile } from '@apex/engine/physics/profiles'
 import type { VehicleSpec } from '@apex/engine/physics/vehicle'
 
 /* ---- the document ---------------------------------------------------------------------------- */
@@ -198,6 +198,31 @@ export interface VehicleDoc {
 /* ---- defaults, per class --------------------------------------------------------------------- */
 
 /**
+ * The hero car's handling overrides, on the `street` base.
+ *
+ * Rich's own drive, pasted back from the F6 panel on 2026-10-05 — the F6 physics sliders are seeded
+ * from these (`adoptPhysCar`), so this is the one place the hero car's numbers live. Everything not
+ * named here keeps `street`.
+ */
+const HERO_HANDLING: Record<string, number> = {
+  powerPerKg: 45,
+  topSpeed: 180,
+  brakePerKg: 37.5,
+  reverse: 0.6,
+  suspensionTravel: 0.13,
+  suspensionStiffness: 141,
+  compression: 4.3,
+  relaxation: 3.9,
+  rollingPerKg: 0,
+  dragPerKg: 0,
+  downforcePerKg: 0.0026,
+  fanPerKg: 8.5,
+  antiRollPerKg: 10.5,
+  rollResist: 0.68,
+  driveShare: 0.4,
+}
+
+/**
  * Sensible numbers per vehicle class.
  *
  * NOT because guessing is good, but because a form full of zeroes is a form nobody fills in, and
@@ -208,7 +233,7 @@ export interface VehicleDoc {
  * mass and CG of an ordinary saloon.
  */
 export const VEHICLE_TEMPLATES: Record<string, VehicleDoc> = {
-  'hero-car': doc({ mass: 1420, wheelbase: 2.65, track: 1.55, cgHeight: 0.52, wheelRadius: 0.32, drive: 'rwd', length: 4.4, width: 1.9, height: 1.35 }, 'street', { power_kw: 205, redline_rpm: 7200, idle_rpm: 850, gears: [3.42, 2.05, 1.42, 1.0, 0.82, 0.68], final_drive: 3.7, brake_torque_nm: 2400, brake_bias: 0.62 }, 'engines/atg-video-2/03_2jz.mr'),
+  'hero-car': doc({ mass: 1420, wheelbase: 2.65, track: 1.55, cgHeight: 0.52, wheelRadius: 0.32, drive: 'rwd', length: 4.4, width: 1.9, height: 1.35 }, 'street', { power_kw: 205, redline_rpm: 7200, idle_rpm: 850, gears: [3.42, 2.05, 1.42, 1.0, 0.82, 0.68], final_drive: 3.7, brake_torque_nm: 2400, brake_bias: 0.62 }, 'engines/atg-video-2/03_2jz.mr', HERO_HANDLING),
   traffic: doc({ mass: 1500, wheelbase: 2.7, track: 1.56, cgHeight: 0.58, wheelRadius: 0.33, drive: 'fwd', length: 4.5, width: 1.82, height: 1.48 }, 'street', { power_kw: 110, redline_rpm: 6200, idle_rpm: 750, gears: [3.55, 1.95, 1.3, 0.95, 0.74], final_drive: 4.05, brake_torque_nm: 1900, brake_bias: 0.65 }, 'engines/atg-video-1/05_honda_vtec.mr'),
   van: doc({ mass: 2300, rideHeight: 0.24, wheelbase: 3.2, track: 1.7, cgHeight: 0.85, wheelRadius: 0.36, drive: 'rwd', length: 5.5, width: 2.0, height: 2.4 }, 'street', { power_kw: 96, redline_rpm: 4600, idle_rpm: 700, gears: [4.2, 2.3, 1.45, 1.0, 0.8, 0.66], final_drive: 3.9, brake_torque_nm: 2600, brake_bias: 0.6 }, 'engines/atg-video-2/05_odd_fire_v6.mr'),
   truck: doc({ mass: 8000, rideHeight: 0.32, wheelbase: 4.8, track: 2.0, cgHeight: 1.25, wheelRadius: 0.52, drive: 'rwd', length: 9.0, width: 2.5, height: 3.4 }, 'street', { power_kw: 180, redline_rpm: 2600, idle_rpm: 600, gears: [7.2, 4.2, 2.6, 1.7, 1.0, 0.78], final_drive: 4.3, brake_torque_nm: 9000, brake_bias: 0.55 }, 'engines/atg-video-2/07_gm_ls.mr'),
@@ -216,10 +241,10 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleDoc> = {
   motorcycle: doc({ mass: 190, rideHeight: 0.14, wheelbase: 1.4, track: 0.18, cgHeight: 0.55, wheelRadius: 0.31, drive: 'rwd', length: 2.15, width: 0.75, height: 1.15, headlights: 1, taillights: 1 }, 'street', { power_kw: 55, redline_rpm: 11000, idle_rpm: 1200, gears: [2.8, 2.0, 1.55, 1.25, 1.05, 0.9], final_drive: 3.2, brake_torque_nm: 800, brake_bias: 0.7 }, 'engines/atg-video-1/02_kohler_ch750.mr'),
 }
 
-function doc(spec: VehicleChassis, base: string, engine: VehicleEngine, setup: string): VehicleDoc {
+function doc(spec: VehicleChassis, base: string, engine: VehicleEngine, setup: string, overrides: Record<string, number> = {}): VehicleDoc {
   return {
     spec,
-    profile: { base, overrides: {} },
+    profile: { base, overrides: { ...overrides } },
     engine,
     audio: { setup, gain: 0.8, lowpass_hz: 9000, cabin_mix: 0.35 },
     wheels: { from_rig: false, steer_max_deg: 34 },
@@ -353,11 +378,12 @@ export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWhe
   else if (!PROFILES[v.profile.base]) errors.push(`profile.base ${JSON.stringify(v.profile.base)} is not a drive profile (have ${Object.keys(PROFILES).join(', ')})`)
   if (v.profile?.blendWith && !PROFILES[v.profile.blendWith]) errors.push(`profile.blendWith ${JSON.stringify(v.profile.blendWith)} is not a drive profile`)
   // Overrides are checked against the REAL keys, so `rollStiffness` — a plausible name that does not
-  // exist — is an error here rather than a number that is silently ignored for ever.
-  const keys = new Set(Object.keys(PROFILES.street))
+  // exist — is an error here rather than a number that is silently ignored for ever. The key set is
+  // the engine's own numeric-key list, not `Object.keys(PROFILES.street)`: the optional keys
+  // (`driveShare`, `tractionFloor`, `chassisFriction`) are `undefined` on a concrete profile and a
+  // legitimate override of one would otherwise be rejected.
   for (const [k, val] of Object.entries(v.profile?.overrides ?? {})) {
-    if (!keys.has(k)) errors.push(`profile.overrides.${k} is not a DriveProfile key`)
-    else if (typeof (PROFILES.street as unknown as Record<string, unknown>)[k] !== 'number') errors.push(`profile.overrides.${k} is not a number on DriveProfile`)
+    if (!DRIVE_PROFILE_NUMBER_KEYS.has(k)) errors.push(`profile.overrides.${k} is not a DriveProfile key`)
     else if (!Number.isFinite(val)) errors.push(`profile.overrides.${k} must be a number`)
   }
 
@@ -721,7 +747,10 @@ export function vmaxFromProfile(p: DriveProfile, front: number): number {
 }
 
 function computeVmax(p: DriveProfile, front: number): number {
-  if (!(p.dragPerKg > 0) || !(p.topSpeed > 0) || !(p.powerPerKg > 0)) return 0
+  if (!(p.topSpeed > 0) || !(p.powerPerKg > 0)) return 0
+  // No drag is a legitimate tune (the F6 slider's floor), and with nothing slowing the car the wall
+  // is the limiter itself — `topSpeed` is exactly what that field means.
+  if (!(p.dragPerKg > 0)) return p.topSpeed
   const g = 9.81
   const share = p.drive === 'fwd' ? front : p.drive === 'awd' ? 1 : 1 - front
   const grip = p.drive === 'fwd'

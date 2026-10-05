@@ -522,7 +522,9 @@ describe('estimating the speed a car actually reaches', () => {
   it('moves with drag, grip and power — not with power alone', () => {
     const at = (over: Record<string, number>) => {
       const v = defaultVehicle('hero-car')
-      v.profile.overrides = { ...v.profile.overrides, ...over }
+      // a known reference, not the hero's own tune: the hero now defaults to zero drag, so start
+      // from some drag and modest power — "less drag is faster" has to be a real comparison
+      v.profile.overrides = { ...v.profile.overrides, dragPerKg: 0.001, powerPerKg: 20, ...over }
       return estimateVmax(v)
     }
     const base = at({})
@@ -544,10 +546,12 @@ describe('estimating the speed a car actually reaches', () => {
   it('exposes the same arithmetic over a live profile, and memoises it', () => {
     // the F6 auto-gear switch calls this on every tuning change with the car's live profile
     const v = defaultVehicle('hero-car')
-    const p = toDriveProfile(v)
     const front = frontShare(v.spec)
+    const p0 = toDriveProfile(v)
+    expect(vmaxFromProfile(p0, front)).toBeCloseTo(estimateVmax(v), 9)
+    // the hero runs zero drag, so its wall is the limiter; give it drag to test "less drag is faster"
+    const p = { ...p0, dragPerKg: 0.001 }
     const once = vmaxFromProfile(p, front)
-    expect(once).toBeCloseTo(estimateVmax(v), 9)
     // the same numbers must come back without re-solving, and a moved knob must not
     expect(vmaxFromProfile(p, front)).toBe(once)
     expect(vmaxFromProfile({ ...p, dragPerKg: 0.00045 }, front)).toBeGreaterThan(once)

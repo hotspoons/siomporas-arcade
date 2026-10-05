@@ -144,6 +144,8 @@ const skyDome = new Sky()
 scene.add(skyDome.mesh)
 
 let site: Site | null = null
+/** the last TRAFFIC_DENSITY the tune surface saw, so a rebuild only happens when that knob moved */
+let lastDensityKnob = Number.NaN
 /**
  * The physics world, when `PHYS_ENABLED` is on — null otherwise, and null is the honest answer
  * rather than a live-looking object that simulates nothing (see physics.ts).
@@ -1039,7 +1041,7 @@ async function loadSite(slug: string) {
    */
   const levelId = new URLSearchParams(location.search).get('level')
   const early = levelId && earlyLevel?.id === levelId ? earlyLevel : levelId ? await loadLevel(levelId).catch(() => null) : null
-  const trafficNeedsPhysics = !!early?.simulations?.some((x) => x.kind === 'traffic')
+  const trafficNeedsPhysics = !!early?.simulations?.some((x) => x.kind === 'traffic') || T.TRAFFIC_DENSITY > 0
   physics = await buildPhysics(site, {
     // `?phys=` first, then the player's own choice (Escape menu → Physics), then what the world
     // needs, then the world's PHYS_ENABLED knob (its tuning.json) — Rich, 2026-09-30: a world may
@@ -1612,20 +1614,13 @@ async function openLevel(id: string) {
    * started for it at site build (see `trafficNeedsPhysics`); without it the cars still drive,
    * they just cannot be hit.
    */
-  traffic?.dispose()
-  traffic = null
-  const wantTraffic = lvl.simulations?.find((x) => x.kind === 'traffic') as TrafficSpec | undefined
-  if (wantTraffic && site) {
-    traffic = new TrafficLayer(site, actors, physics)
-    scene.add(traffic.group)
-    try {
-      const n = await traffic.load(site.manifest.slug, wantTraffic)
-      status(`traffic: ${n} cars`)
-      for (const p of traffic.problems) toast(`traffic: ${p}`, 'warn', 6000)
-      if (!n) toast(`${lvl.id}: traffic asked for, but no zone or density put a car anywhere`, 'warn', 6000)
-    } catch (e) {
-      toast(`traffic: ${String((e as Error).message ?? e)}`, 'warn', 8000)
-    }
+  const levelTraffic = lvl.simulations?.find((x) => x.kind === 'traffic') as TrafficSpec | undefined
+  // the TRAFFIC_DENSITY knob can put traffic on the roads of ANY level, whether or not it asked
+  const wantTraffic = levelTraffic ?? (T.TRAFFIC_DENSITY > 0 ? ({ kind: 'traffic' } as TrafficSpec) : undefined)
+  if (wantTraffic) await buildTraffic(wantTraffic)
+  else {
+    traffic?.dispose()
+    traffic = null
   }
   /*
    * THE CAR IS REBUILT FOR THE LEVEL. `drive.car` is made once and kept, so a car built before the
@@ -1667,6 +1662,29 @@ function advanceStage(outcome: 'win' | 'lose' | 'abandoned'): void {
 }
 /** the level's traffic, once a level with a traffic simulation has opened */
 let traffic: TrafficLayer | null = null
+
+/**
+ * (Re)build the traffic layer from a spec.
+ *
+ * Called when a level opens, and again live when `TRAFFIC_DENSITY` is raised on a world that had no
+ * traffic simulation to begin with — the knob is the switch that puts cars on every road. The
+ * layer owns the streets, the models, the bodies and the meshes; this only decides when one exists.
+ */
+async function buildTraffic(want: TrafficSpec): Promise<void> {
+  traffic?.dispose()
+  traffic = null
+  if (!site) return
+  traffic = new TrafficLayer(site, actors, physics)
+  scene.add(traffic.group)
+  try {
+    const n = await traffic.load(site.manifest.slug, want)
+    status(`traffic: ${n} cars`)
+    for (const p of traffic.problems) toast(`traffic: ${p}`, 'warn', 6000)
+    if (!n) toast(`${level?.id ?? 'level'}: traffic asked for, but no zone or density put a car anywhere`, 'warn', 6000)
+  } catch (e) {
+    toast(`traffic: ${String((e as Error).message ?? e)}`, 'warn', 8000)
+  }
+}
 /** what the player fires (M), and the bang where it lands */
 let missiles: MissileLayer | null = null
 /** the machine gun (weaponfx.ts): tracers, flashes, and the hits handed to the traffic */
@@ -3038,6 +3056,15 @@ function applySeasonKnob() {
  * hook called `retune()` alone and the season knob silently did nothing under it.
  */
 function onTuneChange() {
+  // TRAFFIC_DENSITY is a switch as well as a level: raised on a world with no traffic simulation,
+  // it builds one on the spot. Lowering it, or nudging any other knob, leaves the layer alone.
+  if (T.TRAFFIC_DENSITY !== lastDensityKnob) {
+    lastDensityKnob = T.TRAFFIC_DENSITY
+    if (!traffic && T.TRAFFIC_DENSITY > 0 && site && level) {
+      const lt = level.simulations?.find((x) => x.kind === 'traffic') as TrafficSpec | undefined
+      void buildTraffic(lt ?? { kind: 'traffic' })
+    }
+  }
   applySeasonKnob()
   applySky(season) // the WEATHER knob lives here: sky, fog, sun, grip and what is falling
   // Gravity and the car profile, and — with the auto-gear switch on — the sound's final drive. It
@@ -3609,6 +3636,8 @@ function frame() {
   if (gun && !paused) gun.tick(dt)
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
   if (traffic && !paused) {
+    // the density knob, fed every frame; the layer applies it on a throttle, not per frame
+    traffic.setWorldDensity(T.TRAFFIC_DENSITY)
     // the drivers see the player: where he is and how fast, in the site frame
     if (drive.on && drive.car) {
       const c = drive.car

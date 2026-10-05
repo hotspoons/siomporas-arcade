@@ -36,8 +36,8 @@ export let GRASS_LOD_FAR_DENSITY = 0.3
  * blades per area, THICK is each blade's width, HEIGHT its length, and WIND its sway. The shader
  * reads the same numbers.
  */
-export let GRASS_DENSITY = 1
-export let GRASS_THICK = 1
+export let GRASS_DENSITY = 3.1
+export let GRASS_THICK = 0.6
 export let GRASS_HEIGHT = 1
 /**
  * Relief underlayment only: how far the ground grass's blade faces turn toward the driver. 0 leaves
@@ -96,10 +96,10 @@ export let GRASS_RURAL_TALL = 1.3
 export let GRASS_GROW_S = 0.8
 export let GRASS_MAX_FROM_ROAD = 24
 /** blade heights (m): mown turf, and the rough before the season multiplier */
-export let GRASS_MOWN_HEIGHT = 0.22
-export let GRASS_ROUGH_HEIGHT = 1.8
+export let GRASS_MOWN_HEIGHT = 0.14
+export let GRASS_ROUGH_HEIGHT = 1.05
 /** how far a blade's tip leans from its root (fraction of height), and how hard the wind blows */
-export let GRASS_LEAN = 0.45
+export let GRASS_LEAN = 0.2
 export let GRASS_WIND = 0.45 // was 1.0: "way too much emphasis on its motion" (Rich, 2026-09-26)
 /**
  * BARE PATCHES — a desert/scrub dial, OFF by default. East-coast turf is dense and universal, so a
@@ -192,13 +192,13 @@ export let WEATHER_MELT_RATE = 0.06
  */
 export let WEATHER_GRIP_SCALE = 1
 /** sprite clumps: from the mid ring out to this radius (m), cards per m², size multiplier */
-export let GRASS_SPRITE_RADIUS = 300
+export let GRASS_SPRITE_RADIUS = 150
 export let GRASS_SPRITE_PER_M2 = 1.1
 export let GRASS_SPRITE_SCALE = 1.0
 /** sprite look: card width multiplier, lean (shear of the top), and the density kept at the far rim */
-export let GRASS_SPRITE_WIDTH = 1.2
-export let GRASS_SPRITE_LEAN = 0.25
-export let GRASS_SPRITE_FAR_DENSITY = 0.6 // was 0.25: the far rim was a quarter as dense as the near, and read as bare
+export let GRASS_SPRITE_WIDTH = 1.05
+export let GRASS_SPRITE_LEAN = 0.02
+export let GRASS_SPRITE_FAR_DENSITY = 0.45 // was 0.25: the far rim was a quarter as dense as the near, and read as bare
 /** colour over the season palette: hue shift (deg), saturation, lightness, and extra straw/dryness
  *  (September verge grass is not April grass: default +0.3 dryness) */
 export let GRASS_HUE = 0
@@ -216,7 +216,7 @@ export let GRASS_DRY_ADD = 0
  * Both read the SAME shape controls (GRASS_DENSITY/THICK/HEIGHT/WIND) plus the density, radius and
  * LOD knobs above.
  */
-export let GRASS_MODE = 0
+export let GRASS_MODE = 1
 /** The vegetation layer as 0/1. Only the cards detent is cards; anything else is the 3D blades,
  * so a stale persisted value can never strand the user on cards. */
 export function grassMode(): number {
@@ -341,11 +341,23 @@ export let GRASS_TILES_PER_FRAME = 48
 /** and no longer than this per frame generating them: the real budget, since tile cost varies 30× */
 export let GRASS_MS_PER_FRAME = 4
 /** evict cached tiles once the map holds this multiple of what the ring needs */
-export let GRASS_CACHE_SLACK = 1.4
+export let GRASS_CACHE_SLACK = 1.5
 
 // --- traffic ------------------------------------------------------------------------------------
 /** never more traffic cars than this, whatever the zones and the level ask for */
 export let TRAFFIC_MAX = 600
+/**
+ * TRAFFIC ON ALL ROADS. A world-wide floor density, 0…1, laid under the painted zones, so every
+ * road in the world carries a trickle of cars instead of only the jams the level painted.
+ *
+ * 0 (the default) lets the level decide — its own `simulations[].density` still applies. Above 0
+ * this knob OVERRIDES the level: it is the switch that turns "traffic" from "a jam somewhere" into
+ * "traffic on all roads", on any level, whether or not it asked. Drawn as the default boxes when a
+ * set names no built model, which is the point — boxes are enough to tune a look against.
+ *
+ * Live: changing it re-plans and respawns the cars within a fraction of a second, no level reload.
+ */
+export let TRAFFIC_DENSITY = 0
 /** traffic cars further than this from the eye are simulated but not drawn (m) */
 export let TRAFFIC_DRAW_M = 700
 /** m from the player a car that ran off its road may come back at. Closer is a car from thin air */
@@ -1147,7 +1159,7 @@ export let HERO_TAILLIGHTS_MERGE_TOP = 0.05
  * a real headlamp's tone-mapped brightness; it is the master brightness of the fallback. 0 leaves
  * the term compiled in but shutting itself off immediately.
  */
-export let FAKE_LAMPS = 4
+export let FAKE_LAMPS = 0.25
 /**
  * How many traffic lights (head + tail slots) may be REAL spot lights at once. The forward renderer
  * evaluates every visible spot for every lit ground fragment, and the cost is super-linear:
@@ -1155,13 +1167,13 @@ export let FAKE_LAMPS = 4
  * the budget; the rest show only their emissive lamps and the wet-road streaks. The hero car's own
  * beams are separate and always real.
  */
-export let TRAFFIC_LIGHTS = 4
+export let TRAFFIC_LIGHTS = 16
 /**
  * Traffic beams: 0 = off, 1 = real spot lights (budgeted by TRAFFIC_LIGHTS), 2 = fake (no real
  * spot; the nearest cars feed the analytic flood, nearest-first, up to TRAFFIC_LIGHTS lamps). Mode
  * 2 is what makes a jam cheap: a dozen real spots on every road fragment collapse to a fixed pool.
  */
-export let TRAFFIC_LIGHTS_MODE = 1
+export let TRAFFIC_LIGHTS_MODE = 2
 /**
  * Retroreflection: how hard paint and sheeting throw your own headlights back at you.
  *
@@ -2234,6 +2246,7 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'traffic',
         keys: [
+          tune('TRAFFIC_DENSITY', () => TRAFFIC_DENSITY, (v) => (TRAFFIC_DENSITY = v), [0, 1], 0.05, 'traffic on all roads: a world-wide density under the painted zones. 0 lets the level decide; >0 overrides it and puts cars everywhere, live'),
           tune('TRAFFIC_MAX', () => TRAFFIC_MAX, (v) => (TRAFFIC_MAX = v), [0, 2000], 10, 'cap on traffic cars (reload the level)'),
           tune('TRAFFIC_WAKE_NS', () => TRAFFIC_WAKE_NS, (v) => (TRAFFIC_WAKE_NS = v), [200, 20000], 100, 'a hit harder than this (N·s) knocks a traffic car loose'),
           tune('MISSILE_SPEED', () => MISSILE_SPEED, (v) => (MISSILE_SPEED = v), [20, 300], 5, 'm/s, plus the car’s own'),

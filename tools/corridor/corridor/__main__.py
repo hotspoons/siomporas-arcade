@@ -609,7 +609,7 @@ def main() -> None:
     ctx = sub.add_parser("context", help="write the compact context.json the viewer reads, from an existing osm.geojson")
     ctx.add_argument("slug", nargs="?", default="all")
     ctx.set_defaults(fn=cmd_context)
-    vec = sub.add_parser("vectors", help="split buildings out of an exported manifest into per-1 km vector tiles")
+    vec = sub.add_parser("vectors", help="split the heavy spatial arrays out of an exported manifest into per-1 km vector tiles")
     vec.add_argument("slug", nargs="?", default="all")
     vec.set_defaults(fn=cmd_vectors)
     ex = sub.add_parser("export", help="(re)write web/ layers + sites/index.json for the viewer")

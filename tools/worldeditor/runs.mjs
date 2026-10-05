@@ -93,9 +93,9 @@ export class Runs {
     // across the cluster, one cheap finalizer. `run.phase`/`run.jobs` carry the state so a pod
     // restart resumes at the phase it was in (reconcile below).
     //
-    // Sharding is automatic above `shardAboveM` (a world half-width, metres): the dc-metro/495 site
-    // is radius_m 19933 and OOMs `lidar_tiled` as one Job. `sharded: false` forces the single Job
-    // back; `sharded: true` forces sharding on a small world (the spike/probe).
+    // Sharding is automatic above `shardAboveM` when that is configured (OFF by default until the
+    // per-shard export path lands — see the note there). `sharded: true` forces it on any world,
+    // which is how the plan -> shard -> finalize path is exercised before a real large world.
     const sharded = opts.sharded ?? (await this.#shouldShard(slug))
     if (sharded) {
       return this.#start({ kind: 'bake', slug, args: [], label: `bake ${slug} (sharded)`, sharded: true, phaseArgs: opts })
@@ -106,12 +106,19 @@ export class Runs {
     return this.#start({ kind: 'bake', slug, args, label: `bake ${slug}` })
   }
 
-  /** A world large enough that one Job's bbox is the problem: > `shardAboveM` half-width. */
+  /** A world large enough that one Job's bbox is the problem: > `shardAboveM` half-width.
+   *
+   * OFF BY DEFAULT. Auto-sharding turns on only when `cfg.shardAboveM` is set, because the sharded
+   * path does not yet run `export_tiles`/`pyramid.bake` per shard — an auto-sharded world would
+   * come out with no tiles until that lands. Request `{"sharded":true}` to force it for the spike.
+   */
   async #shouldShard(slug) {
     if (slug === 'all') return false
+    const ceiling = Number(this.cfg.shardAboveM)
+    if (!Number.isFinite(ceiling) || ceiling <= 0) return false
     const world = await this.store.getWorld(slug).catch(() => null)
     const r = Number(world?.radius_m)
-    return Number.isFinite(r) && r > (this.cfg.shardAboveM ?? 8000)
+    return Number.isFinite(r) && r > ceiling
   }
 
   /**

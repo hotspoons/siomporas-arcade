@@ -190,6 +190,10 @@ const runs = new Runs(store, k8s, {
   prefix: env.WORLDEDITOR_S3_PREFIX ?? 'corridor',
   overpassUrl: settings.get('overpass.url'),
   horizonM: Number(env.WORLDEDITOR_HORIZON_M ?? 30000),
+  // Auto-shard a world when its half-width exceeds this. UNSET means no auto-sharding: opt in with
+  // the request body (`{"slug":..,"sharded":true}`) or set this once the sharded export path is
+  // exercised against a real world. See docs/corridor/PLAN-SHARDED-BAKE.md.
+  shardAboveM: env.WORLDEDITOR_SHARD_ABOVE_M ? Number(env.WORLDEDITOR_SHARD_ABOVE_M) : null,
   resources: JSON.parse(env.WORLDEDITOR_BAKE_RESOURCES ?? '{"requests":{"cpu":"8","memory":"32Gi"},"limits":{"cpu":"64","memory":"384Gi"}}'),
   python: env.WORLDEDITOR_PYTHON ?? path.join(REPO, 'tools/corridor/.venv/bin/python'),
   cwd: env.WORLDEDITOR_CORRIDOR ?? path.join(REPO, 'tools/corridor'),

@@ -92,9 +92,9 @@ test('a sharded run goes plan -> 2 shards -> finalize and ends done', async () =
     const onDisk = JSON.parse(await readFile(store.runFile(run.id), 'utf8'))
     assert.equal(onDisk.phase, 'finalize')
     assert.equal(onDisk.shardCount, 2)
-    runs.live.get(run.id)?.stop()
+    runs.live.get(run.id)?.stop(); runs.live.delete(run.id)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })
 
@@ -121,9 +121,41 @@ test('a failed shard cancels its siblings and fails the run', async () => {
     const onDisk = JSON.parse(await readFile(store.runFile(run.id), 'utf8'))
     assert.match(onDisk.detail, /shard Job .* failed/)
     assert.ok(deleted.includes(shardNames[1]), 'the surviving sibling was cancelled')
-    runs.live.get(run.id)?.stop()
+    runs.live.get(run.id)?.stop(); runs.live.delete(run.id)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test('auto-sharding is off unless shardAboveM is configured', async () => {
+  const { root, store } = await setup()
+  await writeFile(path.join(store.worlds, 'big.json'), JSON.stringify({ slug: 'big', lat: 38.9, lon: -77.0, radius_m: 19933 }))
+  const k8s = cluster()
+  try {
+    const off = new Runs(store, k8s, { force: 'kubernetes', image: 'c', claim: 'd', resources: {} })
+    const a = await off.bake('big')
+    await until(() => commands(k8s.jobs).length === 1)
+    assert.match(commands(k8s.jobs)[0], / corridor fetch big$/)
+    await off.cancel(a.id)
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test('auto-sharding turns on above the configured ceiling', async () => {
+  const { root, store } = await setup()
+  await writeFile(path.join(store.worlds, 'big.json'), JSON.stringify({ slug: 'big', lat: 38.9, lon: -77.0, radius_m: 19933 }))
+  await mkdir(path.join(store.sites, 'big', 'plan'), { recursive: true })
+  await writeFile(path.join(store.sites, 'big', 'plan', 'shards.json'), JSON.stringify({ n: 1 }))
+  const k8s = cluster()
+  try {
+    const on = new Runs(store, k8s, { force: 'kubernetes', image: 'c', claim: 'd', resources: {}, shardAboveM: 8000 })
+    const a = await on.bake('big')
+    await until(() => commands(k8s.jobs).length === 1)
+    assert.match(commands(k8s.jobs)[0], / corridor plan big$/)
+    await on.cancel(a.id)
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })
 
@@ -142,8 +174,8 @@ test('a plan that yields no shards fails instead of hanging', async () => {
     })
     const onDisk = JSON.parse(await readFile(store.runFile(run.id), 'utf8'))
     assert.match(onDisk.detail, /no shards/)
-    runs.live.get(run.id)?.stop()
+    runs.live.get(run.id)?.stop(); runs.live.delete(run.id)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })

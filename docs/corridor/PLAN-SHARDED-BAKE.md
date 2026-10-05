@@ -6,10 +6,20 @@ orchestration (`runs.bake` fans plan → N shard Jobs → finalize above `shardA
 (cluster-aware sizing) is partially shipped — shards spread by `topologySpreadConstraints`, request
 sizing is still the one 384 Gi request.
 
-Known gaps vs the sections below: the shards write the per-block rasters, lidar, profiles and
-branches, but `export_tiles` / `pyramid.bake` / `overview` currently run in the FINALIZER over the
-merged site rather than per shard (they are pool-parallel after Phase 0, so this is a cost, not a
-bug); and none of it has been exercised against a real large world yet.
+Known gaps vs the sections below, all on the path to the first real run:
+
+  * the shards write the per-block rasters, lidar, profiles and branches, but
+    `export_tiles` / `pyramid.bake` / `overview` currently run in the FINALIZER
+    over the merged site. That is the wrong side of the seam: the export reads
+    the site's `dem_1m.tif` / `naip_1m.tif` and `lidar/`, and the finalizer does
+    not yet merge the per-block root rasters into one (a 30 km NAIP merge is the
+    2.5 GB raster the whole design exists to avoid). The right fix is the one
+    §Phase 1 describes — each shard runs `export_tiles` / `pyramid.bake` for its
+    own tiles and the finalizer only unions `web/tiles` + `web/pyr`. Until then,
+    a sharded world's tiles/pyramid are not yet produced;
+  * `overview` is a whole-region layer and is not sharded at all (Phase 0 made
+    it strip-parallel and logged; that is its fix for now);
+  * none of it has been exercised against a real large world yet.
 
 ## What this is
 

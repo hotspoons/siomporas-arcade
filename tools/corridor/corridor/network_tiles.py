@@ -434,7 +434,7 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
     from PIL import Image
 
     from . import naip as naip_mod
-    from .naip import SERVICE, TILE_PX, _get_with_retry, session  # noqa: F401
+    from .naip import TILE_PX
 
     if rastercache.reuse(out, frame.crs, tuple(bbox), "naip"):
         return {"file": out.name, "cached": True, "res_m": res}
@@ -448,29 +448,29 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
     xmin, ymin, xmax, ymax = bbox
     width = int(round((xmax - xmin) / res))
     height = int(round((ymax - ymin) / res))
-    tiles = [(r0, c0) for r0 in range(0, height, TILE_PX) for c0 in range(0, width, TILE_PX)]
-    fetched = 0
-    with rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=3, dtype="uint8", crs=frame.crs, transform=from_origin(xmin, ymax, res, res), compress="jpeg", photometric="ycbcr", tiled=True, blockxsize=512, blockysize=512, jpeg_quality=88) as dst:
-        for i, (r0, c0) in enumerate(tiles, 1):
+    # The service tiles the corridor actually touches, with where each lands in the output. Build
+    # the whole plan first so the downloads can run concurrently; a single GeoTIFF still has one
+    # writer, so the windows are written serially afterwards — from the cache, which is instant.
+    plan = []  # (r0, c0, tw, th, cache_path, params)
+    for r0 in range(0, height, TILE_PX):
+        for c0 in range(0, width, TILE_PX):
             tw, th = min(TILE_PX, width - c0), min(TILE_PX, height - r0)
             bx0, by1 = xmin + c0 * res, ymax - r0 * res
             if not box(bx0, by1 - th * res, bx0 + tw * res, by1).intersects(corridor):
                 continue
             hit = cache / "naip" / f"{frame.epsg}_{bx0:.1f}_{by1:.1f}_{tw}x{th}_{res:g}.jpg"
-            if hit.exists():
-                raw = hit.read_bytes()
-            else:
-                r = _get_with_retry(SERVICE, params={"bbox": f"{bx0},{by1 - th * res},{bx0 + tw * res},{by1}", "bboxSR": frame.epsg, "imageSR": frame.epsg, "size": f"{tw},{th}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image"}, timeout=300)
-                r.raise_for_status()
-                if not r.headers.get("content-type", "").startswith("image"):
-                    raise RuntimeError(f"NAIP exportImage returned {r.headers.get('content-type')}: {r.text[:200]}")
-                raw = r.content
-                hit.parent.mkdir(parents=True, exist_ok=True)
-                hit.write_bytes(raw)
-            tile = np.asarray(Image.open(BytesIO(raw)).convert("RGB"))
+            plan.append((r0, c0, tw, th, hit, {
+                "bbox": f"{bx0},{by1 - th * res},{bx0 + tw * res},{by1}", "bboxSR": frame.epsg, "imageSR": frame.epsg,
+                "size": f"{tw},{th}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
+            }))
+    naip_mod.fetch_tiles_parallel([(h, p) for _, _, _, _, h, p in plan])
+    fetched = 0
+    with rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=3, dtype="uint8", crs=frame.crs, transform=from_origin(xmin, ymax, res, res), compress="jpeg", photometric="ycbcr", tiled=True, blockxsize=512, blockysize=512, jpeg_quality=88) as dst:
+        for r0, c0, tw, th, hit, _params in plan:
+            tile = np.asarray(Image.open(BytesIO(hit.read_bytes())).convert("RGB"))
             dst.write(np.moveaxis(tile, -1, 0), window=rasterio.windows.Window(c0, r0, tw, th))
             fetched += 1
-            print(f"  naip    tile {i}/{len(tiles)} ({fetched} fetched)", flush=True)
+            print(f"  naip    tile {fetched}/{len(plan)}", flush=True)
     return {"file": out.name, "res_m": res, "size": [width, height], "tiles_fetched": fetched}
 
 

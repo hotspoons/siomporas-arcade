@@ -19,6 +19,8 @@ at any distance from the car.
 from __future__ import annotations
 
 import io
+import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -47,10 +49,11 @@ session = requests.Session()
 session.headers["User-Agent"] = "apex-conduit corridor (github.com/hotspoons)"
 
 
-def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5):
+def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5, session: requests.Session | None = None):
     """USGS's ArcGIS image services answer 502/503 under load and recover in seconds. Back off."""
     import time
 
+    session = session or globals()["session"]
     last = None
     for attempt in range(tries):
         try:
@@ -62,6 +65,67 @@ def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5):
             last = exc
         time.sleep(8 * (attempt + 1))
     raise RuntimeError(f"{url}: {last}")
+
+
+#: One `requests.Session` per worker thread. A Session owns a urllib3 connection pool and is not
+#: documented thread-safe; sharing the module-level one across the fetch pool invites exactly the
+#: kind of intermittent failure that is impossible to reproduce.
+_TLS = threading.local()
+
+
+def _thread_session() -> requests.Session:
+    s = getattr(_TLS, "session", None)
+    if s is None:
+        s = requests.Session()
+        _TLS.session = s
+    return s
+
+
+def _fetch_one(hit: Path, params: dict, timeout: int = 300) -> bool:
+    """Fetch one service tile into `hit` (atomic), returning False if it was already cached."""
+    if hit.exists():
+        return False
+    r = _get_with_retry(SERVICE, params=params, timeout=timeout, session=_thread_session())
+    r.raise_for_status()
+    if not r.headers.get("content-type", "").startswith("image"):
+        raise RuntimeError(f"NAIP exportImage returned {r.headers.get('content-type')}: {r.text[:200]}")
+    hit.parent.mkdir(parents=True, exist_ok=True)
+    # Private temp + os.replace: several shards may race the same cache key, and the RWX cache is
+    # lock-free by design (a published entry is immutable). A half-written JPEG must never publish.
+    tmp = hit.with_name(f"{hit.name}.{os.getpid()}-{threading.get_ident()}.tmp")
+    tmp.write_bytes(r.content)
+    os.replace(tmp, hit)
+    return True
+
+
+def fetch_tiles_parallel(tasks, jobs: int | None = None, label: str = "naip") -> int:
+    """Fetch every missing `(cache_path, params)` concurrently; return how many were downloaded.
+
+    The service averages ~40 s for a 4000x4000 tile and the tiles are independent, so a 44-tile
+    shard block spent half an hour mostly waiting on one request at a time. The caller still writes
+    the mosaic/site raster serially from the cache afterwards, because one GeoTIFF has one writer.
+    `CORRIDOR_NAIP_JOBS` caps the concurrency (default 6) so twelve shards do not open a hundred
+    sockets at USGS at once.
+    """
+    missing = [(h, p) for h, p in tasks if not h.exists()]
+    if not missing:
+        return 0
+    jobs = jobs if jobs is not None else int(os.environ.get("CORRIDOR_NAIP_JOBS", "6") or "6")
+    jobs = max(1, min(int(jobs), len(missing)))
+    if jobs == 1:
+        n = sum(1 for h, p in missing if _fetch_one(h, p))
+        print(f"  {label}    fetched {n}/{len(missing)} tiles", flush=True)
+        return n
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    n = 0
+    with ThreadPoolExecutor(max_workers=jobs) as ex:
+        futs = [ex.submit(_fetch_one, h, p) for h, p in missing]
+        for done, fut in enumerate(as_completed(futs), 1):
+            n += 1 if fut.result() else 0
+            if done % 5 == 0 or done == len(missing):
+                print(f"  {label}    fetched {done}/{len(missing)} tiles ({jobs} parallel)", flush=True)
+    return n
 
 
 def covered(frame: Frame, bbox: tuple[float, float, float, float]) -> bool:
@@ -175,31 +239,21 @@ def fetch_naip(frame: Frame, bbox: tuple[float, float, float, float], out: Path,
     width = int(round((xmax - xmin) / RES))
     height = int(round((ymax - ymin) / RES))
     mosaic = np.zeros((3, height, width), dtype=np.uint8)
-    tiles = [(r0, c0) for r0 in range(0, height, TILE_PX) for c0 in range(0, width, TILE_PX)]
-    for i, (r0, c0) in enumerate(tiles, 1):
-        tw, th = min(TILE_PX, width - c0), min(TILE_PX, height - r0)
-        bx0, by1 = xmin + c0 * RES, ymax - r0 * RES
-        hit = cache / "naip" / f"{frame.epsg}_{bx0:.1f}_{by1:.1f}_{tw}x{th}_{RES:g}.jpg"
-        if hit.exists():
-            raw = hit.read_bytes()
-        else:
-            r = _get_with_retry(
-                SERVICE,
-                params={
-                    "bbox": f"{bx0},{by1 - th * RES},{bx0 + tw * RES},{by1}", "bboxSR": frame.epsg, "imageSR": frame.epsg,
-                    "size": f"{tw},{th}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
-                },
-                timeout=300,
-            )
-            r.raise_for_status()
-            if not r.headers.get("content-type", "").startswith("image"):
-                raise RuntimeError(f"NAIP exportImage returned {r.headers.get('content-type')}: {r.text[:200]}")
-            raw = r.content
-            hit.parent.mkdir(parents=True, exist_ok=True)
-            hit.write_bytes(raw)
-        tile = np.asarray(Image.open(io.BytesIO(raw)).convert("RGB"))
+    plan = []  # (r0, c0, tw, th, cache_path, params)
+    for r0 in range(0, height, TILE_PX):
+        for c0 in range(0, width, TILE_PX):
+            tw, th = min(TILE_PX, width - c0), min(TILE_PX, height - r0)
+            bx0, by1 = xmin + c0 * RES, ymax - r0 * RES
+            hit = cache / "naip" / f"{frame.epsg}_{bx0:.1f}_{by1:.1f}_{tw}x{th}_{RES:g}.jpg"
+            plan.append((r0, c0, tw, th, hit, {
+                "bbox": f"{bx0},{by1 - th * RES},{bx0 + tw * RES},{by1}", "bboxSR": frame.epsg, "imageSR": frame.epsg,
+                "size": f"{tw},{th}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
+            }))
+    fetch_tiles_parallel([(h, p) for _, _, _, _, h, p in plan])
+    for i, (r0, c0, tw, th, hit, _params) in enumerate(plan, 1):
+        tile = np.asarray(Image.open(io.BytesIO(hit.read_bytes())).convert("RGB"))
         mosaic[:, r0 : r0 + th, c0 : c0 + tw] = np.moveaxis(tile, -1, 0)
-        print(f"  naip    tile {i}/{len(tiles)}", flush=True)
+        print(f"  naip    tile {i}/{len(plan)}", flush=True)
     with rasterio.open(
         out, "w", driver="GTiff", width=width, height=height, count=3, dtype="uint8", crs=frame.crs,
         transform=from_origin(xmin, ymax, RES, RES), compress="jpeg", photometric="ycbcr", tiled=True, jpeg_quality=88,

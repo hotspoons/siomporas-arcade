@@ -84,7 +84,7 @@ const CAR_HALF_WIDTH = 0.95
  */
 const DEG2RAD = Math.PI / 180
 /** the map's projection camera fov is 2 × angle; keep it far from 180° where the matrix is singular */
-const MERGE_ANGLE_MAX = 80 * DEG2RAD
+const MERGE_ANGLE_MAX = 85 * DEG2RAD
 const lampMaps = new Map<string, THREE.DataTexture>()
 function lampMap(seam: number, top: number, ry: number): THREE.DataTexture {
   const key = `${seam.toFixed(3)}|${top.toFixed(3)}|${ry.toFixed(4)}`
@@ -102,7 +102,12 @@ function lampMap(seam: number, top: number, ry: number): THREE.DataTexture {
       const u = (x + 0.5) / S - 0.5
       const v = (y + 0.5) / S - 0.5
       const d = Math.sqrt((u / rx) ** 2 + (v / ry) ** 2)
-      let a = d >= 1 ? 0 : d <= 0.35 ? 1 : 1 - (d - 0.35) / 0.65
+      // a smoothstep fade to zero at the ellipse edge: a hard-ish linear edge showed up as a
+      // straight line cutting across the ground pool at grazing camera angles (Rich, 2026-10-05),
+      // and a fade with zero slope at both ends disappears instead. It holds near-full out to 0.6
+      // so the lit band stays broad instead of hot in the middle and dim at the sides.
+      const fade = Math.min(1, Math.max(0, (d - 0.6) / 0.4))
+      let a = d >= 1 ? 0 : 1 - fade * fade * (3 - 2 * fade)
       if (a > 0) {
         // a gaussian valley at u = 0, so the two lobes sit either side of the centreline
         const seamMask = 1 - seam * Math.exp(-(u * u) / (2 * sw * sw))
@@ -542,7 +547,11 @@ export class Car {
     this.mergedBeam = mergedBeam
     const mergedTail = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, Math.min(T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX), 0.55, 2)
     mergedTail.position.set(-2.18, 0.66, 0)
-    mergedTail.target.position.set(-2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65), 0.02, 0)
+    // Aimed steeper than the pair (0.75 m back, ~40° down, against their ~33°). A shallow aim spends
+    // the wide cone's outer rays grazing down the road, where they are dim; a steeper one drops them
+    // onto the road close behind the bumper and the single spot covers the width the two did
+    // (Rich, 2026-10-05: at max width the wash still would not widen).
+    mergedTail.target.position.set(-2.18 - Math.max(0.65, T.TAILLIGHT_RANGE * 0.5), 0.02, 0)
     mergedTail.castShadow = false
     mergedTail.visible = false
     g.add(mergedTail, mergedTail.target)
@@ -658,7 +667,7 @@ export class Car {
       b.intensity = v * 140 * T.TAILLIGHT * (b === this.mergedTailBeam ? 2 : 1)
       b.distance = T.TAILLIGHT_RANGE
       b.angle = b === this.mergedTailBeam ? Math.min(T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX) : T.TAILLIGHT_ANGLE
-      b.target.position.x = -2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
+      b.target.position.x = -2.18 - Math.max(0.65, T.TAILLIGHT_RANGE * 0.5)
       b.target.position.y = 0.02
       b.visible = tailOn
     }

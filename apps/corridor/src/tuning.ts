@@ -869,6 +869,13 @@ export let WATER_REFLECT_SCALE = 0.5
 /** how far the wave normal smears the reflection, in screen fractions */
 export let WATER_REFLECT_RIPPLE = 0.1
 /**
+ * How close the eye must come to an inland body's shore for the planar mirror to aim at it instead
+ * of the sea (m). 0 keeps the mirror on the sea alone, as it was. A pond is as flat as the sea, so
+ * the one exact mirror plane serves it just as well — this is the reach at which the lake under your
+ * nose takes the plane over, and its own trees and bank land in the water. The sea is the fallback.
+ */
+export let WATER_REFLECT_REACH = 500
+/**
  * SKY AND HORIZON, for the water the one planar mirror cannot serve.
  *
  * The planar reflection is a single plane at sea level, so a pond or a stream at any other height
@@ -1969,6 +1976,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_REFLECT', () => WATER_REFLECT, (v) => (WATER_REFLECT = v), [0, 1], 0.02, 'planar reflection: 0 off, 1 full — the scene is rendered once more mirrored in the water plane'),
           tune('WATER_REFLECT_SCALE', () => WATER_REFLECT_SCALE, (v) => (WATER_REFLECT_SCALE = v), [0.2, 1], 0.05, 'reflection buffer resolution ×; lower is cheaper and softer'),
           tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.6], 0.02, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
+          tune('WATER_REFLECT_REACH', () => WATER_REFLECT_REACH, (v) => (WATER_REFLECT_REACH = v), [0, 3000], 25, 'aim the planar mirror at the nearest inland body within this many metres of its shore (else the sea); 0 keeps it on the sea alone'),
           tune('WATER_SKY_REFLECT', () => WATER_SKY_REFLECT, (v) => (WATER_SKY_REFLECT = v), [0, 1.5], 0.05, 'sky/horizon reflection from the environment map, for ponds and streams the sea plane cannot mirror; 0 is the old flat sheet'),
           tune('WATER_PROBES', () => WATER_PROBES, (v) => (WATER_PROBES = v), [0, 32], 1, 'reflection probes: how many inland lakes keep a live capture of their own surroundings (trees, bank) at once, nearest to the eye. 0 off; 1 is the lake you are at'),
           tune('WATER_PROBE_RES', () => WATER_PROBE_RES, (v) => (WATER_PROBE_RES = v), [16, 256], 1, 'probe cube face px; the stored equirect is 2× across. Higher is sharper and costs capture time + memory'),

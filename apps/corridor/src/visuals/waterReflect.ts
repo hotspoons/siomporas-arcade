@@ -8,6 +8,12 @@
 // so this is exact, needs no depth buffer, and reflects the coast, the trees and a boat — the
 // geometry the sky environment map can never supply.
 //
+// ONE PLANE, AIMED. The mirror is exact only across the plane it is rendered from, so originally it
+// served only the sea. But the eye is at one body at a time, and a pond is flat too: each frame the
+// plane is aimed at the nearest inland body within `WATER_REFLECT_REACH` (else the sea), so the lake
+// under your nose mirrors its own bank and trees with the same render the coast uses. The sea keeps
+// its level when no body is near; on an inland site the pass stands down as before.
+//
 // The mirror camera, the oblique clipping plane that keeps the seabed out of the sky, and the
 // projected sample are adapted from three.js `examples/jsm/objects/Reflector.js` (MIT).
 import * as THREE from 'three'
@@ -30,9 +36,18 @@ export const waterReflectRipple = { value: 0.1 }
 const waterSkyRough = { value: 0.03 }
 
 let planeY = 0
-let registered = false
+/** the sea plane's Y, or null when the site has no visible sea (inland, or the flood is under the hill) */
+let seaLevel: number | null = null
 let hide: THREE.Object3D | null = null
 let target: THREE.WebGLRenderTarget | null = null
+/**
+ * Inland bodies the mirror may follow: one flat polygon each, at its own waterline. `x`/`z` is the
+ * body centre and `radius` its rough half-width, so "near" means near the shore. The plane itself is
+ * exact for any viewpoint, so these exist only to decide WHICH body the single mirror plane belongs
+ * to this frame. Filled by water.ts via registerWaterReflectBodies.
+ */
+export interface WaterReflectBody { x: number; y: number; z: number; radius: number }
+let localBodies: WaterReflectBody[] = []
 
 const virtualCamera = new THREE.PerspectiveCamera()
 const bias = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
@@ -49,15 +64,45 @@ const q = new THREE.Vector4()
 const size = new THREE.Vector2()
 
 /**
- * Point the reflection at a water plane. `level` is the world Y of the plane (the sea), or `null`
- * when the site has no water for the mirror to show — then the pass is skipped entirely rather than
- * rendering the whole scene twice for a plane hidden under inland terrain. `group` is the water
- * itself, hidden while the mirror is drawn so the sea does not reflect the sea.
+ * Point the reflection at the sea plane. `level` is the world Y of the sea, or `null` when the site
+ * has no water for the sea mirror to show — then the pass may still run for an inland body (see
+ * registerWaterReflectBodies), but with no inland body near it is skipped entirely rather than
+ * rendering the whole scene twice for a plane hidden under terrain. `group` is the water itself,
+ * hidden while the mirror is drawn so the sea does not reflect the sea.
  */
 export function configureWaterReflection(level: number | null, group: THREE.Object3D | null) {
-  registered = level !== null
+  seaLevel = level
   if (level !== null) planeY = level
   hide = group
+}
+
+/**
+ * Give the mirror the inland bodies it may follow. The one plane cannot serve the sea and every pond
+ * at once, but it is exact for whichever flat body it is aimed at, and the eye is at one body at a
+ * time: each frame `renderWaterReflection` aims it at the nearest body within `WATER_REFLECT_REACH`,
+ * falling back to the sea. `radius` is the body's rough half-width so proximity means the shore, not
+ * the centroid. Called by water.ts once the manifest is known.
+ */
+export function registerWaterReflectBodies(bodies: WaterReflectBody[]) {
+  localBodies = bodies
+}
+
+/** The water plane the mirror should use this frame: nearest inland body in reach, else the sea. */
+function pickPlane(camera: THREE.Camera): number | null {
+  const reach = T.WATER_REFLECT_REACH
+  if (reach > 0 && localBodies.length) {
+    let best = reach
+    let bestY: number | null = null
+    for (const b of localBodies) {
+      const d = Math.hypot(b.x - camera.position.x, b.z - camera.position.z) - b.radius
+      if (d < best) {
+        best = d
+        bestY = b.y
+      }
+    }
+    if (bestY !== null) return bestY
+  }
+  return seaLevel
 }
 
 /**
@@ -66,10 +111,14 @@ export function configureWaterReflection(level: number | null, group: THREE.Obje
  */
 export function renderWaterReflection(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
   waterReflectRipple.value = T.WATER_REFLECT_RIPPLE
-  const on = T.WATER_REFLECT > 0.001 && registered
+  // aim the one mirror at the water the eye is at: the nearest inland body within reach, else the
+  // sea. null means nothing to mirror (no visible sea, no pond near), so the pass is skipped.
+  const level = pickPlane(camera)
+  const on = T.WATER_REFLECT > 0.001 && level !== null
   // zero it when off, or a disabled plane keeps sampling its last texture
   waterReflectStrength.value = on ? T.WATER_REFLECT : 0
   if (!on) return
+  planeY = level
 
   const full = renderer.getDrawingBufferSize(size)
   const w = Math.max(2, Math.round(full.x * T.WATER_REFLECT_SCALE))
@@ -203,8 +252,12 @@ const REFLECT_BODY = /* glsl */ `
       vec3 refl = texture2D(uReflectMap, ruv).rgb;
       float ndv = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
       float fres = pow(1.0 - ndv, 3.0);
-      // only deep water mirrors: a stream or a pond is shallow and takes almost none
-      float deep = smoothstep(0.3, 2.5, max(vWater.x, 0.0));
+      // Deep water mirrors, the shingle at the edge does not. This used to be a harsh gate — only
+      // the sea's baked depth of 60 m reached it — because the plane was at sea level and a pond
+      // reflecting through the wrong plane was worse than no reflection. Now the plane is aimed at
+      // the body (pickPlane), so a pond's few metres of baked depth should mirror like the sea:
+      // anything past the waterline counts, and the Fresnel term is what keeps the look-down clear.
+      float deep = smoothstep(0.3, 1.0, max(vWater.x, 0.0));
       gl_FragColor.rgb = mix(gl_FragColor.rgb, refl, clamp(fres * uReflect * deep, 0.0, 1.0));
     }
   }

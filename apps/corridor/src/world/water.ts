@@ -27,7 +27,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from '../tuning'
 import { chainCompile, injectRelief, injectSSR, injectShade, noteShiny } from '../visuals/shading'
-import { configureWaterReflection, injectWaterReflect } from '../visuals/waterReflect'
+import { configureWaterReflection, injectWaterReflect, registerWaterReflectBodies } from '../visuals/waterReflect'
 import { MAX_WATER_PROBES, registerWaterProbes, type WaterProbeBody } from '../visuals/waterProbes'
 import { WATER_ATTR, WATER_FRAG_COLOR, WATER_FRAG_NORMAL, WATER_FRAG_PARS, WATER_LOOK_NAMES, WATER_VERT_BODY, WATER_VERT_PARS, applyLookColours, lookOf, refreshLook, waterTints, writeWaterAttr, type WaterKnobs, type WaterLook, type WaterWaveUniforms } from './waterShader'
 
@@ -437,6 +437,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   const empty: WaterResult = { group, tick: advance, lines: 0, areas: 0, falls: 0, length_m: 0, setColours, setLook, looks: [] }
   if (!water || (!water.lines?.length && !water.areas?.length)) {
     registerWaterProbes([], group)
+    registerWaterReflectBodies([])
     return empty
   }
 
@@ -468,6 +469,10 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     }
   }
   registerWaterProbes(probeBodies, group)
+  // the same bodies feed the planar mirror, which aims its one exact plane at the nearest of them
+  // each frame (visuals/waterReflect.ts). This is what puts the real trees and bank on a pond, the
+  // thing the sky map and the cube probe both approximate.
+  registerWaterReflectBodies(probeBodies.map((b) => ({ x: b.x, y: b.y, z: b.z, radius: b.radius })))
 
   const foam = foamMaterial(uniforms)
   let nLines = 0, nFalls = 0, length = 0

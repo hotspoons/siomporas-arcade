@@ -1071,26 +1071,53 @@ export function treesFromCanopy(
 }
 
 /** An overpass stand-in: a deck slab over our road on two piers down to the measured ground. */
-export function overpassMesh(mid: Station, deckZ: number, deckLen: number, roadWidth: number, groundAt: (x: number, y: number) => number, colour = 0xb9b9b4): THREE.Group {
+export function overpassMesh(mid: Station, deckZ: number, deckLen: number, roadWidth: number, groundAt: (x: number, y: number) => number, colour = 0xb9b9b4, onRoad?: (x: number, z: number) => boolean): THREE.Group {
   const g = new THREE.Group()
   const side = mid.dir.clone().cross(UP)
   const span = roadWidth + 12 // deck reaches past both shoulders to where the piers stand
   const concrete = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.9 })
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(span, 1.4, Math.max(2, deckLen)), concrete)
-  deck.position.set(mid.pos.x, deckZ + 0.7, mid.pos.z)
+  const soffitMat = new THREE.MeshStandardMaterial({ color: 0x8f8d88, roughness: 0.95 })
+  const depth = Math.max(2, deckLen)
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(span, 1.2, depth), concrete)
+  deck.position.set(mid.pos.x, deckZ + 0.6, mid.pos.z)
   deck.rotation.y = Math.atan2(mid.dir.x, mid.dir.z)
   g.add(deck)
+  /*
+   * THE UNDERSIDE. The deck box already has a bottom, but a flat 17 m slab is a lid, not a bridge:
+   * from the road below you read the structure by its SOFFIT — the recessed slab and the girders
+   * running the span. One inset slab (so the edges overhang and cast a line) plus three girders is
+   * enough at 40 m without pretending to be a box-girder section. Rich, 2026-10-06.
+   */
+  const soffit = new THREE.Mesh(new THREE.BoxGeometry(span - 1.6, 0.5, depth - 1.0), soffitMat)
+  soffit.position.set(mid.pos.x, deckZ - 0.25, mid.pos.z)
+  soffit.rotation.y = deck.rotation.y
+  g.add(soffit)
+  for (const gz of [-depth / 3, 0, depth / 3]) {
+    const girder = new THREE.Mesh(new THREE.BoxGeometry(span - 2.0, 0.7, 0.5), soffitMat)
+    girder.position.copy(soffit.position).add(new THREE.Vector3(0, -0.35, 0))
+    girder.position.add(mid.dir.clone().multiplyScalar(gz))
+    girder.rotation.y = deck.rotation.y
+    g.add(girder)
+  }
   const parapet = new THREE.Mesh(new THREE.BoxGeometry(span, 1.1, 0.3), concrete)
   for (const sgn of [-1, 1]) {
     const p = parapet.clone()
-    p.position.copy(deck.position).add(mid.dir.clone().multiplyScalar((sgn * Math.max(2, deckLen)) / 2)).add(new THREE.Vector3(0, 1.2, 0))
+    p.position.copy(deck.position).add(mid.dir.clone().multiplyScalar((sgn * depth) / 2)).add(new THREE.Vector3(0, 1.2, 0))
     p.rotation.y = deck.rotation.y
     g.add(p)
+    /*
+     * A PIER DOES NOT STAND IN A ROADWAY. The pier sits at the edge of the span, which is where the
+     * abutment is — but a crossing structure can land its base on a carriageway below (a ramp under
+     * another ramp, a girder over a slip road), and a 1.6 m concrete post in a live lane reads as a
+     * wall the car cannot see the reason for. If the call site can say what is a road, a pier whose
+     * foot is on one is simply not built; the deck's own span carries it. Rich, 2026-10-06.
+     */
     const px = mid.pos.x + side.x * sgn * (span / 2 - 1.2)
     const pz = mid.pos.z + side.z * sgn * (span / 2 - 1.2)
+    if (onRoad?.(px, pz)) continue
     const gz = groundAt(px, -pz)
     const hgt = Math.max(1, deckZ - gz)
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.6, hgt, Math.max(2, deckLen) * 0.8), concrete)
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.6, hgt, depth * 0.8), concrete)
     pier.position.set(px, gz + hgt / 2, pz)
     pier.rotation.y = deck.rotation.y
     g.add(pier)

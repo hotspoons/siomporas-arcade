@@ -1562,6 +1562,13 @@ export let SIDEWALK_OWN_CLEAR_M = 3
  * take out a 12 m junction crossing costs far more pavement than it saves.
  */
 export let SIDEWALK_STATION_M = 4
+/**
+ * The resolution at which a walk is clipped against a road (m). The kerb edge is a straight line
+ * between two stations; this walks it to find where it runs onto a carriageway, so the piece removed
+ * is the road actually crossed rather than a whole station span. Smaller is a tighter cut and more
+ * `roadInfo` calls per metre of walk.
+ */
+export let SIDEWALK_CLIP_M = 1.5
 export let SIDEWALK_DROP_M = 3
 /** a painted crossing bar's width and spacing along the crossing (m), and its float (m) */
 export let SIDEWALK_BAR_W = 0.5
@@ -2529,6 +2536,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SIDEWALK_KERB_MAX_FROM_ROAD', () => SIDEWALK_KERB_MAX_FROM_ROAD, (v) => (SIDEWALK_KERB_MAX_FROM_ROAD = v), [1, 40], 1, 'past this it is a path and has no kerb (m)'),
           tune('SIDEWALK_ROAD_CLEAR_M', () => SIDEWALK_ROAD_CLEAR_M, (v) => (SIDEWALK_ROAD_CLEAR_M = v), [0, 6], 0.1, 'drop the walk where it strays this far onto ANOTHER road (m)'),
           tune('SIDEWALK_STATION_M', () => SIDEWALK_STATION_M, (v) => (SIDEWALK_STATION_M = v), [1, 20], 0.5, 'station spacing along a walk, and the granularity of a cut (m)'),
+          tune('SIDEWALK_CLIP_M', () => SIDEWALK_CLIP_M, (v) => (SIDEWALK_CLIP_M = v), [0.5, 8], 0.5, 'resolution of the walk-vs-road clip (m)'),
           tune('SIDEWALK_OWN_CLEAR_M', () => SIDEWALK_OWN_CLEAR_M, (v) => (SIDEWALK_OWN_CLEAR_M = v), [0, 12], 0.1, 'the same for its own road \u2014 wide, a walk hugs its own shoulder (m)'),
           tune('SIDEWALK_DROP_M', () => SIDEWALK_DROP_M, (v) => (SIDEWALK_DROP_M = v), [0, 12], 0.5, 'dropped-kerb ramp before a crossing (m)'),
           tune('SIDEWALK_BAR_W', () => SIDEWALK_BAR_W, (v) => (SIDEWALK_BAR_W = v), [0.1, 1.5], 0.05, 'crossing bar width (m)'),

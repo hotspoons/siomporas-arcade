@@ -1,0 +1,209 @@
+# Street furniture: signs, kerbs, walks, trails and rail
+
+**Status:** plan + first implementation, overnight 2026-10-06. The overpass/bridge ground fix that
+this sits beside is in `PLAN-WORLD-SCALE.md`'s orbit and already built (`world/overpass.ts`).
+**Audience:** whoever picks up the furniture work next — the main agent, or a person.
+**Companion:** [`LANES-AND-SIGNALS.md`](LANES-AND-SIGNALS.md), [`DESIGN.md`](DESIGN.md).
+
+---
+
+## What Rich asked for
+
+> school-zone signs at school-zone edges; major-road intersection signage (exit signs and/or signs
+> hung from stop-light booms); right-angle and beveled kerbs; sidewalks never cover roads; better
+> dubious entrance/exit handling (crofton-triangle on both sides of highway); render trails and
+> railways (use trailblazed to decide "paving", e.g. dirt).
+
+Six things. Three are viewer-side (signs, kerbs, walks), two need the bake (trails/rail, entrance
+classification), and one is a bug that all of them touch.
+
+---
+
+## What already exists (do not rebuild)
+
+`world/furniture.ts` (1 092 lines) already builds, from the manifest and the analytic ground:
+
+| thing | where | what it does |
+|---|---|---|
+| signal masts and heads | `mastGeometry`, `headGeometry`, `signalLensOffsets` | a mast per signalised junction arm, stepped to the kerb, arm measured to reach the stop line, heads looking along −Z |
+| stop / give-way signs | `signPostGeometry`, `signOutline`, `signFace`, `signTexture` | MUTCD R1-1 and R1-2 as painted canvases on a post |
+| barriers | `buildBarriers` | walls, hedges, guard rails swept along a way with a kind-scaled profile |
+| sidewalks + kerbs + crossing bars | `buildSidewalks` (`sidewalkCover`, ~line 880) | a three-point swept profile (kerb foot, kerb top, back edge), the kerb side found **by measurement**, dropped at crossings, clipped off carriageways |
+| street-name blades | `intersections.ts buildBlades` | one merged mesh per site (no instance, hence no collider — see below) |
+
+So the work below is **adding sign kinds, fixing the kerb geometry, extending the walk clip, and
+teaching the bake to say what a way is** — not standing up a furniture system.
+
+---
+
+## 1. School-zone signs
+
+**The thing.** A school zone is a stretch of road with a school beside it: a `school` amenity or a
+`school_zone`/`maxspeed:school` tag, and the signs mark where the zone *starts*. MUTCD S1-1 /
+S4-3 (school) with an S5-1 fluorescent yellow-green outline, plus a speed plate.
+
+**Data.** Check `manifest.pois` for `amenity=school` (the bake already collects POIs) and
+`manifest.roads` for `maxspeed=*school*`; if neither survives today, add a `school_zones` array in
+`export.py` — a list of `{ s, side, kind: 'school'|'school_speed', speed }` derived from the OSM
+ways/points, which is a small bake change and not a rebake of the heavy arrays.
+
+**Approach.** For each zone edge, place a post at the kerb the same way `buildFurniture` places a
+mast (step sideways with `edgeDistance` until clear), facing **against** travel so the driver reads
+it. A zone start gets the diamond; the paired end gets the optional END SCHOOL ZONE plate. Colour
+is the fluorescent yellow-green (`#c7ea46`), not the ordinary warning yellow — that is the tell.
+
+**Knobs.** `SCHOOL_SIGN_H`, `SCHOOL_ZONE_REACH_M` (how far the zone's road is signed), `SCHOOL_SIDE`.
+
+**Test.** A school POI's road gets exactly two posts (start/end), on the kerb, facing oncoming
+traffic; no post stands on a carriageway (reuse the edge-clear walk). No school in the world → no
+posts, no error.
+
+---
+
+## 2. Major-road intersection signage
+
+**The thing.** Two signs Rich named: **exit signs** on the major road's ramps (green, "EXIT nn"),
+and signs **hung from the stop-light boom** at big junctions (street name, "left turn", lane
+assignment).
+
+**Data.** `manifest.intersections` already carries the junction list and counts; `manifest.roads`
+carries names/refs; `manifest.crossings` says which arm is `over`/`merge`. The boom geometry is
+`mastGeometry`'s arm — a sign hangs where the arm runs.
+
+**Approach.** Extend the existing mast builder: at an arm whose junction is on the `major` list,
+mount **one** panel under the arm at `arm * 0.55` out, facing the stop line, textured from a canvas
+like `signFace`. Exit signs are their own small builder keyed to `crossings` where
+`kind=motorway_link` and `relation` is an exit — the destination is the linked road's `name`/`ref`,
+which the manifest already holds.
+
+**Knobs.** `BOOM_SIGN_MIN_JUNCTION` (how big a junction earns a hung sign), `EXIT_SIGN_H`.
+
+**Test.** A 4-way signalised junction on a `primary` gets a panel per boom; a side-street stop does
+not. A motorway_link crossing named in `crossings` gets an exit panel.
+
+---
+
+## 3. Right-angle and beveled kerbs
+
+**The thing.** The kerb is a swept profile along a walk. At a **corner** the sweep should turn a
+right angle (or a bevel — the 45° chamfer real sidewalks use to open a corner for a turning car),
+not run two parallel ribbons past each other and leave a notch.
+
+**Current state.** `buildSidewalks` sweeps each way independently; OSM splits at the corner node, so
+each way's ribbon ends near it and the next begins, and nothing joins them. The section around
+line 1075 already has the vocabulary (`side`, `edge`).
+
+**Approach.** Join runs that share an endpoint within `KERB_JOIN_M`: at the shared node, walk the
+two ribbons' kerb-side vertices to the **mitered** intersection of the two kerb lines; where the
+turn is sharper than `KERB_BEVEL_DEG` (a real street corner), cut the miter at
+`KERB_BEVEL_M` and add the two-point bevel instead of the long point. This is pure 2-D geometry on
+the ring the builder already accumulates, and it belongs in a small `kerbJoin` helper so it can be
+unit-tested.
+
+**Knobs.** `KERB_JOIN_M`, `KERB_BEVEL_M`, `KERB_BEVEL_DEG`.
+
+**Test.** Two perpendicular walks meeting at a node produce a corner with four kerb vertices, none
+outside a `KERB_BEVEL_M` box of the node; a straight-through pair is untouched.
+
+---
+
+## 4. Sidewalks never cover roads
+
+**The thing.** `sidewalks rendering over streets` (Rich, 2026-09-27). There is a partial fix:
+`roadInfo` at the kerb edge, `onRoad = edge.d < -(who !== own ? CLEAR : OWN_CLEAR)`, and a strip that
+skips on-road spans. It still lets some through.
+
+**Why it is still wrong.** The check is per **vertex** and the ribbon is flushed on a
+previous-vertex basis (`if (i > 0 && !onRoad && !lastOnRoad)`), so a span whose *middle* is over a
+road but whose endpoints are clear is drawn whole, and the 1.5 m "own road" slack is a metre of
+asphalt by design. The zone walk is also a pure lateral offset, so it is only ever as good as the
+road it was offset from.
+
+**Approach.** Clip the **segment** against the road, not the vertex: for each pair of ring slices,
+walk the segment and split it where `roadInfo` crosses zero on the kerb edge, emitting only the
+clear sub-segments. That turns "skip a vertex" into "skip the part that is on the road", which is
+what Rich is looking at. Keep the own-road slack but shrink it, and count the split metres so the
+`overRoad` stat is honest.
+
+**Knobs.** `SIDEWALK_ROAD_CLEAR_M` (already), `SIDEWALK_OWN_CLEAR_M` (already, shrink), and a new
+`SIDEWALK_CLIP_M` resolution.
+
+**Test.** A unit test on the clip: a segment from clear ground, across a 12 m road, to clear ground
+emits two sub-segments totalling `len − 12`, and a segment wholly on the road emits none.
+
+---
+
+## 5. Dubious entrances and exits
+
+**The thing.** "crofton-triangle on both sides of highway" — an entry or exit the bake could not
+place confidently is drawn on both sides, or at a spot that is not a real entrance. On a divided
+highway the two carriageways are close, and a node on one is ambiguously nearer the other.
+
+**Data.** `manifest.stubs`, `manifest.driveways`, `manifest.crossings` (`merge`), and the spine
+`siblings`. The classifier that decides "this node is an entrance" lives in the bake.
+
+**Approach.** Two halves. **Bake:** when a driveway/stub node is within `ENTRANCE_AMBIG_M` of two
+carriageways, do not pick one — record both, and a `side` hint from the way's own direction. **Viewer:**
+in `buildDriveways`-equivalent, place the connector on the side whose `edgeDistance` agrees with the
+hint, and drop it if the two disagree by less than the width of either road (it is genuinely in the
+middle — a median gap, not an entrance). The crofton-triangle case is exactly this disagreement on
+both sides of the highway.
+
+**Knobs.** `ENTRANCE_AMBIG_M`, `ENTRANCE_DROP_M`.
+
+**Test.** A node equidistant from two parallel carriageways (the highway) yields **one** connector,
+on the hinted side; a genuinely centred node on a median yields none.
+
+---
+
+## 6. Trails and railways — and `trailblazed` as the paving tell
+
+**The thing.** Render paths (`highway=path|footway|cycleway|track`) and railways (`railway=rail`),
+and choose the path's surface from `trailblazed` (a dirt path, a paved greenway) rather than drawing
+asphalt.
+
+**Data.** `osm.py` already pulls `way[railway]` and lists `track`, `railway` among the classes
+(line 313); crossings already carry `railway` in their tags. What is missing is (a) the ways
+themselves in the streamed branch set with a `surface`/`trailblazed` tell, and (b) **the
+`tunnel`/`layer` tags, which `export.py` strips at ~line 1515** — so a rail in a tunnel is baked as
+a rail on the surface today.
+
+**Approach.**
+- **Bake:** stop stripping `tunnel`/`layer` on the way record; add `surface` and a `trailblazed`
+  boolean from the OSM tags. Keep paths and rails in the branch stream but under their own `kind`, so
+  the viewer can give them their own mesh and material.
+- **Viewer:** a `buildTrailsAndRail` beside `buildBarriers`: a path is a narrow ribbon (not a
+  carriageway — no kerbs, no paint) with a material from `trailblazed` (dirt, gravel) or `surface`
+  (paved); a railway is two rails + sleepers on a ballast ribbon, or simply a ballast ribbon at
+  distance. `layer < 0` / `tunnel=yes` routes it through the same portal/interior treatment as a
+  road tunnel (see `PLAN-WORLD-SCALE.md`).
+
+**Knobs.** `TRAIL_WIDTH_M`, `RAIL_GAUGE_M`, `RAIL_VIEW_M`.
+
+**Test.** A `highway=track` with no `trailblazed` gets the dirt material; a `highway=cycleway` with
+`surface=asphalt` gets the paved one; `railway=rail` gets two rails.
+
+---
+
+## Order, and what needs a rebake
+
+1. **Kerbs (3)** and **walks (4)** — pure viewer geometry, unit-testable, fix two things Rich can
+   see today. Do these first.
+2. **Signs (1, 2)** — viewer, plus a small optional `school_zones` bake array.
+3. **Entrances (5)** — small bake classifier change + viewer guard.
+4. **Trails/rail (6)** — the largest: a bake change (stop stripping tags, add `kind`/`surface`) and a
+   new mesh builder. Needs a rebake of whatever world is being tested.
+
+Nothing here raises `MAX_M` or touches the sharded bake; every item is per-tile or resident-small.
+
+---
+
+## The one bug underneath all of it
+
+A branch is tiled by its **first point** (`_TILE_KEY` in `export.py`), and the viewer streams a
+branch only when the eye reaches that tile. A long road whose first point is far from part of its
+own length is therefore missing exactly where you are — which is how the dc-metro overpass ramp was
+absent from the grid under its own deck (`probes/corridor-overpass.mjs` documents this). Every
+"furniture missing at spot X" report can be this rather than a builder bug. Fixing it — key a way to
+**every** tile its geometry touches, or stream by bbox overlap — should probably come before more
+furniture, because otherwise each new kind inherits the same holes.

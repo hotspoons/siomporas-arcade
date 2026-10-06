@@ -880,6 +880,32 @@ export function sidewalkCover(manifest: Manifest, margin = 0.35): (x: number, z:
 // before a crossing, which is what the ramp at a corner is, and it is why the kerb height is a
 // per-vertex value rather than a constant in the profile.
 
+/**
+ * The clear sub-spans of a segment, for the walk clip.
+ *
+ * `clear(t)` is sampled at `n + 1` points across [0, 1]. Each maximal run of clear samples becomes
+ * one span, running from the first clear sample to the first non-clear one, so a segment that leaves
+ * clear ground, crosses a 12 m road and returns gives two spans whose total length is the segment
+ * minus the road. `onRoad` counts the on-road samples for the stat. Pure, and the whole reason it is
+ * a function: clipping per VERTEX drew a span whose middle crossed a road.
+ */
+export function clearSpans(n: number, clear: (t: number) => boolean): { spans: [number, number][]; onRoad: number } {
+  const spans: [number, number][] = []
+  let onRoad = 0
+  let start: number | null = null
+  for (let s = 0; s <= n; s++) {
+    const t = s / n
+    if (clear(t)) {
+      if (start === null) start = t
+    } else {
+      if (start !== null) { spans.push([start, t]); start = null }
+      onRoad++
+    }
+  }
+  if (start !== null) spans.push([start, 1])
+  return { spans, onRoad }
+}
+
 export interface SidewalkResult {
   group: THREE.Group
   counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number }
@@ -1009,8 +1035,7 @@ export function buildSidewalks(
     let own = -1
     let ownN = 0
     for (const [who, n] of tally) if (n > ownN) [own, ownN] = [who, n]
-    let ring: number[][] = []
-    let lastOnRoad = false
+    let ring: number[][] | null = null
     for (let i = 0; i < pts.length; i++) {
       const a = pts[Math.max(0, i - 1)]
       const d = pts[Math.min(pts.length - 1, i + 1)]
@@ -1072,15 +1097,31 @@ export function buildSidewalks(
       // Measured at the KERB EDGE, not the centreline. The walk has width, so a centreline just
       // inside the allowance still puts its road-side edge half a width further in — the knob
       // then quietly means "clearance plus about a metre", which is not what it says.
-      const ex = pts[i].x + px * ((side * w) / 2)
-      const ez = pts[i].z + pz * ((side * w) / 2)
-      const edge = roadInfo(ex, ez)
-      const onRoad = edge.d < -(edge.who !== own ? T.SIDEWALK_ROAD_CLEAR_M : T.SIDEWALK_OWN_CLEAR_M)
-      if (i > 0 && !onRoad && !lastOnRoad) {
-        concrete.strip(ring, here)
-        counts.metres += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
-      } else if (onRoad || lastOnRoad) counts.overRoad++
-      lastOnRoad = onRoad
+      //
+      // AND CLIPPED PER SEGMENT, not per vertex. The old rule kept or dropped a whole slice by what
+      // its ENDPOINTS were doing, so a span whose middle crossed a road but whose ends were clear
+      // was drawn across it whole — the "3 sidewalks extending over streets" Rich saw. The kerb edge
+      // is a straight line between two samples, so the clear part of it is an interval: walk the
+      // segment, find where `roadInfo` changes sign, and emit only the clear sub-spans. That makes
+      // the removal the length of the road actually crossed, not the length of the station spacing.
+      if (i > 0 && ring) {
+        const prev = ring
+        const clearAt = (t: number) => {
+          const kx = prev[0][0] + (here[0][0] - prev[0][0]) * t
+          const kz = prev[0][2] + (here[0][2] - prev[0][2]) * t
+          const e = roadInfo(kx, kz)
+          return e.d >= -(e.who !== own ? T.SIDEWALK_ROAD_CLEAR_M : T.SIDEWALK_OWN_CLEAR_M)
+        }
+        const seg = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
+        const lerpRing = (t: number) => prev.map((v, k) => [v[0] + (here[k][0] - v[0]) * t, v[1] + (here[k][1] - v[1]) * t, v[2] + (here[k][2] - v[2]) * t, v[3], v[4], v[5], v[6], v[7]])
+        const n = Math.max(1, Math.ceil(seg / T.SIDEWALK_CLIP_M))
+        const { spans, onRoad } = clearSpans(n, clearAt)
+        counts.overRoad += onRoad
+        for (const [t0, t1] of spans) {
+          concrete.strip(lerpRing(t0), lerpRing(t1))
+          counts.metres += seg * (t1 - t0)
+        }
+      }
       ring = here
     }
   }

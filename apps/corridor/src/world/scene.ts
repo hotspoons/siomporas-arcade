@@ -3158,7 +3158,7 @@ if (uLodOn > 0.5) {
     } else {
       const deck = st.deck_z_min ?? mid.pos.y + (st.clearance_m ?? 6)
       const width = pavedHalfAt((st.s_start + st.s_end) / 2) * 2
-      const op = overpassMesh({ pos: mid.pos, dir: mid.dir.clone().setY(0).normalize(), s: 0 }, deck, st.length_m, width, heightAt)
+      const op = overpassMesh({ pos: mid.pos, dir: mid.dir.clone().setY(0).normalize(), s: 0 }, deck, st.length_m, width, heightAt, undefined, (x, z) => edgeDistanceWorld(x, z) < 0.5)
       op.traverse((o) => { o.userData = { structure: st } })
       structures.add(op)
       continue

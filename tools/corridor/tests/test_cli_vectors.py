@@ -78,9 +78,9 @@ class CmdVectorsTest(unittest.TestCase):
         self.assertEqual(len(cell["signals"]["masts"]), 1)
         self.assertEqual(out["vt"]["counts"]["buildings"], 2)
 
-    def test_does_not_tile_arrays_the_viewer_still_reads_inline(self):
-        # `TILED_ACTIVE` is the gate: a world's `pois` stays in the manifest and out of the tiles,
-        # so the tiles carry only what the viewer streams and nothing is shipped twice.
+    def test_pois_stream_and_leave_nothing_inline(self):
+        # pois is in `TILED_ACTIVE`: the points go to the tiles and out of the manifest, so the
+        # viewer streams them for the editor's autogen rather than parsing them all at load.
         web = self._data / "sites" / "mixed" / "web"
         web.mkdir(parents=True)
         (web / "manifest.json").write_text(json.dumps({
@@ -89,10 +89,18 @@ class CmdVectorsTest(unittest.TestCase):
         }))
         cli.cmd_vectors(argparse.Namespace(slug="mixed"))
         out = json.loads((web / "manifest.json").read_text())
-        self.assertEqual(len(out["pois"]), 1)          # still resident
-        self.assertNotIn("pois", out["vt"]["counts"])  # and not in the tiles
+        self.assertEqual(out["pois"], [])                    # streamed out
+        self.assertEqual(out["vt"]["counts"]["pois"], 1)      # carried in the tiles
         cell = json.loads((web / "vt" / "0" / "0_0.json").read_text())
-        self.assertNotIn("pois", cell)
+        self.assertEqual(len(cell["pois"]), 1)
+
+    def test_every_tileable_array_is_streamed(self):
+        # TILED_ACTIVE is the gate and every array the schema can tile is now behind it; a new array
+        # added to the schema but forgotten here would silently keep shipping inline.
+        for name in export.TILED_FLAT:
+            self.assertIn(name, export.TILED_ACTIVE, name)
+        for name in export.TILED_NESTED:
+            self.assertIn(name, export.TILED_ACTIVE, name)
 
     def test_landuse_streams_and_keeps_its_area_summary(self):
         # landuse is in `TILED_ACTIVE`: the rings go to the tiles, and a class->area summary stays so

@@ -287,6 +287,9 @@ export interface Manifest {
     lat?: number
     tags?: Record<string, string>
   }[]
+  /** OSM points of interest (tools/corridor/corridor/buildings.py): an amenity/shop kind and the
+   *  index of the building it sits in. Streams per cell like the footprints. */
+  pois?: { x: number; y: number; s?: number; lat?: number; kind: string; name?: string | null; building?: number | null }[]
   /** what grows here: LANDFIRE EVT classes with their corridor share, an FIA species mix,
    *  a ground-cover class per vegetation type and Daymet monthly climate (tools/corridor/corridor/flora.py).
    *  Absent on bakes older than 2026-09-21; flora.ts falls back to the OSM land-use rule. */

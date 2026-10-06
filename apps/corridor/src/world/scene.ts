@@ -3196,6 +3196,10 @@ if (uLodOn > 0.5) {
       ;(manifest.landuse ??= []).push(...lu)
       addLanduseCell?.(lu, key)
     }
+    // points of interest: no viewer reader needs them live, but the editor's autogen does, so keep a
+    // running view of what is loaded, as with buildings.
+    const pois = files.pois as NonNullable<Manifest['pois']> | undefined
+    if (pois?.length) (manifest.pois ??= []).push(...pois)
     for (const s of sibs) { (manifest.siblings ??= []).push(s); roads.addLine(s) }
     for (const d of dws) { (manifest.driveways ??= []).push(d); roads.addLine(d.coords) }
     for (const st of sts) { (manifest.stubs ??= []).push(st); roads.addLine(st.coords) }

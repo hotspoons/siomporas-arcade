@@ -2,6 +2,7 @@
 // Z = south — i.e. (x, y, z)_site -> (x, z, -y)_three, right-handed with Y up so nothing in
 // three's camera/controls code has to be told about Z-up.
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { inside } from './polygon'
 import { VegCover } from '../lod/vegmask'
 import { landuseZone, zoneOfRoad } from './zoning'
@@ -1003,6 +1004,14 @@ if (uLodOn > 0.5) {
   const pavedOffsetAt = (s: number) => pavedOffset(twoWayAt(s), kerbedAt(s))
   const road = new THREE.Group()
   road.name = 'road'
+  /**
+   * Concrete for the bridges carried by streamed branch ways (the crossing carriageway over an
+   * underpass). Filled by `addBranchBridge` as branch roads build; parented under `structures` at
+   * assembly so the layer toggle reaches it. Declared here, at function scope, because the branch
+   * builders live in a nested block. Rich, 2026-10-06.
+   */
+  const branchBridges = new THREE.Group()
+  branchBridges.name = 'branchBridges'
   /** Set once `addDriveways` is defined inside the road block below; the tile pump calls it per
    *  cell to lay a streamed world's driveways as its tiles arrive (the load path lays them all). */
   let addDrivewaysBatch: (driveways: NonNullable<Manifest['driveways']>, stubs: NonNullable<Manifest['stubs']>) => void = () => {}
@@ -2165,6 +2174,70 @@ if (uLodOn > 0.5) {
     // STREAM_CHUNK_M of road: the biggest branch on crownsville took 480 ms headless as one unit.
     // The fill itself yields inside that chunk. The branch's asphalt and paint (one mesh for the
     // whole road) are built by whichever of its chunks the eye reaches first, on the same budget.
+    /*
+     * A BRIDGE WE ONLY EVER MEET FROM BELOW.
+     *
+     * The manifest's structures run along the spine, but the carriageway that crosses over us —
+     * Kenilworth Ave (MD 201/459) over the Beltway — arrives later as a streamed branch way with no
+     * `bridge` record of its own: the bake left only a lidar `gantry`, so nothing built a structure,
+     * and from the underpass the crossing road read as a black band of asphalt sky. Walk each
+     * branch once and give every genuinely elevated run the concrete the spine's bridges get: a
+     * slab under the deck, an edge beam beneath each shoulder, and a parapet on top. The deck the
+     * car drives is still the road ribbon; this is only what makes it a bridge to the road below
+     * (case 2, docs/corridor/PLAN-GRADE-SEPARATION-RENDER.md). Rich, 2026-10-06.
+     */
+    const branchBridgeMat = new THREE.MeshStandardMaterial({ color: 0xb9b6ae, roughness: 0.9 })
+    const bridgeYaw = (d: THREE.Vector3) => Math.atan2(d.x, d.z)
+    /** one group of concrete per branch, so a junction-warped rebuild replaces it instead of doubling */
+    const branchBridgeFor: (THREE.Group | null)[] = []
+    const addBranchBridge = (i: number, list: { x: number; z: number; y: number; half: number; s: number; elev?: boolean }[]) => {
+      const old = branchBridgeFor[i]
+      if (old) {
+        branchBridges.remove(old)
+        old.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
+        branchBridgeFor[i] = null
+      }
+      if (!list || list.length < 2) return
+      const up = new THREE.Vector3(0, 1, 0)
+      const parts: THREE.BufferGeometry[] = []
+      const m4 = new THREE.Matrix4()
+      const place = (geo: THREE.BufferGeometry, x: number, y: number, z: number, ry: number) => {
+        m4.makeRotationY(ry)
+        m4.setPosition(x, y, z)
+        geo.applyMatrix4(m4)
+        parts.push(geo)
+      }
+      for (let k = 0; k + 1 < list.length; k++) {
+        const A = list[k], B = list[k + 1]
+        // A genuine deck, not fill: the station grid already carries the isDeck flag, so this walk
+        // costs no extra DEM samples. (Walking the curve at 4 m with a heightAt per step made a
+        // single branch unit take a 7 s slice — Rich's underpass probe, 2026-10-06.)
+        if (!A.elev || !B.elev) continue
+        if (Math.abs(B.s - A.s) > 12) continue // a gap in the road, not a deck
+        const dx = B.x - A.x, dz = B.z - A.z
+        const seg = Math.hypot(dx, dz)
+        if (seg < 0.5 || seg > 12) continue
+        const w = (A.half + B.half) / 2 + 0.6
+        const dir = new THREE.Vector3(dx, B.y - A.y, dz)
+        const l = dir.length() + 0.05
+        dir.normalize()
+        const side = dir.clone().cross(up)
+        const cx = (A.x + B.x) / 2, cy = (A.y + B.y) / 2, cz = (A.z + B.z) / 2
+        const ry = bridgeYaw(dir)
+        place(new THREE.BoxGeometry(2 * (w - 0.3), 0.5, l), cx, cy - 1.35, cz, ry)
+        for (const sgn of [-1, 1]) {
+          place(new THREE.BoxGeometry(0.4, 1.0, l), cx + side.x * sgn * w, cy + 0.5, cz + side.z * sgn * w, ry)
+          place(new THREE.BoxGeometry(0.8, 1.6, l), cx + side.x * sgn * (w - 0.3), cy - 0.9, cz + side.z * sgn * (w - 0.3), ry)
+        }
+      }
+      if (!parts.length) return
+      // ONE MESH. A long elevated run emits thousands of boxes; as separate meshes that is thousands
+      // of draw calls (a probe measured 4,000 for a single branch). Merged, it is one.
+      const g = new THREE.Group()
+      branchBridgeFor[i] = g
+      branchBridges.add(g)
+      g.add(new THREE.Mesh(mergeGeometries(parts, false), branchBridgeMat))
+    }
     const branchUnits: GradeUnit[] = []
     const roadBuilt = new Set<number>()
     // the whole road of each built branch, and the copy with the fixtures cut out of it, if any
@@ -2198,6 +2271,7 @@ if (uLodOn > 0.5) {
       road.add(rm)
       roadParts.push(rm)
       branchRoad[i].base = rm
+      addBranchBridge(i, stationsByWho[branchWho0 + i])
       holeBranch(i)
     }
     branchAts.forEach((b, i) => {
@@ -2208,6 +2282,11 @@ if (uLodOn > 0.5) {
       // Stephens Church Road, crownsville, measured in probes/corridor-crosssection.mjs).
       const skip = (s: number) => {
         const q = b.at(s).pos
+        // ... and a branch on a DECK emits no verge at all: this is the crossing carriageway over
+        // the underpass (Kenilworth Ave over the Beltway), whose graded fill used to climb onto the
+        // span and stand in the roadway below — the "DEM in the underpass" Rich kept driving into.
+        // The pavement mesh still carries the car; only the grass verge goes.
+        if (isDeck(q.y, heightAt(q.x, -q.z), T.OVERPASS_CLEAR_M)) return true
         return edgeDistance(q.x, q.z, branchWho0 + i, true).d < T.BRANCH_VERGE
       }
       const nChunks = Math.max(1, Math.ceil(b.len / CHUNK))
@@ -2230,6 +2309,11 @@ if (uLodOn > 0.5) {
       const b = branchAts[i]
       const skip = (s: number) => {
         const q = b.at(s).pos
+        // ... and a branch on a DECK emits no verge at all: this is the crossing carriageway over
+        // the underpass (Kenilworth Ave over the Beltway), whose graded fill used to climb onto the
+        // span and stand in the roadway below — the "DEM in the underpass" Rich kept driving into.
+        // The pavement mesh still carries the car; only the grass verge goes.
+        if (isDeck(q.y, heightAt(q.x, -q.z), T.OVERPASS_CLEAR_M)) return true
         return edgeDistance(q.x, q.z, branchWho0 + i, true).d < T.BRANCH_VERGE
       }
       const nChunks = Math.max(1, Math.ceil(b.len / CHUNK))
@@ -3148,6 +3232,17 @@ if (uLodOn > 0.5) {
         dir.normalize()
         const side = dir.clone().cross(new THREE.Vector3(0, 1, 0))
         const c = a.pos.clone().lerp(b.pos, 0.5)
+        /*
+         * THE UNDERSIDE. The deck here is the road surface, and a single sheet culled its back face
+         * — from a carriageway crossing below, the bridge read as a black band of sky where its
+         * soffit should be. One slab spanning between the two edge beams closes it: concrete, a
+         * little way below the road so the edge beams still stand proud of it. Rich, 2026-10-06.
+         */
+        const slab = new THREE.Mesh(new THREE.BoxGeometry(2 * (w - 0.3), 0.5, len), concrete)
+        slab.position.copy(c).add(new THREE.Vector3(0, -1.35, 0))
+        slab.rotation.y = yaw(dir)
+        slab.userData = { structure: st }
+        structures.add(slab)
         for (const sgn of [-1, 1]) {
           const parapet = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.0, len), concrete)
           parapet.position.copy(c).add(side.clone().multiplyScalar(sgn * w)).add(new THREE.Vector3(0, 0.5, 0))
@@ -3172,6 +3267,10 @@ if (uLodOn > 0.5) {
           dir.normalize()
           const side = dir.clone().cross(new THREE.Vector3(0, 1, 0))
           const c = a.pos.clone().lerp(b.pos, 0.5)
+          const slab = new THREE.Mesh(new THREE.BoxGeometry(2 * (w2 - 0.3), 0.5, len), concrete)
+          slab.position.copy(c).add(new THREE.Vector3(0, -1.35, 0))
+          slab.rotation.y = yaw(dir)
+          structures.add(slab)
           for (const sgn of [-1, 1]) {
             const parapet = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.0, len), concrete)
             parapet.position.copy(c).add(side.clone().multiplyScalar(sgn * w2)).add(new THREE.Vector3(0, 0.5, 0))
@@ -3225,6 +3324,7 @@ if (uLodOn > 0.5) {
   markers.add(ring)
   for (const o of [...spine.children]) if (o instanceof THREE.ArrowHelper) { spine.remove(o); markers.add(o) }
   markers.visible = false
+  structures.add(branchBridges)
   group.add(structures)
   group.add(markers)
 

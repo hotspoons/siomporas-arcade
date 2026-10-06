@@ -1086,7 +1086,7 @@ export function overpassMesh(mid: Station, deckZ: number, deckLen: number, roadW
   const concrete = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.9 })
   // A little lift so the underside is readable in its own shadow: a concrete soffit lit only by the
   // sky's ground colour came out as a black lid (Rich, 2026-10-06).
-  const soffitMat = new THREE.MeshStandardMaterial({ color: 0x9a978f, roughness: 0.95, emissive: 0x0e0d0c })
+  const soffitMat = new THREE.MeshStandardMaterial({ color: 0x9a978f, roughness: 0.95, emissive: 0x4a4844 })
   const depth = Math.max(2, deckLen)
   const deck = new THREE.Mesh(new THREE.BoxGeometry(span, 1.4, depth), concrete)
   deck.position.set(mid.pos.x, deckZ + 0.7, mid.pos.z)

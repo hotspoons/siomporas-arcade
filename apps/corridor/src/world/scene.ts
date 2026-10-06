@@ -2190,7 +2190,7 @@ if (uLodOn > 0.5) {
     const bridgeYaw = (d: THREE.Vector3) => Math.atan2(d.x, d.z)
     /** one group of concrete per branch, so a junction-warped rebuild replaces it instead of doubling */
     const branchBridgeFor: (THREE.Group | null)[] = []
-    const addBranchBridge = (i: number, list: { x: number; z: number; y: number; half: number; s: number; elev?: boolean }[]) => {
+    const addBranchBridge = (i: number, self: number, list: { x: number; z: number; y: number; half: number; s: number; elev?: boolean }[]) => {
       const old = branchBridgeFor[i]
       if (old) {
         branchBridges.remove(old)
@@ -2206,6 +2206,30 @@ if (uLodOn > 0.5) {
         m4.setPosition(x, y, z)
         geo.applyMatrix4(m4)
         parts.push(geo)
+      }
+      /*
+       * A deck, not fill. `isDeck` fires along every fill embankment too — the bare-earth DEM sits
+       * below a road graded up to its crown — and drawing concrete there fenced the whole corridor:
+       * one branch merged 99,840 verts spanning the map, and Rich read the slabs standing beside the
+       * roadway as "a second bridge with a different lane of traffic inside the first" (2026-10-06).
+       * Concrete is only correct where the deck genuinely spans OPEN AIR, so ask the station grid
+       * whether a carriageway of another `who` passes UNDER this footprint.
+       */
+      const stCellM = 20
+      const spansBelow = (cx: number, cy: number, cz: number, w: number) => {
+        const c0 = Math.floor(cx / stCellM), c1 = Math.floor(cz / stCellM)
+        const r = Math.ceil((w + 24) / stCellM)
+        for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) {
+          for (const p of stGrid.get(`${c0 + a},${c1 + b}`) ?? []) {
+            if (p.who === self) continue
+            const dx = p.x - cx, dz = p.z - cz
+            const reach = w + p.half + 8
+            if (dx * dx + dz * dz > reach * reach) continue
+            if (p.y == null) continue
+            if (p.y < cy - T.OVERPASS_CLEAR_M) return true
+          }
+        }
+        return false
       }
       for (let k = 0; k + 1 < list.length; k++) {
         const A = list[k], B = list[k + 1]
@@ -2223,6 +2247,7 @@ if (uLodOn > 0.5) {
         dir.normalize()
         const side = dir.clone().cross(up)
         const cx = (A.x + B.x) / 2, cy = (A.y + B.y) / 2, cz = (A.z + B.z) / 2
+        if (!spansBelow(cx, cy, cz, w)) continue
         const ry = bridgeYaw(dir)
         place(new THREE.BoxGeometry(2 * (w - 0.3), 0.5, l), cx, cy - 1.35, cz, ry)
         for (const sgn of [-1, 1]) {
@@ -2271,7 +2296,7 @@ if (uLodOn > 0.5) {
       road.add(rm)
       roadParts.push(rm)
       branchRoad[i].base = rm
-      addBranchBridge(i, stationsByWho[branchWho0 + i])
+      addBranchBridge(i, branchWho0 + i, stationsByWho[branchWho0 + i])
       holeBranch(i)
     }
     branchAts.forEach((b, i) => {

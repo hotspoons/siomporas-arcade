@@ -1507,7 +1507,7 @@ if (uLodOn > 0.5) {
   // correction fading out over JUNCTION_MEET_M along the inferior road. The superior road, and
   // the spine always, keep their grade.
   const junctionMeet = { junctions: 0, warped: 0, maxStep: 0, noTarget: 0 }
-  let finishJunctions: () => number[] = () => []
+  let finishJunctions: (budget?: Budget) => Promise<number[]> = async () => []
   // node -> junction, so a branch knows the priority facts at the node it meets. A tiled world adds
   // to it as intersection tiles arrive (hydrateCell), and `finishJunctions` re-runs the meet.
   const xByNode = new Map<number, NonNullable<Manifest['intersections']>['list'][number]>()
@@ -1574,15 +1574,26 @@ if (uLodOn > 0.5) {
         b.dirty = true
       }
     }
-    const sync = () => {
+    const sync = async (budget?: Budget) => {
       const warped: number[] = []
       branchRaw.forEach((b, i) => { if (b.br.id) byId.set(b.br.id, i) })
-      branchRaw.forEach((b, i) => meetOne(b, i))
-      branchRaw.forEach((b, i) => { if (!b.dirty) return; b.recurve(); b.dirty = false; warped.push(i) })
+      // This pass re-meets EVERY branch, and it runs once per arriving branch tile — so as the
+      // network grows it is O(N) a call over data that mostly does not need it, and it sits in the
+      // `loadVectorTile` continuation with no yield. On dc-metro a late call measured 2.97 s in
+      // `gradeStats.worstMs` on a `branch-cell` unit — the same un-budgeted freeze as the street
+      // furniture, one scope down. It still re-runs (an arriving intersection can give an unmet
+      // junction a target at last), but it yields per branch, so the frame paints between.
+      for (let i = 0; i < branchRaw.length; i++) { await budget?.tick(); meetOne(branchRaw[i], i) }
+      for (let i = 0; i < branchRaw.length; i++) {
+        const b = branchRaw[i]
+        if (!b.dirty) continue
+        await budget?.tick()
+        b.recurve(); b.dirty = false; warped.push(i)
+      }
       return warped
     }
     finishJunctions = sync
-    sync()
+    await sync()
     junctionMeet.maxStep = +junctionMeet.maxStep.toFixed(2)
   }
   mark('paving: junctions meet')
@@ -2492,7 +2503,7 @@ if (uLodOn > 0.5) {
     const adoptArriving = async (br: NonNullable<Manifest['branches']>[number], budget: Budget) => {
       if (!takeBranch(br)) return
       branchRoad.push({ base: null, holed: null })
-      const warped = finishJunctions()
+      const warped = await finishJunctions(budget)
       const i = branchAts.length - 1
       const b = branchAts[i]
       curves.push({ at: b.at, len: b.len })
@@ -3760,32 +3771,49 @@ if (uLodOn > 0.5) {
   }
   const wetExtra: THREE.Object3D[] = []
   let streetRoot: {
-    power: ReturnType<typeof buildPower>
-    furniture: ReturnType<typeof buildFurniture>
-    parking: ReturnType<typeof buildParking>
-    barriers: ReturnType<typeof buildBarriers>
-    sidewalks: ReturnType<typeof buildSidewalks>
-    signals: ReturnType<typeof buildSignals>
-    stopbars: ReturnType<typeof buildStopBars>
-    blades: ReturnType<typeof buildBlades>
-    crosswalks: ReturnType<typeof buildCrosswalks>
-    arrows: ReturnType<typeof buildLaneArrows>
+    power: Awaited<ReturnType<typeof buildPower>>
+    furniture: Awaited<ReturnType<typeof buildFurniture>>
+    parking: Awaited<ReturnType<typeof buildParking>>
+    barriers: Awaited<ReturnType<typeof buildBarriers>>
+    sidewalks: Awaited<ReturnType<typeof buildSidewalks>>
+    signals: Awaited<ReturnType<typeof buildSignals>>
+    stopbars: Awaited<ReturnType<typeof buildStopBars>>
+    blades: Awaited<ReturnType<typeof buildBlades>>
+    crosswalks: Awaited<ReturnType<typeof buildCrosswalks>>
+    arrows: Awaited<ReturnType<typeof buildLaneArrows>>
   } | null = null
-  const addStreet = (m: Manifest, xnodes: typeof crossingNodes) => {
+  /**
+   * One cell's street furniture, on the pump's budget.
+   *
+   * This whole path used to run synchronously inside the `loadVectorTile` continuation, so a tile
+   * arriving while the car was moving was one long task — measured at 1.5–2.1 s through the dev
+   * bridge, with input dead and no paint. It was never GC and never the budgeted builders: the
+   * per-tile walks (180 ms), masts and crosswalks simply had no `Budget`. Now every builder that
+   * can be long takes the budget as a bare yield and the whole cell is interruptible, like the
+   * building and strip units it sits beside.
+   */
+  const addStreet = async (m: Manifest, xnodes: typeof crossingNodes, budget: Budget) => {
     const first = !streetRoot
-    const wrap = <T>(name: string, fn: () => T): T => (first ? detail(name, fn) : fn())
-    const powerG = wrap('street: power', () => buildPower(m, groundAtWorld))
-    const furnitureG = wrap('street: furniture', () => buildFurniture(m, groundAtWorld, edgeDistanceWorld))
-    const parkingG = wrap('street: parking', () => buildParking(m, groundAtWorld, edgeDistanceWorld, surfaceSets ?? {}))
-    const barriersG = wrap('street: barriers', () => buildBarriers(m, groundAtWorld))
-    const sidewalksG = wrap('street: sidewalks', () => buildSidewalks(m, groundAtWorld, edgeDistanceWorld, roadInfoWorld))
-    const signalsG = wrap('street: signals', () => buildSignals(m, furnitureG.placed))
-    const stopbarsG = wrap('street: stopbars', () => buildStopBars(m, roadSurfaceAt, edgeDistanceWorld, facts.lanes))
-    const crosswalksG = wrap('street: crosswalks', () => buildCrosswalks(m, roadSurfaceAt, edgeDistanceWorld, sidewalkCover(m, 1.0), xnodes, nearestBranchDir))
-    const arrowsG = wrap('street: arrows', () => buildLaneArrows(m, roadSurfaceAt, facts.lanes))
+    const yieldFn = () => budget.tick()
+    const wrap = async <T>(name: string, fn: () => T | Promise<T>): Promise<T> => {
+      if (!first) return fn()
+      const t0 = performance.now()
+      const r = await fn()
+      bootDetail.push({ phase: name, ms: Math.round(performance.now() - t0) })
+      return r
+    }
+    const powerG = await wrap('street: power', () => buildPower(m, groundAtWorld))
+    const furnitureG = await wrap('street: furniture', () => buildFurniture(m, groundAtWorld, edgeDistanceWorld, yieldFn))
+    const parkingG = await wrap('street: parking', () => buildParking(m, groundAtWorld, edgeDistanceWorld, surfaceSets ?? {}))
+    const barriersG = await wrap('street: barriers', () => buildBarriers(m, groundAtWorld))
+    const sidewalksG = await wrap('street: sidewalks', () => buildSidewalks(m, groundAtWorld, edgeDistanceWorld, roadInfoWorld, yieldFn))
+    const signalsG = await wrap('street: signals', () => buildSignals(m, furnitureG.placed))
+    const stopbarsG = await wrap('street: stopbars', () => buildStopBars(m, roadSurfaceAt, edgeDistanceWorld, facts.lanes))
+    const crosswalksG = await wrap('street: crosswalks', () => buildCrosswalks(m, roadSurfaceAt, edgeDistanceWorld, sidewalkCover(m, 1.0), xnodes, nearestBranchDir, yieldFn))
+    const arrowsG = await wrap('street: arrows', () => buildLaneArrows(m, roadSurfaceAt, facts.lanes))
     stopbarsG.group.add(crosswalksG.group)
     stopbarsG.group.add(arrowsG.group)
-    const bladesG = wrap('street: blades', () => buildBlades(m, groundAtWorld, edgeDistanceWorld))
+    const bladesG = await wrap('street: blades', () => buildBlades(m, groundAtWorld, edgeDistanceWorld))
     signalTicks.push(signalsG.tick)
     if (!streetRoot) {
       streetRoot = {
@@ -3867,11 +3895,11 @@ if (uLodOn > 0.5) {
     }
   }
   const builtStreet = new Set<string>()
-  const buildStreetCell = (cx: number, cy: number, tiled: Record<string, unknown> | null) => {
+  const buildStreetCell = async (cx: number, cy: number, tiled: Record<string, unknown> | null, budget: Budget) => {
     const k = `${cx},${cy}`
     if (builtStreet.has(k)) return
     builtStreet.add(k)
-    addStreet(cellManifest(k, tiled), crossingsByCell.get(k) ?? [])
+    await addStreet(cellManifest(k, tiled), crossingsByCell.get(k) ?? [], budget)
   }
   if (tiledFurniture) {
     const size = tiledFurniture.size_m || CELL
@@ -3883,26 +3911,27 @@ if (uLodOn > 0.5) {
     const home = local && focus
       ? { x0: Math.floor((focus.x - HOME_M) / size), x1: Math.floor((focus.x + HOME_M) / size), y0: Math.floor((-focus.z - HOME_M) / size), y1: Math.floor((-focus.z + HOME_M) / size) }
       : { x0: tiledCells[0].x, x1: tiledCells[0].x, y0: tiledCells[0].y, y1: tiledCells[0].y }
+    const homeStreetBudget = new Budget(T.STREAM_BUDGET_MS)
     for (let cx = home.x0; cx <= home.x1; cx++) for (let cy = home.y0; cy <= home.y1; cy++) {
       const files = await loadVectorTile(manifest.slug, dir, cx, cy)
       hydrateCell(`${cx},${cy}`, files)
-      buildStreetCell(cx, cy, files)
+      await buildStreetCell(cx, cy, files, homeStreetBudget)
     }
     for (const c of tiledCells) {
       const k = `${c.x},${c.y}`
       if (builtStreet.has(k)) continue
-      gradeUnits.push({ key: `street:${k}`, x: c.x * size + size / 2, z: -(c.y * size + size / 2), r: size * 0.75, done: false, run: async () => {
+      gradeUnits.push({ key: `street:${k}`, x: c.x * size + size / 2, z: -(c.y * size + size / 2), r: size * 0.75, done: false, run: async (budget) => {
         const files = await loadVectorTile(manifest.slug, dir, c.x, c.y)
         hydrateCell(k, files)
-        buildStreetCell(c.x, c.y, files)
+        await buildStreetCell(c.x, c.y, files, budget)
       } })
     }
   } else {
-    addStreet(local ? streetSlice(true) : manifest, local ? crossingNodes.filter((n) => inDisc(n.x, n.y)) : crossingNodes)
+    await addStreet(local ? streetSlice(true) : manifest, local ? crossingNodes.filter((n) => inDisc(n.x, n.y)) : crossingNodes, new Budget(T.STREAM_BUDGET_MS))
     if (local && focus) {
       for (const [k] of buckets) {
         const [cx, cy] = k.split(',').map(Number)
-        gradeUnits.push({ key: `street:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.75, done: false, run: () => { buildStreetCell(cx, cy, null) } })
+        gradeUnits.push({ key: `street:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.75, done: false, run: async (budget) => { await buildStreetCell(cx, cy, null, budget) } })
       }
     }
   }

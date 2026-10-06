@@ -613,14 +613,16 @@ export interface CrosswalksResult {
  * from, and at every OSM `highway=crossing` node that is not `unmarked`. MUTCD ladder: 0.4 m bars
  * on 0.6 m gaps, 2.4 m deep, the near edge 1.2 m past the stop line toward the junction.
  */
-export function buildCrosswalks(
+export async function buildCrosswalks(
   manifest: Manifest,
   roadAt: (x: number, z: number) => number | null,
   edgeDistance: (x: number, z: number) => number,
   onSidewalk: (x: number, z: number) => boolean,
   crossingNodes: { x: number; y: number; marked: boolean }[],
   nearestDir?: (x: number, y: number) => THREE.Vector3 | null,
-): CrosswalksResult {
+  /** the caller's frame budget, as a bare yield; one tile's signals and nodes can be a long task */
+  yieldFn?: () => Promise<void>,
+): Promise<CrosswalksResult> {
   const group = new THREE.Group()
   group.name = 'crosswalks'
   const counts = { atSignals: 0, atNodes: 0, skippedNoWalk: 0, skippedNoRoad: 0 }
@@ -667,6 +669,7 @@ export function buildCrosswalks(
   const list = ((manifest.intersections?.list ?? []) as unknown as Junction[])
   for (const X of list) {
     if (X.control !== 'signals') continue
+    await yieldFn?.()
     for (const a of X.approaches) {
       const { travel } = frameOf(a.bearing_deg)
       const stop = toWorld(a.stop_x, a.stop_y)
@@ -687,6 +690,7 @@ export function buildCrosswalks(
   const branches = ((manifest as unknown as { branches?: { coords: number[][] }[] }).branches ?? [])
   for (const n of crossingNodes) {
     if (!n.marked) continue
+    await yieldFn?.()
     const w = toWorld(n.x, n.y)
     if (placed.some((p) => p.distanceTo(w) < 10)) continue
     let dir: THREE.Vector3 | null = null

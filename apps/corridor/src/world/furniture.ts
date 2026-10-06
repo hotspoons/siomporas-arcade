@@ -374,11 +374,17 @@ function signTexture(kind: 'stop' | 'give_way'): THREE.CanvasTexture {
  * to a limit. Where a site has no pavement data the step still happens and simply lands at the
  * nominal offset.
  */
-export function buildFurniture(
+export async function buildFurniture(
   manifest: Manifest,
   groundAt: (x: number, z: number) => number | null,
   edgeDistance: (x: number, z: number) => number,
-): FurnitureResult {
+  /**
+   * The caller's frame budget, as a bare yield. One cell's furniture is a few hundred masts,
+   * signs and kerbs and the per-item walks (`toKerb`) are the expensive part, so the loop yields
+   * between items and a kilometre arriving at speed is a handful of frames rather than a lock-up.
+   */
+  yieldFn?: () => Promise<void>,
+): Promise<FurnitureResult> {
   const group = new THREE.Group()
   group.name = 'furniture'
   const counts = { masts: 0, signs: 0, movedOffPavement: 0, stillOnPavement: 0, onTheLeft: 0, signsOnTheLeft: 0, noRoadNearby: 0, armNoRoad: 0 }
@@ -471,6 +477,7 @@ export function buildFurniture(
   const nearARoad = (p: THREE.Vector3) => edgeDistance(p.x, p.z) <= T.FURNITURE_MAX_FROM_ROAD
 
   for (const m of data.masts ?? []) {
+    await yieldFn?.()
     const lanes = Math.max(1, Math.min(6, Math.round(m.lanes || 2)))
     const arm = Math.max(2.5, (m.arm_m || 4.7) * T.FURNITURE_SIGNAL_ARM_SCALE)
     // the heads face `yaw_deg`; traffic travels the other way; right of travel is where the pole
@@ -559,6 +566,7 @@ export function buildFurniture(
   // --- stop and give-way signs -----------------------------------------------------------------
   const bySign = new Map<'stop' | 'give_way', { pos: THREE.Vector3; yaw: number; src: unknown }[]>()
   for (const s of data.signs ?? []) {
+    await yieldFn?.()
     const kind = s.kind === 'stop' ? 'stop' : 'give_way'
     const b = (s.yaw_deg * Math.PI) / 180
     const headDir = new THREE.Vector3(Math.sin(b), 0, -Math.cos(b))
@@ -953,7 +961,7 @@ export interface SidewalkResult {
   counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number }
 }
 
-export function buildSidewalks(
+export async function buildSidewalks(
   manifest: Manifest,
   groundAt: (x: number, z: number) => number | null,
   edgeDistance: (x: number, z: number) => number,
@@ -963,7 +971,9 @@ export function buildSidewalks(
    * shoulder of its own road from a walk running out across somebody else's.
    */
   roadInfo: (x: number, z: number) => { d: number; who: number } = (x, z) => ({ d: edgeDistance(x, z), who: -1 }),
-): SidewalkResult {
+  /** the caller's frame budget, as a bare yield; one tile of walks is ~180 ms, so it yields per run */
+  yieldFn?: () => Promise<void>,
+): Promise<SidewalkResult> {
   const group = new THREE.Group()
   group.name = 'sidewalks'
   const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0, overRoad: 0 }
@@ -991,6 +1001,7 @@ export function buildSidewalks(
   }
 
   for (const r of runs) {
+    await yieldFn?.()
     /*
      * DENSIFY FIRST.
      *

@@ -2258,8 +2258,9 @@ if (uLodOn > 0.5) {
             if (lat > w) continue          // they must be on our footprint, not merely nearby
             if (p.y == null) continue
             if (p.y < cy - T.OVERPASS_CLEAR_M) { span = 1; continue }
-            // at nearly our height and within our half-width: a duplicate alignment, ours to cede
-            if (p.half > half + 0.5 && Math.abs(p.y - cy) <= 2.5 && lat <= half + 0.5) return 2
+            // at nearly our height and within our half-width: a duplicate alignment, ours to cede,
+            // but only if it runs WITH us — an at-grade cross street is not a duplicate
+            if (p.half > half + 0.5 && Math.abs(p.y - cy) <= 2.5 && lat <= half + 0.5 && p.dx * hx + p.dz * hz >= 0.7) return 2
           }
         }
         return span as 0 | 1
@@ -2333,7 +2334,7 @@ if (uLodOn > 0.5) {
       let touched = false
       if (skip) for (let s = 0; s <= branchAts[i].len && !touched; s += 6) touched = skip(i + 1, s)
       if (!touched) { r.base.visible = true; return }
-      const rm = branchAts[i].road((s) => skip!(i + 1, s))
+      const rm = branchAts[i].road((s) => duplicatesWider(i, s) || skip!(i + 1, s))
       if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
       road.add(rm)
       roadParts.push(rm)
@@ -2341,11 +2342,40 @@ if (uLodOn > 0.5) {
       r.base.visible = false
     }
     holeBranches = () => { for (let i = 0; i < branchAts.length; i++) holeBranch(i) }
+    /**
+     * Is this branch station merely a second ribbon over a wider carriageway?
+     *
+     * An OSM interchange's ramp shares the main road's centreline — its shape points sit on it — a
+     * metre higher. Suppressing the ramp's BRIDGE concrete (see `deckStatus`) still left its ASPHALT
+     * drawn a metre above the main road: Rich's "random chunk of road" (2026-10-06). Where a wider
+     * carriageway runs WITH us, at our height and on our line, the wider road's surface already
+     * stands there, so draw none of our own. A cross street at grade fails the parallel test.
+     */
+    const duplicatesWider = (i: number, s: number): boolean => {
+      const r = branchAts[i].at(s)
+      const q = r.pos
+      const h = Math.hypot(r.dir.x, r.dir.z) || 1
+      const hx = r.dir.x / h, hz = r.dir.z / h
+      const half = branchAts[i].half
+      const c0 = Math.floor(q.x / stCell), c1 = Math.floor(q.z / stCell)
+      const rr = Math.ceil((half + 3) / stCell)
+      for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) {
+        for (const p of stGrid.get(`${c0 + a},${c1 + b}`) ?? []) {
+          if (p.who === branchWho0 + i) continue
+          if (!(p.half > half + 0.5)) continue
+          if (p.y == null || Math.abs(p.y - q.y) > 2.5) continue
+          if (p.dx * hx + p.dz * hz < 0.7) continue
+          if (Math.abs((p.x - q.x) * hz - (p.z - q.z) * hx) > half + 0.5) continue
+          return true
+        }
+      }
+      return false
+    }
     const buildBranchRoad = async (i: number, budget: Budget) => {
       if (roadBuilt.has(i)) return
       roadBuilt.add(i)
       const b = branchAts[i]
-      const rm = await roadMeshPaced(stations(b.at, b.len, 6), () => b.lanes, () => 'asphalt_aged', roadSets, 0.02, () => b.twoWay, paintOff, () => isKerbed(b.highway), null, budget)
+      const rm = await roadMeshPaced(stations(b.at, b.len, 6), () => b.lanes, () => 'asphalt_aged', roadSets, 0.02, () => b.twoWay, paintOff, () => isKerbed(b.highway), (s) => duplicatesWider(i, s), budget)
       if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
       road.add(rm)
       roadParts.push(rm)

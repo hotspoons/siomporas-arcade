@@ -187,10 +187,12 @@ and choose the path's surface from `trailblazed` (a dirt path, a paved greenway)
 asphalt.
 
 **Data.** `osm.py` already pulls `way[railway]` and lists `track`, `railway` among the classes
-(line 313); crossings already carry `railway` in their tags. What is missing is (a) the ways
-themselves in the streamed branch set with a `surface`/`trailblazed` tell, and (b) **the
-`tunnel`/`layer` tags, which `export.py` strips at ~line 1515** — so a rail in a tunnel is baked as
-a rail on the surface today.
+(line 313); crossings already carry `railway` in their tags. **The `tunnel`/`layer` strip is fixed:**
+`export.py` now carries `bridge`/`tunnel`/`layer` (and `spine_bridge`) on the crossing record, and
+`site.ts Crossing` declares them. What is still missing is the ways themselves: `network.py:196`
+drops `footway`/`path`/`cycleway`/`pedestrian`/`steps`/`bridleway`/`track` from the branch stream,
+and rail is not a road at all, so neither reaches the viewer — and neither carries `surface` or
+`trailblazed`. A rail in a tunnel is still baked as a rail on the surface.
 
 **Approach.**
 - **Bake:** stop stripping `tunnel`/`layer` on the way record; add `surface` and a `trailblazed`
@@ -211,12 +213,16 @@ a rail on the surface today.
 
 ## Order, and what needs a rebake
 
-1. **Kerbs (3)** and **walks (4)** — pure viewer geometry, unit-testable, fix two things Rich can
-   see today. Do these first.
-2. **Signs (1, 2)** — viewer, plus a small optional `school_zones` bake array.
-3. **Entrances (5)** — small bake classifier change + viewer guard.
-4. **Trails/rail (6)** — the largest: a bake change (stop stripping tags, add `kind`/`surface`) and a
-   new mesh builder. Needs a rebake of whatever world is being tested.
+1. ~~**Kerbs (3)** and **walks (4)**~~ — the pure cores are done and tested (`kerbCorner`,
+   `clearSpans`); what remains is the run-join pass that calls `kerbCorner` at a shared node, and a
+   look at a screen.
+2. **Signs (1, 2)** — viewer, plus a small optional `school_zones` bake array. Not started.
+3. **Entrances (5)** — small bake classifier change + viewer guard. Not started.
+4. **Trails/rail (6)** — the largest: `network.py` must emit the ways (with `surface`/`trailblazed`)
+   and `trail.ts trailPaving` is the decision, already tested; `trailMesh` and the builder are not
+   written. Needs a rebake of whatever world is being tested.
+5. **Tunnels (bridge side, see `PLAN-WORLD-SCALE.md`)** — the crossing tags now reach the viewer;
+   the portal/interior mesh is not written.
 
 Nothing here raises `MAX_M` or touches the sharded bake; every item is per-tile or resident-small.
 

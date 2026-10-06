@@ -2231,24 +2231,38 @@ if (uLodOn > 0.5) {
        * whether a carriageway of another `who` passes UNDER this footprint.
        */
       const stCellM = 20
-      const spansBelow = (cx: number, cy: number, cz: number, w: number, hx: number, hz: number, halfLen: number) => {
+      /**
+       * Why this segment is, or is not, part of a bridge.
+       *
+       * 0 — nothing under it and nothing on top: leave it alone.
+       * 1 — a carriageway of another `who` passes UNDER the footprint: a real deck, build it.
+       * 2 — a wider carriageway lies ON the footprint at nearly our height. This is the OSM
+       *     interchange's shape-point artefact: a ramp (`motorway_link`, one lane) whose centreline
+       *     is the same line as the main road it leaves, 1 m higher. Building its deck draws a
+       *     second slab and guard rail floating directly over the first — Rich's "second road with
+       *     its own guard rails… one is floating above the other roadway" (2026-10-06). The wider
+       *     road's deck already stands for the structure; keep that one and stand down.
+       */
+      const deckStatus = (cx: number, cy: number, cz: number, w: number, half: number, hx: number, hz: number, halfLen: number): 0 | 1 | 2 => {
         const c0 = Math.floor(cx / stCellM), c1 = Math.floor(cz / stCellM)
         const r = Math.ceil((w + halfLen + 8) / stCellM)
+        let span = 0
         for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) {
           for (const p of stGrid.get(`${c0 + a},${c1 + b}`) ?? []) {
             if (p.who === self) continue
             const ux = p.x - cx, uz = p.z - cz
-            // the other carriageway must run BENEATH the deck, not alongside it: a ramp drawing a
-            // parallel line 15 m over would otherwise make the whole approach read as a bridge
+            // lateral distance from this segment's centreline, and distance along it
             const along = ux * hx + uz * hz
             if (Math.abs(along) > halfLen + 4) continue
             const lat = Math.abs(ux * hz - uz * hx)
-            if (lat > w) continue
+            if (lat > w) continue          // they must be on our footprint, not merely nearby
             if (p.y == null) continue
-            if (p.y < cy - T.OVERPASS_CLEAR_M) return true
+            if (p.y < cy - T.OVERPASS_CLEAR_M) { span = 1; continue }
+            // at nearly our height and within our half-width: a duplicate alignment, ours to cede
+            if (p.half > half + 0.5 && Math.abs(p.y - cy) <= 2.5 && lat <= half + 0.5) return 2
           }
         }
-        return false
+        return span as 0 | 1
       }
       // Walk the deck segment by segment, then decide which segments are truly over open air. A
       // segment-by-segment decision alone flickers: a ramp wanders in and out of the deck's
@@ -2267,7 +2281,8 @@ if (uLodOn > 0.5) {
         const dx = B.x - A.x, dz = B.z - A.z
         const seg = Math.hypot(dx, dz)
         if (seg < 0.5 || seg > 12) { segs.push(null as unknown as Seg); continue }
-        const w = (A.half + B.half) / 2 + 0.6
+        const half = (A.half + B.half) / 2
+        const w = half + 0.6
         const dir = new THREE.Vector3(dx, B.y - A.y, dz)
         const l = dir.length() + 0.05
         dir.normalize()
@@ -2276,7 +2291,7 @@ if (uLodOn > 0.5) {
         segs.push({
           dx, dz, seg, l, w, cx, cy, cz,
           sx: side.x, sz: side.z, ry: bridgeYaw(dir),
-          ok: spansBelow(cx, cy, cz, w, dx / seg, dz / seg, seg / 2),
+          ok: deckStatus(cx, cy, cz, w, half, dx / seg, dz / seg, seg / 2) === 1,
         })
       }
       // A slab earns its keep only as part of a run: drop any segment whose neighbours do not span.

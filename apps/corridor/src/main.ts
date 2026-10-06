@@ -1406,8 +1406,13 @@ async function loadSite(slug: string) {
   const urlQ = new URLSearchParams(location.search)
   const st = readStanceParam()
   const resume = st && st.site === slug ? null : readResume(slug)
-  if (st && st.site === slug) applyStance(st)
-  else if (resume) applyStance(resume)
+  if (st && st.site === slug) {
+    applyStance(st)
+    // park the applied frame as this site's resume point, then take the link out of the address bar
+    // so a reload resumes it instead of re-reading it (see `clearStanceParam`)
+    saveResume()
+    clearStanceParam()
+  } else if (resume) applyStance(resume)
   else if (startOf(worldPoints, null)) goToStart(null)
   else toPhoto()
   // the world's own look (tuning.json `look`, written by the world editor): the URL's ?style and
@@ -3274,7 +3279,14 @@ function applyStance(st: Stance) {
   if (st.mode === 'drive' && st.car) {
     setDrive(true)
     if (drive.car) {
-      drive.car.pos.set(st.car.p[0], st.car.p[1], st.car.p[2])
+      /*
+       * `place`, not `pos.set`. A RapierCar's `pos` is read back from the rigid body every tick
+       * (`sync`), so writing it moved nothing and a shared drive link always dropped you at the
+       * world's spawn — Rich, 2026-10-06. `place` is the DrivableCar seam that moves the body on
+       * both car models. The stance's own `p[1]` is the ride height `place` recomputes from the
+       * ground, so only x/z/heading are taken from the link.
+       */
+      drive.car.place(st.car.p[0], st.car.p[2], st.car.yaw)
       drive.car.yaw = st.car.yaw
       drive.car.speed = st.car.speed
       drive.yaw = st.car.look[0]
@@ -3298,6 +3310,21 @@ function readStanceParam(): Stance | null {
   } catch {
     return null
   }
+}
+/**
+ * Strip `?stance=` once it has been applied.
+ *
+ * The link has done its job the moment the car is placed. Leaving it in the address bar means every
+ * reload — and every HMR reload while Rich is in the car — re-applies the shared frame and snaps him
+ * back to the link's position. The world hash and the `season`/`style`/`relief` look params stay:
+ * they describe the site, not the frame, and `saveResume` has already parked the applied frame as
+ * the per-site resume point, so a plain reload lands where the link did.
+ */
+function clearStanceParam(): void {
+  const u = new URL(location.href)
+  if (!u.searchParams.has('stance')) return
+  u.searchParams.delete('stance')
+  history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`)
 }
 async function copyStance() {
   const st = captureStance()

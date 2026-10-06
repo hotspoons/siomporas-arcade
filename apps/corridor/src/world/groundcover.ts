@@ -168,10 +168,23 @@ function ringArea(ring: [number, number][]): number {
  * it can tell a beach from a farm, and nothing else.
  */
 export function grassTypeFor(manifest: Manifest): GrassType {
-  const by = new Map<string, number>()
-  for (const l of manifest.landuse ?? []) by.set(l.class, (by.get(l.class) ?? 0) + ringArea(l.ring as [number, number][]))
-  const area = (k: string) => by.get(k) ?? 0
-  const total = [...by.values()].reduce((t, v) => t + v, 0)
+  // A tiled world ships `landuse` per cell but keeps a class->area summary resident, so the answer
+  // is the same before any cell streams in. A resident (untiled) bake has the rings; fall back to
+  // summing them.
+  let area: (k: string) => number
+  let total: number
+  if (manifest.landuse_area) {
+    const by = manifest.landuse_area
+    area = (k) => by[k] ?? 0
+    total = 0
+    for (const v of Object.values(by)) total += v
+  } else {
+    const by = new Map<string, number>()
+    for (const l of manifest.landuse ?? []) by.set(l.class, (by.get(l.class) ?? 0) + ringArea(l.ring as [number, number][]))
+    area = (k) => by.get(k) ?? 0
+    total = 0
+    for (const v of by.values()) total += v
+  }
 
   // a beach or a dune field beside the road, wherever it is
   if (area('beach') + area('sand') > 0.05 * Math.max(1, total)) return 'coastal'

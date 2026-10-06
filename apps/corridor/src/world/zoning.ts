@@ -28,23 +28,42 @@ export function zoneOfRoad(highway: string | null | undefined): Zone | null {
 }
 
 /** a point-in-polygon classifier over the bake's landuse rings, in site (x, y) */
-export function landuseZone(manifest: Manifest): (x: number, y: number) => Zone | null {
+export interface LanduseIndex {
+  /** stream another cell's (or the whole resident) rings in; the index rebuilds on the next query */
+  add: (list: NonNullable<Manifest['landuse']>) => void
+  /** the zone at site (x, y), or null where no polygon answers */
+  zoneAt: (x: number, y: number) => Zone | null
+  /** how many rings are held (diagnostics) */
+  count: () => number
+}
+
+/**
+ * Build the classifier over a manifest's resident `landuse`, then add streamed cells as they arrive.
+ *
+ * The index is rebuilt lazily — only when a query follows an `add` — so a burst of cells costs one
+ * rebuild, not one per cell, and the "smaller polygons first" rule holds exactly as it did when the
+ * whole array was resident.
+ */
+export function landuseZone(manifest: Manifest): LanduseIndex {
   type Item = { zone: Zone; ring: [number, number][]; bounds: [number, number, number, number] }
   const items: Item[] = []
-  for (const l of manifest.landuse ?? []) {
-    const zone: Zone | null = KEPT.has(l.class) ? 'kept' : RURAL.has(l.class) ? 'rural' : null
-    if (!zone || !l.ring || l.ring.length < 3) continue
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
-    for (const [x, y] of l.ring) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
-    items.push({ zone, ring: l.ring, bounds: [x0, y0, x1, y1] })
+  let index: BoundsIndex<Item> | null = null
+  const add = (list: NonNullable<Manifest['landuse']>) => {
+    let grew = false
+    for (const l of list ?? []) {
+      const zone: Zone | null = KEPT.has(l.class) ? 'kept' : RURAL.has(l.class) ? 'rural' : null
+      if (!zone || !l.ring || l.ring.length < 3) continue
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+      for (const [x, y] of l.ring) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+      items.push({ zone, ring: l.ring, bounds: [x0, y0, x1, y1] })
+      grew = true
+    }
+    if (grew) index = null
   }
-  if (!items.length) return () => null
-  // smaller polygons first: a lawn inside a residential area is the more specific answer
-  items.sort((a, b) => (a.bounds[2] - a.bounds[0]) * (a.bounds[3] - a.bounds[1]) - (b.bounds[2] - b.bounds[0]) * (b.bounds[3] - b.bounds[1]))
+  add(manifest.landuse ?? [])
   // a point OUTSIDE every polygon but within ZONE_NEAR_M of a built-up one is still in town: OSM's
   // residential polygons stop at the kerb, and the parkway threading a subdivision is not rural
   const NEAR = 40
-  const index = new BoundsIndex(items, 250, NEAR)
   const nearRing = (ring: [number, number][], x: number, y: number, r: number) => {
     const r2 = r * r
     for (let i = 1; i < ring.length; i++) {
@@ -64,5 +83,13 @@ export function landuseZone(manifest: Manifest): (x: number, y: number) => Zone 
     }
     return hit
   }
-  return (x, y) => index.firstAt(x, y, (it) => (inside(it.ring, x, y) ? it.zone : null)) ?? index.firstAt(x, y, (it) => (it.zone === 'kept' && nearRing(it.ring, x, y, NEAR) ? 'kept' : null))
+  const at = (x: number, y: number): Zone | null => {
+    if (!index) {
+      // smaller polygons first: a lawn inside a residential area is the more specific answer
+      const sorted = [...items].sort((a, b) => (a.bounds[2] - a.bounds[0]) * (a.bounds[3] - a.bounds[1]) - (b.bounds[2] - b.bounds[0]) * (b.bounds[3] - b.bounds[1]))
+      index = new BoundsIndex(sorted, 250, NEAR)
+    }
+    return index.firstAt(x, y, (it) => (inside(it.ring, x, y) ? it.zone : null)) ?? index.firstAt(x, y, (it) => (it.zone === 'kept' && nearRing(it.ring, x, y, NEAR) ? 'kept' : null))
+  }
+  return { add, zoneAt: at, count: () => items.length }
 }

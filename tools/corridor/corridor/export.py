@@ -1017,7 +1017,7 @@ TILED_NESTED = {"power": ("lines", "supports"), "signals": ("masts", "signs", "b
 #: that group per cell; `_load_tiled` reads whatever a tree already has, so old and new trees mix.
 TILED_ACTIVE = ("buildings", "sidewalks", "parking", "barriers", "power", "signals",
                 "driveways", "siblings", "stubs", "intersections", "branches",
-                "cuts", "rock", "sidewalk_zones", "water")
+                "cuts", "rock", "sidewalk_zones", "water", "landuse")
 
 
 def _tile_arrays(out: dict) -> dict:
@@ -1034,10 +1034,43 @@ def _tile_arrays(out: dict) -> dict:
     return arrays
 
 
+def _ring_area(ring) -> float:
+    """Shoelace area of a landuse ring, m² — the same measure `groundcover.ringArea` uses."""
+    a = 0.0
+    n = len(ring)
+    for i in range(n):
+        x0, y0 = ring[i]
+        x1, y1 = ring[(i + 1) % n]
+        a += x0 * y1 - x1 * y0
+    return abs(a) / 2
+
+
+def _class_areas(items) -> dict:
+    """class -> summed m² over the rings, for the small site-wide summary a tiled world keeps resident.
+
+    `groundcover.grassTypeFor` picks the fallback verge grass from the share of beach/sand (coastal),
+    farmland (wheat), and latitude. The rings stream per cell, so the shares are computed once here
+    and carried as `landuse_area` — a handful of numbers instead of the whole array.
+    """
+    by: dict = {}
+    for it in items or []:
+        cls = it.get("class")
+        if cls is None:
+            continue
+        a = it.get("area_m2")
+        if a is None:
+            a = _ring_area(it.get("ring") or [])
+        by[cls] = by.get(cls, 0.0) + a
+    return by
+
+
 def _empty_tiled(out: dict) -> None:
     """Drop the tiled arrays from the manifest, keeping any non-tiled metadata beside them."""
     for name in TILED_FLAT:
         if name in TILED_ACTIVE:
+            if name == "landuse" and out.get(name) and "landuse_area" not in out:
+                # keep the class->area summary before the rings leave: `grassTypeFor` answers from it
+                out["landuse_area"] = _class_areas(out[name])
             out[name] = []
     for name, leaves in TILED_NESTED.items():
         if name not in TILED_ACTIVE:

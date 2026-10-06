@@ -84,9 +84,9 @@ class VectorTilesTest(unittest.TestCase):
         export._empty_tiled(out)
         self.assertEqual(out["intersections"]["paint"], [{"x": 10.0, "y": 20.0, "a": [[5.0, 6.0], [15.0, 16.0]]}])
 
-    def test_active_set_streams_cuts_rock_sidewalk_zones_and_water(self):
-        # the dressing pass and the water builder learn to rebuild these per cell, so they leave the
-        # manifest for the tiles
+    def test_active_set_streams_cuts_rock_sidewalk_zones_water_and_landuse(self):
+        # the dressing pass, the water builder and the lawn/crop reader learn to rebuild these per
+        # cell, so they leave the manifest for the tiles
         out = {
             "buildings": [{"ring": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]}],
             "cuts": {"faces": [{"stations": [{"toe": [2.0, 2.0, 0.0]}]}], "summary": {"step": 1}},
@@ -95,6 +95,7 @@ class VectorTilesTest(unittest.TestCase):
             "water": {"lines": [{"pts": [[7.0, 7.0, 0.0], [8.0, 7.0, 0.0]]}],
                       "areas": [{"ring": [[9.0, 9.0], [10.0, 9.0], [10.0, 10.0]]}],
                       "summary": {"count": 1}},
+            "landuse": [{"class": "farmland", "ring": [[11.0, 11.0], [12.0, 11.0], [12.0, 12.0]], "area_m2": 50.0}],
         }
         arrays = export._tile_arrays(out)
         self.assertEqual(len(arrays["cuts"]["faces"]), 1)
@@ -102,11 +103,22 @@ class VectorTilesTest(unittest.TestCase):
         self.assertEqual(len(arrays["sidewalk_zones"]), 1)
         self.assertEqual(len(arrays["water"]["lines"]), 1)
         self.assertEqual(len(arrays["water"]["areas"]), 1)
+        self.assertEqual(len(arrays["landuse"]), 1)
         export._empty_tiled(out)
         self.assertIsNone(out["cuts"])
         self.assertIsNone(out["rock"])
         self.assertIsNone(out["water"])
         self.assertEqual(out["sidewalk_zones"], [])
+        self.assertEqual(out["landuse"], [])
+        # the rings stream, but the class->area summary stays so grassTypeFor can still answer
+        self.assertEqual(out["landuse_area"], {"farmland": 50.0})
+
+    def test_empty_tiled_keeps_the_landuse_area_summary(self):
+        # a second _empty_tiled (a re-tile) must not overwrite the summary it already has
+        out = {"landuse": [{"class": "farmland", "area_m2": 50.0}], "landuse_area": {"farmland": 50.0}}
+        export._empty_tiled(out)
+        self.assertEqual(out["landuse"], [])
+        self.assertEqual(out["landuse_area"], {"farmland": 50.0})
 
     def test_rerun_replaces_rather_than_merges(self):
         with tempfile.TemporaryDirectory() as d:

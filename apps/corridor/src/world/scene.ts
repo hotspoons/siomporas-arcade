@@ -1293,6 +1293,12 @@ if (uLodOn > 0.5) {
   // built now so the junction grade is settled before any asphalt exists. The rest wait for the
   // car. STREAM_LOCAL = 0, and the editor preview, take every branch here.
   const homePt = local && focus ? new THREE.Vector3(focus.x, spineAt(homeS).pos.y, focus.z) : spineAt(homeS).pos
+  // Land use streams in with the tiles. The rings feed a growing point-in-polygon index (zoning.ts)
+  // for the grass and an incremental crop-field builder; the index is seeded from whatever is
+  // resident (nothing on a tiled world). `addLanduseCell` is assigned by the crop block below and
+  // consumed by `hydrateCell`, which is why both live in the function scope rather than the block.
+  const luIndex = landuseZone(manifest)
+  let addLanduseCell: ((list: NonNullable<Manifest['landuse']>, key: string) => void) | null = null
   const branchTouches = (coords: [number, number, number?][], px: number, pz: number, rad: number) => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
     for (const p of coords) {
@@ -2431,9 +2437,8 @@ if (uLodOn > 0.5) {
     canopyAtRef = canopyAt
     const grassAdj = { ...NEUTRAL_ADJ }
     // kept or rural (zoning.ts): the landuse polygon the point is in, else the nearest road's class
-    const luZone = landuseZone(manifest)
     const zoneAtWorld = (x: number, z: number) => {
-      const lu = luZone(x, -z)
+      const lu = luIndex.zoneAt(x, -z)
       if (lu) return lu
       // carriageways only: the nearest station beside a house is its driveway, which has no class
       const e = edgeDistance(x, z, -1, true)
@@ -2488,8 +2493,14 @@ if (uLodOn > 0.5) {
       for (const [px, py] of ring) { x += px; y += py }
       return [x / ring.length, y / ring.length]
     }
-    if (T.CROP_AUTO_FARMLAND > 0) {
-      for (const lu of manifest.landuse ?? []) {
+    /**
+     * The crop fields OSM farmland implies. Used both for the resident rings at build and, per cell,
+     * for the farmland that streams in on a tiled world (`addLanduseCell`).
+     */
+    const fieldsFromLanduse = (list: NonNullable<Manifest['landuse']>): CropField[] => {
+      const out: CropField[] = []
+      if (!(T.CROP_AUTO_FARMLAND > 0)) return out
+      for (const lu of list ?? []) {
         if (lu.class !== 'farmland') continue
         const ring = lu.ring as [number, number][]
         if (ring.length < 3) continue
@@ -2497,8 +2508,12 @@ if (uLodOn > 0.5) {
         // nothing in the bake says which crop; corn is the mid-Atlantic default and the editor
         // overrides it per polygon. Alternating by ring keeps a run of fields from being uniform.
         const crop: CropType = hash2(cx, cy) < 0.5 ? 'corn' : 'soy'
-        fields.push({ polygon: ring, crop, headingDeg: headingNear(cx, cy), spacing: 0 })
+        out.push({ polygon: ring, crop, headingDeg: headingNear(cx, cy), spacing: 0 })
       }
+      return out
+    }
+    if (T.CROP_AUTO_FARMLAND > 0) {
+      for (const f of fieldsFromLanduse(manifest.landuse ?? [])) fields.push(f)
     }
     for (const ar of adjustments.list) {
       const a = ar.adjust ?? {}
@@ -2512,7 +2527,7 @@ if (uLodOn > 0.5) {
         spacing: a.row_spacing_m ?? 0,
       })
     }
-    if (fields.length) {
+    {
       const tCrops = performance.now()
       // Crops were the single largest build cost (crofton: 43 farmland rings, 35 k rows, 6.5 s) and
       // the whole county was generated in one call. Build the fields around the visit and queue the
@@ -2536,7 +2551,8 @@ if (uLodOn > 0.5) {
         }
       }
       // One group with FLAT children: tickCrops, setCropLight and the 650 m cull all walk
-      // `group.children` and would miss a nested group.
+      // `group.children` and would miss a nested group. Made even with no resident farmland: a
+      // tiled world streams its fields in per cell, below.
       crops = buildCrops([], currentSeason, groundAtWorld, edgeDistanceWorld)
       group.add(crops.group)
       const addCropGroup = (fs: CropField[]) => {
@@ -2549,6 +2565,14 @@ if (uLodOn > 0.5) {
       for (const [k, fs] of far) {
         const [cx, cy] = k.split(',').map(Number)
         gradeUnits.push({ key: `crops:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.75, done: false, run: () => addCropGroup(fs) })
+      }
+      // Farmland that arrives with a vector tile becomes its own crop unit, so a streamed cell's
+      // rows are built on the pump's budget rather than inside the unit that fetched the tile.
+      addLanduseCell = (list, key) => {
+        const fs = fieldsFromLanduse(list)
+        if (!fs.length) return
+        const [cx, cy] = key.split(',').map(Number)
+        gradeUnits.push({ key: `crops:${key}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.75, done: false, run: () => addCropGroup(fs) })
       }
       bootDetail.push({ phase: 'growing: crops', ms: Math.round(performance.now() - tCrops) })
     }
@@ -3164,6 +3188,14 @@ if (uLodOn > 0.5) {
     // channels too; `_load_tiled` wrote `water` as `{lines, areas}` and `relieveCell` lifted them
     const w = files.water as Manifest['water'] | undefined
     if (w) { if (waterStream) waterStream.add(w); else pendingWater.push(w) }
+    // land use: feed the zoning index now and queue this cell's farmland for the crop builder. Keep
+    // `manifest.landuse` a running view of what is loaded, as with buildings, for the editor.
+    const lu = files.landuse as NonNullable<Manifest['landuse']> | undefined
+    if (lu?.length) {
+      luIndex.add(lu)
+      ;(manifest.landuse ??= []).push(...lu)
+      addLanduseCell?.(lu, key)
+    }
     for (const s of sibs) { (manifest.siblings ??= []).push(s); roads.addLine(s) }
     for (const d of dws) { (manifest.driveways ??= []).push(d); roads.addLine(d.coords) }
     for (const st of sts) { (manifest.stubs ??= []).push(st); roads.addLine(st.coords) }

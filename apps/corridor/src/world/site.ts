@@ -273,6 +273,9 @@ export interface Manifest {
   lidar: { dataset: string | null; points_in_corridor: number | null; classes: Record<string, number> | null }
   /** OSM land-use polygons in site coordinates; groundcover.ts picks the grass type from them */
   landuse?: { class: string; ring: [number, number][]; area_m2?: number }[]
+  /** A tiled world's land-use rings stream per cell, so the class->area summary `grassTypeFor`
+   *  needs to pick the verge grass is computed once at bake and kept here (tools/corridor/export.py). */
+  landuse_area?: Record<string, number>
   /** OSM footprints with a measured height, in site metres (tools/corridor/corridor/buildings.py) */
   buildings?: {
     ring: [number, number][]

@@ -3139,6 +3139,11 @@ if (uLodOn > 0.5) {
     get faces() { return rocksParts.reduce((s, r) => s + r.faces, 0) },
     get polygons() { return rocksParts.reduce((s, r) => s + r.polygons, 0) },
   }
+  // Water streams the same way (`add` in water.ts). Held here, before `buildWater`, so a cell's
+  // channels can be handed over from `hydrateCell`; the pump that calls it runs after `buildSite`,
+  // so the builder is always assigned by then. An untiled world's water arrives whole in the call
+  // below instead.
+  let waterStream: ReturnType<typeof buildWater> | null = null
   // A tiled world streams its roads with its vector tiles. The index starts as the spine and grows
   // as each tile arrives; the running manifest arrays (`siblings`, `driveways`, `stubs`) grow with
   // it, so the once-only readers (the minimap, the editor) still see what is loaded. `addDriveways`
@@ -3155,6 +3160,8 @@ if (uLodOn > 0.5) {
     const sts = (files.stubs ?? []) as NonNullable<Manifest['stubs']>
     // cut faces and outcrops arrive with the cell; `relieveCell` above already lifted them
     addRocksCell(key, files.cuts as Manifest['cuts'], files.rock as Manifest['rock'])
+    // channels too; `_load_tiled` wrote `water` as `{lines, areas}` and `relieveCell` lifted them
+    if (waterStream && files.water) waterStream.add(files.water as Manifest['water'])
     for (const s of sibs) { (manifest.siblings ??= []).push(s); roads.addLine(s) }
     for (const d of dws) { (manifest.driveways ??= []).push(d); roads.addLine(d.coords) }
     for (const st of sts) { (manifest.stubs ??= []).push(st); roads.addLine(st.coords) }
@@ -3474,6 +3481,7 @@ if (uLodOn > 0.5) {
   }
   group.add(rocks.group)
   const water = buildWater(manifest.water, groundAtWorld, lowestGround)
+  waterStream = water
   /**
    * A style is the season re-applied (trees, grass, strips, terrain, horizon and impostors all
    * read the styled look), plus the four things a season never touched: the photo's

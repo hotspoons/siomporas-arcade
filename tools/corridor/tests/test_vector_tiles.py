@@ -84,21 +84,28 @@ class VectorTilesTest(unittest.TestCase):
         export._empty_tiled(out)
         self.assertEqual(out["intersections"]["paint"], [{"x": 10.0, "y": 20.0, "a": [[5.0, 6.0], [15.0, 16.0]]}])
 
-    def test_active_set_streams_cuts_rock_and_sidewalk_zones(self):
-        # the dressing pass learns to rebuild these per cell, so they leave the manifest for the tiles
+    def test_active_set_streams_cuts_rock_sidewalk_zones_and_water(self):
+        # the dressing pass and the water builder learn to rebuild these per cell, so they leave the
+        # manifest for the tiles
         out = {
             "buildings": [{"ring": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]}],
             "cuts": {"faces": [{"stations": [{"toe": [2.0, 2.0, 0.0]}]}], "summary": {"step": 1}},
             "rock": {"polygons": [{"ring": [[3.0, 3.0], [4.0, 3.0], [4.0, 4.0]]}], "thresholds": {}},
             "sidewalk_zones": [[[5.0, 5.0], [6.0, 5.0]]],
+            "water": {"lines": [{"pts": [[7.0, 7.0, 0.0], [8.0, 7.0, 0.0]]}],
+                      "areas": [{"ring": [[9.0, 9.0], [10.0, 9.0], [10.0, 10.0]]}],
+                      "summary": {"count": 1}},
         }
         arrays = export._tile_arrays(out)
         self.assertEqual(len(arrays["cuts"]["faces"]), 1)
         self.assertEqual(len(arrays["rock"]["polygons"]), 1)
         self.assertEqual(len(arrays["sidewalk_zones"]), 1)
+        self.assertEqual(len(arrays["water"]["lines"]), 1)
+        self.assertEqual(len(arrays["water"]["areas"]), 1)
         export._empty_tiled(out)
         self.assertIsNone(out["cuts"])
         self.assertIsNone(out["rock"])
+        self.assertIsNone(out["water"])
         self.assertEqual(out["sidewalk_zones"], [])
 
     def test_rerun_replaces_rather_than_merges(self):

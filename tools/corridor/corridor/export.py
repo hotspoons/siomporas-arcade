@@ -1017,7 +1017,7 @@ TILED_NESTED = {"power": ("lines", "supports"), "signals": ("masts", "signs", "b
 #: that group per cell; `_load_tiled` reads whatever a tree already has, so old and new trees mix.
 TILED_ACTIVE = ("buildings", "sidewalks", "parking", "barriers", "power", "signals",
                 "driveways", "siblings", "stubs", "intersections", "branches",
-                "cuts", "rock", "sidewalk_zones")
+                "cuts", "rock", "sidewalk_zones", "water")
 
 
 def _tile_arrays(out: dict) -> dict:

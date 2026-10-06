@@ -322,6 +322,10 @@ export interface WaterResult {
   setLook: (name: string | null) => void
   /** the look names present in this build, for a UI to list */
   looks: string[]
+  /** stream one cell's channels in; geometry builds now, the per-look mesh merges on `flush` */
+  add: (water: WaterLayer | null | undefined) => void
+  /** merge any geometry added since the last flush into the per-look meshes */
+  flush: () => void
 }
 
 /**
@@ -448,14 +452,21 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       lastFancy = fancyNow
       for (const wm of waveMats) wm.mat.needsUpdate = true
     }
+    // cells added since the last merge: fold them in once the stream goes quiet for a moment, so a
+    // burst of arriving cells costs one merge, not one per cell
+    if (pending && performance.now() - lastAdd > 200) flush()
   }
   const streamMats: THREE.MeshStandardMaterial[] = []
   const stillMats: THREE.MeshStandardMaterial[] = []
+  // a style can be picked before the water that wears it has streamed in, so the last style is kept
+  // and each material is dressed as it is made (see `flush`)
+  let lastStyle: { stream: THREE.Color; still: THREE.Color; sea: THREE.Color; opacityBias: number } | null = null
   const applyTint = (m: THREE.MeshStandardMaterial) => {
     const wm = m.userData.water as { u: WaterWaveUniforms } | undefined
     if (wm) waterTints(m.color, wm.u.uShoreColor.value, wm.u.uDepthColor.value)
   }
   const setColours = (streamC: THREE.Color, stillC: THREE.Color, seaC: THREE.Color, opacityBias = 0) => {
+    lastStyle = { stream: streamC.clone(), still: stillC.clone(), sea: seaC.clone(), opacityBias }
     for (const wm of waveMats) wm.styleColoured = true
     seaMat.color.copy(seaC)
     seaMat.opacity = Math.min(0.98, T.WATER_OPACITY + 0.08 + opacityBias)
@@ -466,135 +477,211 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     for (const m of stillMats) applyTint(m)
   }
   const setLook = (name: string | null) => { defaultLookOverride = name }
-  const empty: WaterResult = { group, tick: advance, lines: 0, areas: 0, falls: 0, length_m: 0, setColours, setLook, looks: [] }
-  if (!water || (!water.lines?.length && !water.areas?.length)) {
-    registerWaterProbes([], group)
-    registerWaterReflectBodies([])
-    return empty
-  }
 
-  // WHICH BODIES GET A REFLECTION PROBE. The environment map is sky alone, so the trees and bank a
-  // lake should mirror come from a probe taken at the water itself (visuals/waterProbes.ts). Every
-  // inland body is a candidate (up to MAX_WATER_PROBES); `aProbe` is baked per vertex so the merged
-  // shader can find a body's strip. The live WATER_PROBES knob is how many probes may be captured at
-  // once — the nearest to the eye take them, so 1 means "the lake I am at", and 0, the default,
-  // captures none.
-  const probeIndexOf = new Map<string, number>()
-  const probeBodies: WaterProbeBody[] = []
-  {
-    const ranked = (water.areas ?? [])
-      .filter((a) => a.ring.length >= 3)
-      .slice()
-      .sort((a, b) => b.area_m2 - a.area_m2)
-      .slice(0, MAX_WATER_PROBES)
-    for (const a of ranked) {
-      let cx = 0
-      let cy = 0
-      for (const [x, y] of a.ring) {
-        cx += x
-        cy += y
-      }
-      cx /= a.ring.length
-      cy /= a.ring.length
-      probeIndexOf.set(a.id, probeBodies.length)
-      probeBodies.push({ id: a.id, x: cx, y: a.z + T.WATER_DEPTH * 0.5, z: -cy, radius: Math.sqrt(Math.max(1, a.area_m2) / Math.PI) })
-    }
-  }
-  registerWaterProbes(probeBodies, group)
-  // the same bodies feed the planar mirror, which aims its one exact plane at the nearest of them
-  // each frame (visuals/waterReflect.ts). This is what puts the real trees and bank on a pond, the
-  // thing the sky map and the cube probe both approximate.
-  registerWaterReflectBodies(probeBodies.map((b) => ({ x: b.x, y: b.y, z: b.z, radius: b.radius })))
-
+  // ---------------------------------------------------------------------------------------------
+  // Streaming. A tiled world hands its channels in one cell at a time; the viewer calls `add` as
+  // each arrives and lets the near update `flush`. Geometry is built on arrival — cheap — and merged
+  // into ONE mesh per look, so the draw calls stay at one per look however many cells load. The
+  // merge is the only repeated cost and `advance` throttles it to the quiet after a burst.
+  // ---------------------------------------------------------------------------------------------
   const foam = foamMaterial(uniforms)
-  let nLines = 0, nFalls = 0, length = 0
-  const foamGeo: THREE.BufferGeometry[] = []
-
-  // ONE MESH PER (LOOK, MATERIAL), not per waterway. The Crofton region has 416 streams, 129 rapids
-  // and 199 ponds: drawn separately that is ~744 draw calls for about 4,000 triangles, which is the
-  // wrong trade in every direction. Bodies naming the same `look` merge; nothing picks an individual
-  // stream. The per-line records stay on the result for anyone who needs them.
-  interface Bucket { look: WaterLook; lines: THREE.BufferGeometry[]; areas: THREE.BufferGeometry[] }
+  interface Bucket {
+    key: string
+    look: WaterLook
+    own: boolean
+    lineSources: THREE.BufferGeometry[]
+    areaSources: THREE.BufferGeometry[]
+    matLines?: THREE.MeshStandardMaterial
+    matAreas?: THREE.MeshStandardMaterial
+    lineMesh?: THREE.Mesh
+    areaMesh?: THREE.Mesh
+    dirty: boolean
+  }
+  // ONE MERGED MESH PER (LOOK, LINES|AREAS), not per waterway or per cell. Crofton has 416 streams
+  // and 199 ponds, dc-metro five times that: drawn separately that is thousands of draw calls for a
+  // few thousand triangles. Bodies naming the same `look` merge; nothing picks an individual stream.
   const buckets = new Map<string, Bucket>()
   const bucketFor = (name: string | undefined): Bucket => {
     const key = name && WATER_LOOK_NAMES.includes(name) ? name : defaultLookName
     let b = buckets.get(key)
-    if (!b) { b = { look: lookOf(key), lines: [], areas: [] }; buckets.set(key, b) }
+    if (!b) {
+      b = { key, look: lookOf(key), own: key !== defaultLookName, lineSources: [], areaSources: [], dirty: false }
+      buckets.set(key, b)
+    }
     return b
   }
+  const foamSources: THREE.BufferGeometry[] = []
+  let foamMesh: THREE.Mesh | undefined
+  let pending = false
+  let lastAdd = 0
 
-  for (const ln of water.lines ?? []) {
-    if (ln.culvert || ln.pts.length < 2) continue
-    const b = bucketFor(ln.look)
-    const pts = ln.pts.map(([x, y, z]) => {
-      const wz = -y
-      const g = groundAt(x, wz)
-      // the channel bottom plus the water's depth; never more than 0.3 m under the graded ground
-      const surf = z + T.WATER_DEPTH
-      return new THREE.Vector3(x, g === null ? surf : Math.max(surf, g - 0.3), wz)
-    })
-    const w = Math.max(0.6, ln.width_m) * T.WATER_WIDTH_SCALE
-    const lineGeo = ribbon(pts, () => w, undefined, undefined, b.look.crown * T.WATER_CROWN)
-    setProbeIndex(lineGeo, probeIndexOf.get(ln.id) ?? -1)
-    b.lines.push(lineGeo)
-    nLines++
-    length += ln.length_m
-    for (const f of ln.falls ?? []) {
-      const seg = pts.slice(f.i0, f.i1 + 1).map((p) => p.clone().setY(p.y + 0.06))
-      if (seg.length < 2) continue
-      foamGeo.push(ribbon(seg, () => w * (f.kind === 'falls' ? 1.15 : 0.9), 'aFoam', () => 0.3))
-      nFalls++
-    }
+  // Reflection probes, streamed. The slot handed out here IS the baked `aProbe`, so a body arriving
+  // never renumbers the others; only an area that displaces a smaller one re-bakes the evicted
+  // geometry (→ −1) and the newcomer (→ its slot). The candidates are the areas actually loaded, so
+  // the eye's own lake is among them — the eye, not a build-time ranking, still picks the capture
+  // (visuals/waterProbes.ts), and the set adapts as the coast streams in.
+  const slots: (WaterProbeBody | undefined)[] = []
+  const slotArea: number[] = []
+  const slotGeo: (THREE.BufferGeometry | undefined)[] = []
+  const slotBucket: string[] = []
+  let probeChanged = false
+  const registerBodies = () => {
+    const list = slots as WaterProbeBody[]
+    registerWaterProbes(list, group)
+    // the same bodies feed the planar mirror, which aims its one exact plane at the nearest of them
+    // each frame. This is what puts the real trees and bank on a pond.
+    registerWaterReflectBodies(list.map((b) => ({ x: b.x, y: b.y, z: b.z, radius: b.radius })))
   }
-  const areaWind = waterWind()
-  for (const ar of water.areas ?? []) {
-    if (ar.ring.length < 3) continue
-    const b = bucketFor(ar.look)
-    const sh = new THREE.Shape(ar.ring.map(([x, y]) => new THREE.Vector2(x, y)))
-    const geo = new THREE.ShapeGeometry(sh)
-    // shape (x, y_site) → world (x, level, −y_site): rotate −90° about X puts local +Y on world −Z
-    geo.rotateX(-Math.PI / 2)
-    geo.translate(0, ar.z + T.WATER_DEPTH * 0.5, 0)
-    geo.deleteAttribute('normal')
-    geo.computeVertexNormals()
-    const depth = Math.max(0.3, b.look.pondDepth * T.WATER_CROWN)
-    writeWaterAttr(geo, () => [depth, areaWind.x, areaWind.y])
-    setProbeIndex(geo, probeIndexOf.get(ar.id) ?? -1)
-    b.areas.push(geo)
-  }
-
-  const add = (geos: THREE.BufferGeometry[], mat: THREE.Material, name: string) => {
-    if (!geos.length) return
-    // mergeGeometries needs identical attribute sets; ribbon() and ShapeGeometry both end up with
-    // position + uv + normal + aWater, and the foam bucket additionally carries aFoam throughout.
-    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false)
-    if (!merged) {
-      for (const g of geos) group.add(new THREE.Mesh(g, mat))  // mismatched attributes: draw them singly
+  const placeProbe = (a: WaterArea, geo: THREE.BufferGeometry, key: string) => {
+    let cx = 0
+    let cy = 0
+    for (const [x, y] of a.ring) { cx += x; cy += y }
+    cx /= a.ring.length
+    cy /= a.ring.length
+    const body: WaterProbeBody = { id: a.id, x: cx, y: a.z + T.WATER_DEPTH * 0.5, z: -cy, radius: Math.sqrt(Math.max(1, a.area_m2) / Math.PI) }
+    if (slots.length < MAX_WATER_PROBES) {
+      setProbeIndex(geo, slots.length)
+      slots.push(body); slotArea.push(a.area_m2); slotGeo.push(geo); slotBucket.push(key)
+      probeChanged = true
       return
     }
-    if (merged !== geos[0]) for (const g of geos) g.dispose()
+    let mi = 0
+    for (let i = 1; i < slotArea.length; i++) if (slotArea[i] < slotArea[mi]) mi = i
+    if (a.area_m2 > slotArea[mi]) {
+      const old = slotGeo[mi]
+      if (old) {
+        setProbeIndex(old, -1)
+        const ob = buckets.get(slotBucket[mi])
+        if (ob) ob.dirty = true
+      }
+      setProbeIndex(geo, mi)
+      slots[mi] = body; slotArea[mi] = a.area_m2; slotGeo[mi] = geo; slotBucket[mi] = key
+      probeChanged = true
+    } else {
+      setProbeIndex(geo, -1)
+    }
+  }
+
+  let nLines = 0, nFalls = 0, nAreas = 0, length = 0
+  const add = (layer: WaterLayer | null | undefined) => {
+    if (!layer) return
+    for (const ln of layer.lines ?? []) {
+      if (ln.culvert || ln.pts.length < 2) continue
+      const b = bucketFor(ln.look)
+      const pts = ln.pts.map(([x, y, z]) => {
+        const wz = -y
+        const g = groundAt(x, wz)
+        // the channel bottom plus the water's depth; never more than 0.3 m under the graded ground
+        const surf = z + T.WATER_DEPTH
+        return new THREE.Vector3(x, g === null ? surf : Math.max(surf, g - 0.3), wz)
+      })
+      const w = Math.max(0.6, ln.width_m) * T.WATER_WIDTH_SCALE
+      const lineGeo = ribbon(pts, () => w, undefined, undefined, b.look.crown * T.WATER_CROWN)
+      setProbeIndex(lineGeo, -1)
+      b.lineSources.push(lineGeo)
+      b.dirty = true
+      nLines++
+      length += ln.length_m
+      for (const f of ln.falls ?? []) {
+        const seg = pts.slice(f.i0, f.i1 + 1).map((p) => p.clone().setY(p.y + 0.06))
+        if (seg.length < 2) continue
+        foamSources.push(ribbon(seg, () => w * (f.kind === 'falls' ? 1.15 : 0.9), 'aFoam', () => 0.3))
+        nFalls++
+      }
+    }
+    const areaWind = waterWind()
+    for (const ar of layer.areas ?? []) {
+      if (ar.ring.length < 3) continue
+      const b = bucketFor(ar.look)
+      const sh = new THREE.Shape(ar.ring.map(([x, y]) => new THREE.Vector2(x, y)))
+      const geo = new THREE.ShapeGeometry(sh)
+      // shape (x, y_site) → world (x, level, −y_site): rotate −90° about X puts local +Y on world −Z
+      geo.rotateX(-Math.PI / 2)
+      geo.translate(0, ar.z + T.WATER_DEPTH * 0.5, 0)
+      geo.deleteAttribute('normal')
+      geo.computeVertexNormals()
+      const depth = Math.max(0.3, b.look.pondDepth * T.WATER_CROWN)
+      writeWaterAttr(geo, () => [depth, areaWind.x, areaWind.y])
+      b.areaSources.push(geo)
+      b.dirty = true
+      placeProbe(ar, geo, b.key)
+      nAreas++
+    }
+    if (probeChanged) { registerBodies(); probeChanged = false }
+    pending = true
+    lastAdd = performance.now()
+  }
+
+  const rebuild = (sources: THREE.BufferGeometry[], mat: THREE.Material, prev: THREE.Mesh | undefined, name: string): THREE.Mesh => {
+    // mergeGeometries needs identical attribute sets; ribbon() and ShapeGeometry both end up with
+    // position + uv + normal + aWater (+ aProbe), and the foam bucket carries aFoam throughout.
+    const merged = mergeGeometries(sources, false)
+    if (!merged) {
+      for (const g of sources) group.add(new THREE.Mesh(g, mat))  // mismatched attributes: draw them singly
+      return prev ?? new THREE.Mesh(undefined, mat)
+    }
+    if (prev) { prev.geometry.dispose(); prev.geometry = merged; return prev }
     const mesh = new THREE.Mesh(merged, mat)
     mesh.name = name
     mesh.frustumCulled = false
     if (name === 'water:foam') mesh.renderOrder = 2
     group.add(mesh)
+    return mesh
   }
-  for (const [key, b] of buckets) {
-    const own = key !== defaultLookName
-    if (b.lines.length) {
-      const m = makeMat(b.look, key, own)
-      m.name = `water:streams:${key}`
-      streamMats.push(m)
-      add(b.lines, m, m.name)
-    }
-    if (b.areas.length) {
-      const m = makeMat(b.look, key, own, 1.05)
-      m.name = `water:areas:${key}`
-      stillMats.push(m)
-      add(b.areas, m, m.name)
-    }
+  const dress = (m: THREE.MeshStandardMaterial, colour: THREE.Color, opacity: number) => {
+    m.color.copy(colour)
+    m.opacity = opacity
+    applyTint(m)
   }
-  add(foamGeo, foam, 'water:foam')
+  const flush = () => {
+    if (!pending) return
+    pending = false
+    for (const b of buckets.values()) {
+      if (!b.dirty) continue
+      b.dirty = false
+      if (b.lineSources.length) {
+        if (!b.matLines) {
+          b.matLines = makeMat(b.look, b.key, b.own)
+          b.matLines.name = `water:streams:${b.key}`
+          streamMats.push(b.matLines)
+          // a style chosen before this body arrived dresses it now (makeMat just tracked it)
+          if (lastStyle) { waveMats[waveMats.length - 1].styleColoured = true; dress(b.matLines, lastStyle.stream, Math.min(0.98, T.WATER_OPACITY + lastStyle.opacityBias)) }
+        }
+        b.lineMesh = rebuild(b.lineSources, b.matLines, b.lineMesh, b.matLines.name)
+      }
+      if (b.areaSources.length) {
+        if (!b.matAreas) {
+          b.matAreas = makeMat(b.look, b.key, b.own, 1.05)
+          b.matAreas.name = `water:areas:${b.key}`
+          stillMats.push(b.matAreas)
+          if (lastStyle) { waveMats[waveMats.length - 1].styleColoured = true; dress(b.matAreas, lastStyle.still, Math.min(1, T.WATER_OPACITY + 0.05 + lastStyle.opacityBias)) }
+        }
+        b.areaMesh = rebuild(b.areaSources, b.matAreas, b.areaMesh, b.matAreas.name)
+      }
+    }
+    if (foamSources.length) foamMesh = rebuild(foamSources, foam, foamMesh, 'water:foam')
+  }
 
-  return { group, tick: advance, lines: nLines, areas: water.areas?.length ?? 0, falls: nFalls, length_m: Math.round(length), setColours, setLook, looks: [...buckets.keys()] }
+  // the whole water for an untiled world (or the home disc a tiled one shipped), built at once
+  if (water && (water.lines?.length || water.areas?.length)) {
+    add(water)
+    flush()
+  } else {
+    registerWaterProbes([], group)
+    registerWaterReflectBodies([])
+  }
+
+  return {
+    group,
+    tick: advance,
+    get lines() { return nLines },
+    get areas() { return nAreas },
+    get falls() { return nFalls },
+    get length_m() { return Math.round(length) },
+    get looks() { return [...buckets.keys()] },
+    setColours,
+    setLook,
+    add,
+    flush,
+  }
 }

@@ -805,8 +805,26 @@ def _raster(ldir: Path, kind: str) -> Path:
     return vrt if vrt.exists() else ldir / f"{kind}.tif"
 
 
+def crossings_over(site_dir: Path) -> list[float]:
+    """Along-track metres where OSM says a way crosses OVER the primary (from crossings.json).
+
+    The overpass/gantry call in `lidar.profile` needs this to tell a real bridge deck from a sign
+    gantry. `corridor plan` writes crossings.json next to the site; a bake that never planned one
+    gets an empty list, which reads as "we checked and nothing crosses" — correct for a fresh
+    single-image bake, and the thing that stops a motorway gantry becoming a road.
+    """
+    p = site_dir / "crossings.json"
+    if not p.exists():
+        return []
+    try:
+        return [float(c["s"]) for c in json.loads(p.read_text()) if c.get("relation") == "over"]
+    except Exception:
+        return []
+
+
 def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: int | None = None,
-                  road_index_cache: tuple | None = None, fill: bool = True) -> dict:
+                  road_index_cache: tuple | None = None, fill: bool = True,
+                  crossings_over_s: list[float] | None = None) -> dict:
     """lidar.profile over the rasters with a LazyRaster, and only this road's near points.
 
     `road_index_cache` is `build_road_index(pts)`. Without it the road filter is `pts["road"] ==
@@ -838,7 +856,7 @@ def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: in
                 sub = {k: v[m] for k, v in pts.items() if k != "road"}
         else:
             sub = {k: v for k, v in pts.items() if k != "road"}
-        prof = lidar.profile(line, dtm, chm, dtm.transform, sub)
+        prof = lidar.profile(line, dtm, chm, dtm.transform, sub, crossings_over_s=crossings_over_s)
         return _fill_profile(prof) if fill else prof
     finally:
         dtm.close()
@@ -883,22 +901,26 @@ _PROFILE_CTX: dict = {}
 
 
 def _profile_worker(task: tuple) -> dict | None:
-    road_index, ident, line = task
+    road_index, ident, line = task[:3]
+    over_s = task[3] if len(task) > 3 else None
     ctx = _PROFILE_CTX
     try:
-        return profile_tiled(line, ctx["ldir"], ctx["pts"], road_index, road_index_cache=ctx["cache"])
+        return profile_tiled(line, ctx["ldir"], ctx["pts"], road_index, road_index_cache=ctx["cache"], crossings_over_s=over_s)
     except Exception as exc:  # a bad branch must not take the bake down
         print(f"  branch  {ident} profile failed: {exc}", flush=True)
         return None
 
 
 def profile_many(tasks: list, ldir: Path, pts: dict | None, jobs: int | None = None) -> list:
-    """Profile `(road_index, ident, line)` tasks, forked across `jobs` processes when > 1.
+    """Profile `(road_index, ident, line, crossings_over_s)` tasks, forked across `jobs` processes.
 
     The cloud is 669 M points / tens of GB; a pool that passed it through the pickle would copy it
     per task. So the pool is FORKED and the cloud is a module global: every worker inherits it
     copy-on-write, and only the (small) line is sent. Order is preserved; a failed profile returns
     None and prints, exactly as the serial loop did.
+
+    `crossings_over_s` is the primary's OSM over-crossings (or None for a branch): see
+    `crossings_over` and the overpass/gantry call in `lidar.profile`.
     """
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
@@ -913,9 +935,11 @@ def profile_many(tasks: list, ldir: Path, pts: dict | None, jobs: int | None = N
     if jobs == 1:
         p = progress.Progress("branch", total)
         out = []
-        for road_index, ident, line in tasks:
+        for task in tasks:
+            road_index, ident, line = task[:3]
+            over_s = task[3] if len(task) > 3 else None
             try:
-                out.append(profile_tiled(line, ldir, pts, road_index, road_index_cache=cache))
+                out.append(profile_tiled(line, ldir, pts, road_index, road_index_cache=cache, crossings_over_s=over_s))
             except Exception as exc:
                 print(f"  branch  {ident} profile failed: {exc}", flush=True)
                 out.append(None)
@@ -1036,7 +1060,8 @@ def reprofile(site_dir: Path) -> dict:
         except Exception as exc:
             print(f"  reprofile ignoring unreadable branches.json ({exc})", flush=True)
     branches = []
-    profiles = profile_many([(i + 1, c["id"], c["line"]) for i, c in enumerate(chains)], ldir, pts)
+    over_s = crossings_over(site_dir)
+    profiles = profile_many([(i + 1, c["id"], c["line"], over_s if c["primary"] else None) for i, c in enumerate(chains)], ldir, pts)
     if any(p is None for p in profiles):
         raise RuntimeError("reprofile: a chain failed to profile (see the log above)")
     for c, prof in zip(chains, profiles):

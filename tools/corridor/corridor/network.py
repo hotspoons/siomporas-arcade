@@ -563,8 +563,9 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     if no_lidar is None and "lidar" not in skip and tiled:
         pts = meta.pop("pts")
         idx = {c["id"]: i + 1 for i, c in enumerate(R["chains"])}
+        over_s = network_tiles.crossings_over(out)
         with progress.heartbeat("profile", f"primary {prim['ident']} {prim['line'].length / 1000:.0f} km"):
-            prof = network_tiles.profile_tiled(prim["line"], ldir, pts, idx[prim["id"]])
+            prof = network_tiles.profile_tiled(prim["line"], ldir, pts, idx[prim["id"]], crossings_over_s=over_s)
         (out / "profile.json").write_text(json.dumps(prof))
         cls = meta["classes"]
         print(f"  lidar   {meta['points_in_corridor']:,} pts in corridor over {len(meta['tiles']['list'])} km tiles; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}; {meta['near_road_points']:,} near-road points kept", flush=True)
@@ -575,7 +576,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
         # fanned out across processes. `profile_many` groups the cloud once (the old loop rescanned
         # all 669 M points per chain) and forks, so the cloud is shared copy-on-write, not pickled.
         others = [c for c in R["chains"] if c is not prim]
-        tasks = [(idx[c["id"]], c["ident"], c["line"]) for c in others]
+        tasks = [(idx[c["id"]], c["ident"], c["line"], None) for c in others]
         for c, bp in zip(others, network_tiles.profile_many(tasks, ldir, pts)):
             branches.append(branch_rec(c, bp))
         print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
@@ -645,8 +646,9 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
                 meta["z_factor"] = f
             meta["classification"] = lidar.classification_quality(pts)
             r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
+            over_s = [c["s"] for c in V["crossings"] if c.get("relation") == "over"]
             with progress.heartbeat("profile", f"primary {prim['ident']} {prim['line'].length / 1000:.0f} km"):
-                prof = lidar.profile(prim["line"], r["dtm"], r["chm"], r["transform"], r["pts"])
+                prof = lidar.profile(prim["line"], r["dtm"], r["chm"], r["transform"], r["pts"], crossings_over_s=over_s)
             (out / "profile.json").write_text(json.dumps(prof))
             cls = r["classes"]
             print(f"  lidar   {r['points_in_corridor']:,} pts in corridor; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}")
@@ -828,11 +830,11 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
         from . import network_tiles
 
         with progress.heartbeat("profile", f"primary {prim['ident']} {prim['line'].length / 1000:.0f} km"):
-            prof = network_tiles.profile_tiled(prim["line"], ldir, pts, prim_idx, fill=False)
+            prof = network_tiles.profile_tiled(prim["line"], ldir, pts, prim_idx, fill=False, crossings_over_s=network_tiles.crossings_over(out))
         (sdir / "profile.json").write_text(json.dumps(prof))
         manifest_lidar = meta
         others = [c for c in shard_chains if c is not prim]
-        tasks = [(idx[c["id"]], c["ident"], c["line"]) for c in others]
+        tasks = [(idx[c["id"]], c["ident"], c["line"], None) for c in others]
         for c, bp in zip(others, network_tiles.profile_many(tasks, ldir, pts)):
             branches.append(branch_record(c, prim, bp))
         print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures", flush=True)

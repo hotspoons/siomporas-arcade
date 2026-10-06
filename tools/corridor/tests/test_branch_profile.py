@@ -69,7 +69,7 @@ class ProfileManyTest(unittest.TestCase):
         nt.profile_tiled = self.orig
 
     def _fake(self, boom=None):
-        def fake(line, ldir, pts, road_index=None, road_index_cache=None):
+        def fake(line, ldir, pts, road_index=None, road_index_cache=None, crossings_over_s=None):
             if boom is not None and road_index == boom:
                 raise RuntimeError("synthetic failure")
             a, b = road_index_cache[1][road_index]

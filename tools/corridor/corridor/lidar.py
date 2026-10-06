@@ -692,17 +692,30 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
         # smaller an overhead thing is only believed where OSM says a way crosses over within 25 m
         # (the Bowie bridleway at s≈2350 stays; the canopy goes).
         over_s = np.array(crossings_over_s or [], float)
+        # `crossings_over_s is None` means the caller could not tell us what OSM crosses this road
+        # (a branch profile); `[]` means it told us and NOTHING does. The difference matters below.
+        known = crossings_over_s is not None
         for i, j in _runs(spanned):
             length = (j - i + 1) * step
             if length < 2.0:
                 continue
-            if not major_road:
-                mid = (s[i] + s[j]) / 2
-                if not (len(over_s) and np.min(np.abs(over_s - mid)) <= 25.0):
-                    continue
+            mid = (s[i] + s[j]) / 2
+            crosses = bool(len(over_s)) and float(np.min(np.abs(over_s - mid))) <= 25.0
+            if not major_road and not crosses:
+                continue
             labelled = bool(np.any(~np.isnan(deck_min[i : j + 1])))
+            # A SPAN IS ONLY AN OVERPASS WHERE SOMETHING ACTUALLY GOES OVER IT: an OSM way crossing
+            # within 25 m, or class-17 deck points in the run. Naming a full-width overhead an
+            # `overpass` off its LENGTH alone made the viewer raise a concrete road-carrying deck,
+            # so the Capital Beltway grew a 31 m pad with a pier dropped in the median at s≈42386
+            # that dead-ended on both sides — it was a sign gantry, and OSM maps nothing crossing
+            # there (Rich, 2026-10-06). Without that evidence the record is still kept, as a
+            # `gantry` (analysis only), never promoted to scenery by length. Where the caller gave
+            # us no crossing list at all (a branch) we keep the old length naming: demoting every
+            # real overpass on a road we never checked is worse than the bug.
+            overpass = length >= 5 and ((crosses or labelled) if known else True)
             structures.append({
-                "kind": "overpass" if length >= 5 else "gantry", "source": "geometry+class17" if labelled else "geometry",
+                "kind": "overpass" if overpass else "gantry", "source": "geometry+class17" if labelled else "geometry",
                 "s_start": round(float(s[i]), 1), "s_end": round(float(s[j]), 1), "length_m": round(float(length), 1),
                 "deck_z_min": round(float(np.nanmin(hmin[i : j + 1] + surface_z[i : j + 1])), 2), "deck_z_max": None,
                 "clearance_m": round(float(np.nanmin(hmin[i : j + 1])), 2), "height_above_ground_m": None,

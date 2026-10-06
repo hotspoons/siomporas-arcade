@@ -114,6 +114,16 @@ export interface Crossing {
   relation: string
   name: string | null
   inferred?: boolean
+  /**
+   * The crossing way's OSM structure tags, kept since 2026-10-06 (they used to be stripped at
+   * export). `tunnel`/`layer` say a road goes UNDER rather than over — the tell for a portal — and
+   * `bridge` says the crossing is on a structure at all. Absent on bakes before then.
+   */
+  bridge?: string | null
+  tunnel?: string | null
+  layer?: string | null
+  /** whether the SPINE itself is on a bridge at this crossing, rather than the crossing way */
+  spine_bridge?: boolean
 }
 
 /** a road of a network site other than the primary: rendered as a first-class carriageway with its own strip */

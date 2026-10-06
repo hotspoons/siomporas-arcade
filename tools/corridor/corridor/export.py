@@ -1512,7 +1512,20 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "spine": {"coords": spine_rel, "photo_s": spine["photo_s"], "length_m": round(float(line.length), 1), "segments": spine.get("segments", [])},
         "siblings": siblings,
         "structures": prof["structures"] if prof else [],
-        "crossings": [{k: c.get(k) for k in ("s", "kind", "relation", "name", "inferred")} for c in crossings],
+        # The crossing keeps its structure tags. `tunnel`/`layer`/`bridge` are what tell a road that
+        # goes OVER from one that goes UNDER: the crossing classifier in osm.py already reads them,
+        # and the viewer cannot render a portal or a soffit without them, so they are no longer
+        # stripped here. Paul, 2026-10-06: "stop stripping tunnel/layer tags". `spine_bridge` is the
+        # spine's own bridge flag, kept for the same reason.
+        "crossings": [
+            {
+                **{k: c.get(k) for k in ("s", "kind", "relation", "name", "inferred", "spine_bridge")},
+                "bridge": (c.get("tags") or {}).get("bridge"),
+                "tunnel": (c.get("tags") or {}).get("tunnel"),
+                "layer": (c.get("tags") or {}).get("layer"),
+            }
+            for c in crossings
+        ],
         "surface": {"step_m": surface["step_m"], "s": surface["stations"]["s"], "class": surface["stations"]["class"], "lidar_ratio": surface["stations"]["lidar_ratio"], "naip_brightness": surface["stations"]["naip_brightness"], "segments": surface["segments"], "summary": surface["summary"]} if surface else None,
         "profile": profile_10,
         "geology": {"named_formations": geology.get("named_formations", []), "units": [{k: u.get(k) for k in ("name", "strat_name", "lith", "descrip", "b_age", "t_age")} for u in geology.get("units", []) if u.get("strat_name")]},

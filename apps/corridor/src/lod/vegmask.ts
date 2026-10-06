@@ -80,7 +80,7 @@ export class VegCover {
     this.inFlight.add(k)
     try {
       const t0 = performance.now()
-      const res = await fetch(this.urlOf(t), { cache: 'force-cache' })
+      const res = await fetch(this.urlOf(t), { cache: 'no-cache' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const t1 = performance.now()

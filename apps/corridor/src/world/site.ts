@@ -354,12 +354,20 @@ const _vtiles = new Map<string, Promise<Record<string, unknown>>>()
 
 /** One vector tile, fetched once and cached for the life of the page. A missing tile is `{}`.
  *  A tile is a partial manifest: arrays (`buildings`, `sidewalks`) and nested objects
- *  (`power`, `signals`) keyed exactly as the manifest field they replace. */
+ *  (`power`, `signals`) keyed exactly as the manifest field they replace.
+ *
+ *  `cache: 'no-cache'`, NOT `force-cache`. A re-export (a re-bake, the ENU migration) rewrites
+ *  the tile bodies at the SAME URL; `force-cache` served the browser's pre-export copy for the
+ *  life of the cache without ever asking the server, so streamed roads stayed on the old flat
+ *  vertical while the manifest spine and every raster (both fetched fresh) curved onto the
+ *  ellipsoid — "some streets on flat earth, some on round". The server sends `Cache-Control:
+ *  no-cache`; honour it. The `_vtiles` map still dedupes within the page, so the network cost is
+ *  one conditional request per tile as it streams, not one per builder that asks for it. */
 export function loadVectorTile(slug: string, dir: string, x: number, y: number): Promise<Record<string, unknown>> {
   const url = `${DATA_BASE}/sites/${slug}/web/${dir}/${x}_${y}.json`
   let p = _vtiles.get(url)
   if (!p) {
-    p = fetch(url, { cache: 'force-cache' })
+    p = fetch(url, { cache: 'no-cache' })
       .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : {}))
       .catch(() => ({}))
     _vtiles.set(url, p)

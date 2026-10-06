@@ -196,7 +196,10 @@ export async function loadTiles(
   let done = 0
   for (const e of index.list) {
     try {
-      const res = await fetch(`${DATA_BASE}${base}${dir}/${e.x}_${e.y}.pack`, { cache: 'force-cache' })
+      // no-cache, not force-cache: a re-export rewrites the pack at the same URL with the new
+      // vertical (the ENU lattice); pinning the old body left the DEM on flat earth under curved
+      // roads. The server already sends Cache-Control: no-cache — honour it. See site.ts.
+      const res = await fetch(`${DATA_BASE}${base}${dir}/${e.x}_${e.y}.pack`, { cache: 'no-cache' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const files = readPack(await res.arrayBuffer())
       const demBytes = files.get('dem.png')
@@ -667,7 +670,7 @@ export async function loadPyrTile(
   signal?: AbortSignal,
 ): Promise<PyrTile | null> {
   if (e.empty || !e.dem) return null
-  const res = await fetch(`${DATA_BASE}${base}${index.dir}/${e.z}/${e.x}_${e.y}.pack`, { cache: 'force-cache', signal })
+  const res = await fetch(`${DATA_BASE}${base}${index.dir}/${e.z}/${e.x}_${e.y}.pack`, { cache: 'no-cache', signal })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const buf = await res.arrayBuffer()
   const files = readPack(buf)

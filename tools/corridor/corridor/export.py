@@ -956,9 +956,10 @@ def _enu_derived(frame: Frame, derived: dict) -> dict:
 
 #: Above this many footprints, the heavy spatial arrays move out of the manifest into per-tile
 #: files. The threshold is not a tuning knob so much as "is this a world that freezes a tab":
-#: crofton-triangle is 28k and fine inline; dc-metro is 446k, and `buildings` alone was 142 MB of a
-#: 346 MB manifest before the first array was tiled.
-VECTOR_TILE_MIN = 50_000
+#: crofton-triangle is 8k and fine inline; ellicott-mills-and-ilchester is 43k and a 37 MB manifest,
+#: which drops to 0.4 MB tiled; dc-metro is 446k, and `buildings` alone was 142 MB of a 346 MB
+#: manifest before the first array was tiled.
+VECTOR_TILE_MIN = 20_000
 
 #: Where a feature lands, in SITE metres. The viewer buckets on the same grid (`floor(x / size_m)`),
 #: so a feature and the cell that rebuilds it agree by construction. A leaf is named by its own

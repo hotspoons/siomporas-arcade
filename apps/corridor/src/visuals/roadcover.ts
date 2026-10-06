@@ -21,6 +21,20 @@ export const roadClipUniforms = {
   uRoadCover: { value: null as THREE.Texture | null },
   uRoadViewProj: { value: new THREE.Matrix4() },
   uRoadCoverOn: { value: 0 },
+  /**
+   * How far ABOVE the pavement a fragment is still "on" it, metres.
+   *
+   * This is the difference between cutting the sliver of ground that pokes through asphalt and
+   * DELETING THE LAND above a road. 80 m is the right answer for a tree: a crown that reaches over
+   * the lane from the verge is a tree that should not be there, so the whole thing goes. It is the
+   * wrong answer for the GROUND: a hill over an underpass, or a slope above a road, stands inside
+   * that band and was being discarded too — the fine DEM disappeared, the coarse overview showed
+   * through from below, and the world read as see-through (Rich, 2026-10-06). Terrain and grass
+   * take the shared value below (a thin shell at the pavement); foliage passes its own wide ceiling
+   * to `installRoadClip`. The grass shader splices `ROAD_CLIP_PARS` and spreads `roadClipUniforms`
+   * itself, so this default is what keeps grass blades on a hillside too.
+   */
+  uRoadCoverCeil: { value: 2.5 as number },
 }
 
 /**
@@ -35,6 +49,7 @@ export const ROAD_CLIP_PARS = /* glsl */ `
 uniform sampler2D uRoadCover;
 uniform mat4 uRoadViewProj;
 uniform float uRoadCoverOn;
+uniform float uRoadCoverCeil;
 bool roadCovered(vec3 world) {
   if (uRoadCoverOn < 0.5) return false;
   vec4 c = uRoadViewProj * vec4(world, 1.0);
@@ -44,7 +59,7 @@ bool roadCovered(vec3 world) {
   float s = texture2D(uRoadCover, uv).r;
   if (s > 9000.0) return false;
   float roadY = s - 2000.0;
-  return world.y > roadY - 1.2 && world.y < roadY + 80.0;
+  return world.y > roadY - 1.2 && world.y < roadY + uRoadCoverCeil;
 }
 `
 
@@ -69,7 +84,7 @@ function isPavement(name: string): boolean {
  * Chain the clip onto a three built-in material (terrain, bark, leaves, lollipops, rocks).
  * Custom shader materials splice {@link ROAD_CLIP_PARS} themselves and share {@link roadClipUniforms}.
  */
-export function installRoadClip(mat: THREE.Material): void {
+export function installRoadClip(mat: THREE.Material, ceil = 80): void {
   const ud = mat.userData as { roadClip?: boolean }
   if (ud.roadClip) return
   ud.roadClip = true
@@ -79,6 +94,9 @@ export function installRoadClip(mat: THREE.Material): void {
     prev?.call(mat, shader, renderer)
     if (shader.fragmentShader.includes('uRoadCover')) return
     Object.assign(shader.uniforms, roadClipUniforms)
+    // A ceiling of its own: the shared 80 is for foliage. Assigning a fresh object (not mutating
+    // the shared one) keeps terrain at its tight band while trunks and crowns keep the wide one.
+    shader.uniforms.uRoadCoverCeil = { value: ceil }
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${ROAD_VARYING}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${ROAD_VERTEX}`)
@@ -86,7 +104,7 @@ export function installRoadClip(mat: THREE.Material): void {
       .replace('#include <common>', `#include <common>\n${ROAD_VARYING}\n${ROAD_CLIP_PARS}`)
       .replace('#include <clipping_planes_fragment>', `${ROAD_DISCARD}\n#include <clipping_planes_fragment>`)
   }
-  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ''}|roadclip`
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ''}|roadclip|${ceil}`
 }
 
 /**

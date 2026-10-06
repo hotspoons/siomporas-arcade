@@ -616,6 +616,25 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // streamed only for diagnostics; nothing gates the grass on it.
   let veg: VegCover | null = null
   const bare = new THREE.Color(0x6f6a5a)
+  /*
+   * THE BASE TEXTURE. Every DEM surface should read as ground even when its own imagery has not
+   * streamed — a tile past the overview's edge, or one whose photo failed. Left bare it is a flat
+   * colour that reads as a hole (and the coarse imagery shows from below where the fine world is
+   * sunk under a strip). The fallback is the same turf the verge uses, sampled top-down by world
+   * position so it tiles across any tile regardless of its uv; which surface class it is is the
+   * one thing to change to re-skin it. Rich, 2026-10-06.
+   */
+  const TERRAIN_FALLBACK_CLASS = 'grass_rough'
+  const terrainFallbackTex = { value: null as THREE.Texture | null }
+  const terrainFallbackOn = { value: 0 }
+  /** Point the terrain's base texture at a surface-set class's own map (see blocks below). */
+  const applyTerrainFallback = (sets: Record<string, SurfaceSet> | undefined): void => {
+    const fb = (sets?.[TERRAIN_FALLBACK_CLASS]?.material as THREE.MeshStandardMaterial | undefined)?.map ?? null
+    if (!fb) return
+    fb.wrapS = fb.wrapT = THREE.RepeatWrapping
+    terrainFallbackTex.value = fb
+    terrainFallbackOn.value = 1
+  }
   // the coarse terrain takes the settled layer as well, or snow stops at the strip's rim
   const terrainWeather = accumUniforms()
   /** one object shared by every terrain material: a style's hold on the photo (0 as shot, 1 grey) */
@@ -635,15 +654,20 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       shader.uniforms.uDesat = terrainDesat
       shader.uniforms.uLodTint = { value: lodTint }
       shader.uniforms.uLodOn = lodOn
+      // The base texture only stands in where there is no photo. `uFallback` is the shared turf (it
+      // arrives with the surface sets, after this closure is built, so the object is shared and its
+      // value read at draw time); `on` is 0 for any material that carries its own imagery.
+      shader.uniforms.uFallback = terrainFallbackTex
+      shader.uniforms.uFallbackOn = map ? { value: 0 } : terrainFallbackOn
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nvarying vec2 vLodUv;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWWorld = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * objectNormal);\nvLodUv = uv;')
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nvarying vec2 vLodUv;\nuniform vec3 uBare;\nuniform float uDesat;\nuniform vec3 uLodTint;\nuniform float uLodOn;\n${ACCUM_PARS}`)
+        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nvarying vec2 vLodUv;\nuniform vec3 uBare;\nuniform float uDesat;\nuniform vec3 uLodTint;\nuniform float uLodOn;\nuniform sampler2D uFallback;\nuniform float uFallbackOn;\n${ACCUM_PARS}`)
         // a placeholder tile past the overview's edge carries the (-1, -1) uv sentinel: bare ground
         // there, not the overview's last row stretched across the rim; then the style's
         // desaturation of the photo (the material colour, the ground tint, multiplies after)
-        .replace('#include <map_fragment>', '#include <map_fragment>\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2))), uDesat);\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
+        .replace('#include <map_fragment>', `#include <map_fragment>\nif (uFallbackOn > 0.5) diffuseColor.rgb = texture2D(uFallback, vWWorld.xz * 0.35).rgb;\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2))), uDesat);\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);`)
         // AFTER lighting, so the legend colour is what you see and a shadow cannot wash it out.
         // The border is a couple of pixels of the tile's own 0..1 uv, so it stays a line at every
         // zoom instead of a band that grows with the tile.
@@ -658,7 +682,15 @@ if (uLodOn > 0.5) {
       injectShade(shader)
     }
     m.customProgramCacheKey = () => 'corridor-terrain-lod'
-    installRoadClip(m)
+    /*
+     * THE TERRAIN'S CLIP BAND IS MILLIMETRES, NOT EIGHTY METRES. The road cover exists to hide the
+     * sliver of ground that the road mesh is standing on, so the terrain gives up a thin shell at
+     * the pavement and no more. The wide default is for a tree over a lane (which should not be
+     * there at all); applied to the ground it deleted every hill standing over a road, and over an
+     * underpass it deleted the land the road runs through — the fine DEM went, the coarse overview
+     * showed from underneath, and the world was see-through (Rich, 2026-10-06).
+     */
+    installRoadClip(m, 2.5)
     return m
   }
   const roadCover = renderer ? new RoadCover(renderer) : null
@@ -990,6 +1022,7 @@ if (uLodOn > 0.5) {
   let surfacesDoc: SurfacesDoc = await loadSurfacesDoc(manifest.slug)
   bootDetail.push({ phase: 'paving: surfaces doc', ms: Math.round(performance.now() - tSurfDoc) })
   let roadSets = resolveSurfaceSets(surfaceSets, surfacesDoc)
+  applyTerrainFallback(roadSets)
   const poolOf = (doc: SurfacesDoc): TexturePool | null => {
     const b = doc.buildings
     if (!b || (!b.walls?.length && !b.roofs?.length)) return null
@@ -3010,6 +3043,7 @@ if (uLodOn > 0.5) {
     applySurfaces = (doc) => {
       surfacesDoc = doc
       roadSets = resolveSurfaceSets(surfaceSets!, doc)
+      applyTerrainFallback(roadSets)
       void rebuildRoad()
     }
     retune = () => {

@@ -1070,16 +1070,26 @@ export function treesFromCanopy(
   return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0) }) }
 }
 
-/** An overpass stand-in: a deck slab over our road on two piers down to the measured ground. */
+/**
+ * An overpass stand-in: a deck slab over our road on piers down to the measured ground.
+ *
+ * The parts a driver reads from below are the three thicknesses: the deck, the SOFFIT recessed
+ * under it (so the edge overhangs and throws a line), and the girders under that. Above, the deck
+ * carries concrete BARRIERS along the bridge road's own edges, and — where OSM records no support
+ * and the carriageway below is wide enough to be divided — a COLUMN IN THE MEDIAN between the two
+ * directions. Rich, 2026-10-06.
+ */
 export function overpassMesh(mid: Station, deckZ: number, deckLen: number, roadWidth: number, groundAt: (x: number, y: number) => number, colour = 0xb9b9b4, onRoad?: (x: number, z: number) => boolean): THREE.Group {
   const g = new THREE.Group()
   const side = mid.dir.clone().cross(UP)
   const span = roadWidth + 12 // deck reaches past both shoulders to where the piers stand
   const concrete = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.9 })
-  const soffitMat = new THREE.MeshStandardMaterial({ color: 0x8f8d88, roughness: 0.95 })
+  // A little lift so the underside is readable in its own shadow: a concrete soffit lit only by the
+  // sky's ground colour came out as a black lid (Rich, 2026-10-06).
+  const soffitMat = new THREE.MeshStandardMaterial({ color: 0x9a978f, roughness: 0.95, emissive: 0x0e0d0c })
   const depth = Math.max(2, deckLen)
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(span, 1.2, depth), concrete)
-  deck.position.set(mid.pos.x, deckZ + 0.6, mid.pos.z)
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(span, 1.4, depth), concrete)
+  deck.position.set(mid.pos.x, deckZ + 0.7, mid.pos.z)
   deck.rotation.y = Math.atan2(mid.dir.x, mid.dir.z)
   g.add(deck)
   /*
@@ -1088,21 +1098,25 @@ export function overpassMesh(mid: Station, deckZ: number, deckLen: number, roadW
    * running the span. One inset slab (so the edges overhang and cast a line) plus three girders is
    * enough at 40 m without pretending to be a box-girder section. Rich, 2026-10-06.
    */
-  const soffit = new THREE.Mesh(new THREE.BoxGeometry(span - 1.6, 0.5, depth - 1.0), soffitMat)
-  soffit.position.set(mid.pos.x, deckZ - 0.25, mid.pos.z)
+  const soffit = new THREE.Mesh(new THREE.BoxGeometry(span - 1.6, 0.7, depth - 1.0), soffitMat)
+  soffit.position.set(mid.pos.x, deckZ - 0.35, mid.pos.z)
   soffit.rotation.y = deck.rotation.y
   g.add(soffit)
   for (const gz of [-depth / 3, 0, depth / 3]) {
-    const girder = new THREE.Mesh(new THREE.BoxGeometry(span - 2.0, 0.7, 0.5), soffitMat)
-    girder.position.copy(soffit.position).add(new THREE.Vector3(0, -0.35, 0))
+    const girder = new THREE.Mesh(new THREE.BoxGeometry(span - 2.0, 0.8, 0.6), soffitMat)
+    girder.position.copy(soffit.position).add(new THREE.Vector3(0, -0.55, 0))
     girder.position.add(mid.dir.clone().multiplyScalar(gz))
     girder.rotation.y = deck.rotation.y
     g.add(girder)
   }
-  const parapet = new THREE.Mesh(new THREE.BoxGeometry(span, 1.1, 0.3), concrete)
+  // CONCRETE BARRIERS: one along each edge of the bridge road, sitting on the deck. The bridge
+  // carries its own road across ours, so its parapets run the span and stand at the deck's
+  // near/far edges (along `mid.dir`), not across the span.
+  const barrier = new THREE.Mesh(new THREE.BoxGeometry(span, 1.15, 0.45), concrete)
+  let supported = false
   for (const sgn of [-1, 1]) {
-    const p = parapet.clone()
-    p.position.copy(deck.position).add(mid.dir.clone().multiplyScalar((sgn * depth) / 2)).add(new THREE.Vector3(0, 1.2, 0))
+    const p = barrier.clone()
+    p.position.copy(deck.position).add(mid.dir.clone().multiplyScalar((sgn * depth) / 2)).add(new THREE.Vector3(0, 1.28, 0))
     p.rotation.y = deck.rotation.y
     g.add(p)
     /*
@@ -1121,6 +1135,22 @@ export function overpassMesh(mid: Station, deckZ: number, deckLen: number, roadW
     pier.position.set(px, gz + hgt / 2, pz)
     pier.rotation.y = deck.rotation.y
     g.add(pier)
+    supported = true
+  }
+  /*
+   * A SUPPORT IN THE MEDIAN. Where the structure has no OSM abutment it can use (both edge piers
+   * landed on a live carriageway and were dropped), or the carriageway below is wide enough to be a
+   * divided highway, the deck needs a column. It goes on the CENTRELINE — the middle of the two
+   * lanes of traffic below — which is the one place a post is not in a driving lane. Generated only
+   * where OSM left the structure unsupported, per Rich, 2026-10-06.
+   */
+  if (!supported || roadWidth >= 14) {
+    const gz = groundAt(mid.pos.x, -mid.pos.z)
+    const hgt = Math.max(1, deckZ - gz)
+    const column = new THREE.Mesh(new THREE.BoxGeometry(2.0, hgt, Math.max(1.6, depth * 0.4)), concrete)
+    column.position.set(mid.pos.x, gz + hgt / 2, mid.pos.z)
+    column.rotation.y = deck.rotation.y
+    g.add(column)
   }
   return g
 }

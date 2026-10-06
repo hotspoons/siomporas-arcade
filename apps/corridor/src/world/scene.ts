@@ -1852,7 +1852,7 @@ if (uLodOn > 0.5) {
     }
     placeBulbs()
     /** signed distance to the nearest pavement edge, and which carriageway that was */
-    const edgeDistance = (x: number, z: number, exclude = -1, roadsOnly = false, grade = false): { d: number; who: number; y: number; s: number; gx: number; gz: number } => {
+    const edgeDistance = (x: number, z: number, exclude = -1, roadsOnly = false, grade = false, skipBranchDecks = false): { d: number; who: number; y: number; s: number; gx: number; gz: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
       let best = Infinity, who = -1, bp: (typeof stGrid extends Map<string, (infer R)[]> ? R : never) | null = null
       // how the distance GROWS from the winning station: away from its centreline inside the
@@ -1871,6 +1871,14 @@ if (uLodOn > 0.5) {
             // collider — the "invisible tunnel" under the structure. Without this the ground snapped
             // to whichever deck was laterally nearest, a 7.65 m wall on the Beltway (Paul, 2026-10-06).
             if (grade && p.elev) continue
+            // THE GROUND THE STRIP READS IS NOT A DECK OF ANOTHER ROAD. The spine's fine strip
+            // (buildStrip) grades up to whatever carriageway pavement is nearest. When a crossing
+            // branch rides a deck over the spine — University Blvd over the Beltway, Kenilworth over
+            // the Beltway — the bare-earth DEM below is the valley floor, but the strip kept
+            // climbing to the branch's deck and left a mound of earth standing in the roadway under
+            // the span. The branch's own strip already skips its deck (see the `isDeck` verge rule);
+            // here the spine strip must too, so it falls back to the DEM/road below.
+            if (skipBranchDecks && p.elev && p.who >= branchWho0) continue
             // lateral distance to the station's tangent, so a point between two stations measures
             // to the road and not to the nearer station's dot
             const ux = x - p.x, uz = z - p.z
@@ -2106,6 +2114,11 @@ if (uLodOn > 0.5) {
       const primary = e.who < branchWho0
       if (e.d > (primary ? VERGE : T.BRANCH_VERGE)) return null
       if (primary && e.d > stripEdgeLimitAt(e.s)) return null
+      // ... and the spine's ground must not climb to a crossing BRANCH's deck. University Blvd over
+      // the Beltway rides a deck whose bare-earth DEM below is the valley floor, but the ground
+      // formula kept following the deck and stood a mound of earth in the underpass roadway. Keep
+      // the pavement itself (objects on the deck still stand on it); drop the verge to the DEM.
+      if (!primary && e.d > 0.6 && isDeck(e.y, heightAt(x, -z), T.OVERPASS_CLEAR_M)) return null
       const t = THREE.MathUtils.smoothstep(e.d, 0.6, 7.0)
       const off = offsetFn ? offsetFn(x, -z) * t : 0
       // THE TURF LIP (buildStrip). The mesh stands the grass-scaled lip proud of the pavement over
@@ -2142,6 +2155,8 @@ if (uLodOn > 0.5) {
       dressStrip(st)
     }
     const edgeAt = (x: number, z: number) => edgeDistance(x, z)
+    // the spine strip must not grade up to a crossing branch's deck (see `skipBranchDecks`)
+    const edgeAtSpine = (x: number, z: number) => edgeDistance(x, z, -1, false, false, true)
     // the primary in chunks along s: a chunk's stations start at its own s0, so two chunks meet
     // on identical vertices and the seam is exact
     const CHUNK = T.STREAM_CHUNK_M
@@ -2150,7 +2165,7 @@ if (uLodOn > 0.5) {
       const s1 = Math.min(curveLen, s0 + CHUNK)
       const mid = spineAt((s0 + s1) / 2).pos
       spineUnits.push({ key: `spine:${Math.round(s0)}`, x: mid.x, z: mid.z, r: (s1 - s0) / 2 + VERGE + 60, done: false, run: async (budget) => {
-        await adoptStrip(await buildStrip((s) => spineAt(s0 + s), s1 - s0, -latMin + VERGE, latMax + VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, offsetFn, null, (s) => stripEdgeLimitAt(s0 + s), stripCanopyAt, litter, budget), budget)
+        await adoptStrip(await buildStrip((s) => spineAt(s0 + s), s1 - s0, -latMin + VERGE, latMax + VERGE, edgeAtSpine, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, offsetFn, null, (s) => stripEdgeLimitAt(s0 + s), stripCanopyAt, litter, budget), budget)
       } })
     }
     mark('grade: sink primary')

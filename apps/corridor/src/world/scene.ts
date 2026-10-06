@@ -281,11 +281,16 @@ function framed(layer: Layer, data: Float32Array, anchor: Anchor | null): Field 
  * bbox arithmetic would read a cell tens of metres away at the far edge of a site. Without one it
  * falls back to the flat arithmetic, which is what the grid actually was.
  */
-function sampler(f: Field) {
+function sampler(f: Field, up = false) {
   const [w, h] = f.layer.size
   if (f.rf) {
     const rf = f.rf
-    return (x: number, y: number) => { const g = rf.toGrid(x, y); return bilinear(f.data, w, h, g[0], g[1]) }
+    // `up` is for HEIGHT rasters: their stored value is geodetic and the world renders on the
+    // ellipsoid, so the lookup returns the curved up (the mesh beside it is placed the same way).
+    // Canopy is a height ABOVE the ground, not a height on it, so it is asked for without `up`.
+    return up
+      ? (x: number, y: number) => { const g = rf.toGrid(x, y); return rf.toEnuUp(g[0], g[1], bilinear(f.data, w, h, g[0], g[1])) }
+      : (x: number, y: number) => { const g = rf.toGrid(x, y); return bilinear(f.data, w, h, g[0], g[1]) }
   }
   const [xmin, , , ymax] = f.layer.bbox
   return (x: number, y: number) => bilinear(f.data, w, h, (x - xmin) / (w * f.layer.res), (ymax - y) / (h * f.layer.res))
@@ -522,7 +527,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   if (overrides.length) manifest = { ...manifest, spine: { ...manifest.spine, coords: flattenSpine(manifest.spine.coords, overrides) }, structures: suppressed(manifest.structures, overrides) }
   const demImg = await loadImage(base + L.dem.file)
   const dem: Field = framed(L.dem, decodeHeights(demImg, L.dem), anchor)
-  const overviewHeight = sampler(dem)
+  const overviewHeight = sampler(dem, true)
 
   // A network bake keeps this 8 m DEM as the OVERVIEW and puts the real 2 m heights in tiles. Those
   // are decoded up front, not streamed: every height lookup below — the strip, the trees, the
@@ -569,10 +574,20 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
    */
   const lowestGround = (): number => {
     let lo = Infinity
+    // the stored zmin is geodetic; the world renders on the ellipsoid, so a tile's real floor is
+    // its corners' ENU up (the curvature can put it tens of metres lower at the far edge of a
+    // network). Read the frame, not the raw value.
+    const floorOf = (t: { dem: { layer: { zmin?: number | null }; rf: { toEnuUp(u: number, v: number, h: number): number } } }) => {
+      const z = t.dem.layer.zmin
+      if (z == null) return
+      const rf = t.dem.rf
+      const v = Math.min(rf.toEnuUp(0, 0, z), rf.toEnuUp(1, 0, z), rf.toEnuUp(0, 1, z), rf.toEnuUp(1, 1, z))
+      if (v < lo) lo = v
+    }
     if (pyrSet) {
-      for (const t of pyrSet.tiles.values()) { const z = t.dem.layer.zmin; if (z != null && z < lo) lo = z }
+      for (const t of pyrSet.tiles.values()) floorOf(t)
     } else if (tileSet) {
-      for (const t of tileSet.tiles) { const z = t.dem.layer.zmin; if (z != null && z < lo) lo = z }
+      for (const t of tileSet.tiles) floorOf(t)
     } else if (typeof L.dem?.zmin === 'number') {
       lo = L.dem.zmin
     }

@@ -870,9 +870,14 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
 
 def _enu_cols(frame, pts, zs=None, nd: int = 2) -> list:
     """Nx2 UTM -> [[e, n(, z)], ...] in the site's ENU frame. Mirrors export._enu_cols; kept local
-    so network.py does not have to import export.py."""
-    e, n = frame.to_enu(pts[:, 0], pts[:, 1])
-    cols = [np.asarray(e), np.asarray(n)] + ([np.nan_to_num(np.asarray(zs, dtype=float))] if zs is not None else [])
+    so network.py does not have to import export.py. With `zs` the third column is the ENU UP
+    (see export._enu_cols / Frame.to_enu3), so a branch road curves with the terrain it crosses."""
+    if zs is None:
+        e, n = frame.to_enu(pts[:, 0], pts[:, 1])
+        cols = [np.asarray(e), np.asarray(n)]
+    else:
+        e, n, u = frame.to_enu3(pts[:, 0], pts[:, 1], np.nan_to_num(np.asarray(zs, dtype=float)))
+        cols = [np.asarray(e), np.asarray(n), np.asarray(u)]
     return np.column_stack(cols).round(nd).tolist()
 
 
@@ -975,9 +980,6 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
                 _j["x"], _j["y"] = round(float(_e), 1), round(float(_n), 1)
         print(f"  note    branches.json junctions measured as still in the old frame; {sum(len(b.get('junctions') or []) for b in _br)} converted on read", flush=True)
 
-    def finite(v, default=0.0):
-        return default if v is None or not np.isfinite(v) else float(v)
-
     out = []
     for si, sib in enumerate(spine.get("siblings", [])):
         b = by_id.get(sib.get("id")) or (by_pos[si] if not by_id and si < len(by_pos) else None) or {}
@@ -1012,21 +1014,45 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
         else:
             zs = np.zeros(len(s_d))
         zs = np.nan_to_num(zs, nan=0.0, posinf=0.0, neginf=0.0)
+        s_d_a = np.asarray(s_d, dtype=float)
+        coords_curved = _enu_cols(frame, pts, zs)
+        # The branch grade, the junctions and the deck heights are all measured on the SAME road,
+        # so they have to land on the SAME curve as the coords — interpolate the converted coords
+        # back rather than converting the profile a second way (it must not disagree by the
+        # curvature the branch is now expressed in).
+        spine_zb = np.asarray([c[2] for c in coords_curved], dtype=float)
+
+        def _curve_on_branch(values, ss):
+            out = []
+            for v, sv in zip(values, ss):
+                x = float(np.interp(sv, s_d_a, pts[:, 0]))
+                y = float(np.interp(sv, s_d_a, pts[:, 1]))
+                out.append(round(float(frame.to_enu3(x, y, float(v))[2]), 2))
+            return out
+
         js = []
         for j in b.get("junctions", []):
             z = None
             if prof and prof.get("s"):
-                pz = np.asarray(prof["road_z"], dtype=float)
-                good = np.isfinite(pz)
-                if good.any():
-                    z = float(np.interp(j["s"], np.asarray(prof["s"], dtype=float)[good], pz[good]))
+                z = float(np.interp(j["s"], s_d_a, spine_zb))
             js.append({**j, "z": None if z is None or not np.isfinite(z) else round(z, 2)})
+        structs = []
+        for st0 in (b.get("structures") or []):
+            st = dict(st0)
+            smid = 0.5 * (float(st.get("s_start", 0.0)) + float(st.get("s_end", st.get("s_start", 0.0))))
+            for k in ("deck_z_min", "deck_z_max"):
+                if st.get(k) is not None:
+                    st[k] = _curve_on_branch([st[k]], [smid])[0]
+            structs.append(st)
+        prof_road_z = None
+        if prof and prof.get("s"):
+            prof_road_z = np.round(np.interp(np.asarray(prof["s"], dtype=float), s_d_a, spine_zb), 2)
         out.append({
             "id": b["id"], "name": b.get("name"), "ref": b.get("ref"), "ident": b.get("ident"), "highway": b.get("highway"), "lanes": b.get("lanes"), "oneway": b.get("oneway"), "length_m": b.get("length_m"),
-            "coords": _enu_cols(frame, pts, zs),
+            "coords": coords_curved,
             "junctions": js, "dead_ends": sib.get("dead_ends") or b.get("dead_ends") or [], "s_on_primary": b.get("s_on_primary"),
-            "profile": {"s": prof["s"][::5], "road_z": [finite(v) for v in prof["road_z"][::5]]} if prof and prof.get("s") else None,
-            "structures": b.get("structures") or [], "surface": None,
+            "profile": {"s": prof["s"][::5], "road_z": prof_road_z[::5].tolist()} if prof_road_z is not None else None,
+            "structures": structs, "surface": None,
         })
     return out
 

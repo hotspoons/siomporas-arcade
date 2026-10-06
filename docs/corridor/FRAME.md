@@ -139,3 +139,24 @@ while `coords` went through the conversion, so a re-export could not repair it.
 **A migration's blind spot is the data it does not own.** Both classes are now stamped with the
 frame they were written in, and `corridor.verify` fails a manifest whose junction offsets grow
 with distance from the origin — the signature of a rotation rather than ordinary slop.
+
+## The vertical half, which the first re-export missed
+
+`Frame.to_enu` took the horizontal at `h = 0` and returned east/north — true ENU horizontally —
+but left `z` in the UTM/geodetic frame it came in as. The viewer, meanwhile, does curve the
+vertical: `gridGeometry` places every raster vertex through the ellipsoid transform, so the
+terrain mesh dropped `d²/2N` below the tangent plane (11.3 m at the car on `dc-metro-take-2`,
+25 km from the anchor). The road, its profile and its decks did not, so the carriageway floated
+above the ground drawn under it — the gap Rich saw at the Beltway interchange, 2026-10-06.
+
+It was invisible on a 3 km corridor (0.7 m) and only became a bug when the sites grew to full
+networks. The fix is `Frame.to_enu3`: the same horizontal at `h = 0` (every layer keeps ONE
+shared grid), plus the exact ellipsoid UP at each point's own height. Every `z` the bake writes
+now goes through it — `_enu_cols` for the coordinate arrays, `_enu_z` for the scalar points, and
+the station-based heights (the spine/branch profile's `road_z`, the structures' `deck_z_*`) are
+interpolated back from the converted centreline so they land on the same curve. The viewer's
+`heightAt` was made to agree by routing it through `RasterFrame.toEnuUp`, the cheap bilinear
+twin of `toEnu` (agrees to a centimetre, one DEM count).
+
+The authored data beside the bake has the same shape of problem as above: any absolute height
+there (`adjustments`, `placements`) still holds its written frame until its own pass converts it.

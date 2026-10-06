@@ -160,7 +160,11 @@ export class TileSet {
   heightAt = (x: number, y: number): number => {
     const hit = this.at(x, y)
     if (!hit) return this.baseHeight(x, y)
-    return bilinear(hit.t.dem.data, hit.t.dem.layer.size[0], hit.t.dem.layer.size[1], hit.u, hit.v)
+    const h = bilinear(hit.t.dem.data, hit.t.dem.layer.size[0], hit.t.dem.layer.size[1], hit.u, hit.v)
+    // the raster's height is geodetic; the world renders on the ellipsoid, so the up carries the
+    // curvature the mesh beside it has (see RasterFrame.toEnuUp) — without this, the strip, the
+    // trees and the car sit a `d²/2N` tangent plane above the ground that is drawn under them.
+    return hit.t.dem.rf.toEnuUp(hit.u, hit.v, h)
   }
 
   canopyAt = (x: number, y: number): number => {
@@ -481,7 +485,11 @@ export class PyramidSet {
   heightAt = (x: number, y: number): number => {
     const hit = this.at(x, y)
     if (!hit) return this.baseHeight(x, y)
-    return bilinear(hit.t.dem.data, hit.t.dem.layer.size[0], hit.t.dem.layer.size[1], hit.u, hit.v)
+    const h = bilinear(hit.t.dem.data, hit.t.dem.layer.size[0], hit.t.dem.layer.size[1], hit.u, hit.v)
+    // the raster's height is geodetic; the world renders on the ellipsoid, so the up carries the
+    // curvature the mesh beside it has (see RasterFrame.toEnuUp) — without this, the strip, the
+    // trees and the car sit a `d²/2N` tangent plane above the ground that is drawn under them.
+    return hit.t.dem.rf.toEnuUp(hit.u, hit.v, h)
   }
 
   canopyAt = (x: number, y: number): number => {

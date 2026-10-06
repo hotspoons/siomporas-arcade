@@ -53,10 +53,25 @@ def _enu(frame: Frame, x, y, nd: int = 2):
 
 
 def _enu_cols(frame: Frame, pts: np.ndarray, zs=None, nd: int = 2) -> list:
-    """An Nx2 array of UTM points -> [[e, n], ...] or [[e, n, z], ...], rounded."""
-    e, n = frame.to_enu(pts[:, 0], pts[:, 1])
-    cols = [np.asarray(e), np.asarray(n)] + ([np.nan_to_num(np.asarray(zs, dtype=float))] if zs is not None else [])
+    """An Nx2 array of UTM points -> [[e, n], ...] or [[e, n, z], ...], rounded.
+
+    With `zs` the third column is the ENU UP at that height (see `Frame.to_enu3`), not the raw
+    UTM/geodetic z: the whole point of the frame change is that the road, the barriers, the
+    sidewalks and the terrain mesh all curve together. Without `zs` it is the horizontal only.
+    """
+    if zs is None:
+        e, n = frame.to_enu(pts[:, 0], pts[:, 1])
+        cols = [np.asarray(e), np.asarray(n)]
+    else:
+        e, n, u = frame.to_enu3(pts[:, 0], pts[:, 1], np.nan_to_num(np.asarray(zs, dtype=float)))
+        cols = [np.asarray(e), np.asarray(n), np.asarray(u)]
     return np.column_stack(cols).round(nd).tolist()
+
+
+def _enu_z(frame: Frame, x: float, y: float, z: float, nd: int = 2) -> tuple:
+    """One UTM point + height -> (east, north, UP), the scalar twin of `_enu_cols`."""
+    e, n, u = frame.to_enu3(x, y, z)
+    return round(float(e), nd), round(float(n), nd), round(float(u), nd)
 
 
 def _enu_ring(frame: Frame, coords, nd: int = 2) -> list:
@@ -532,10 +547,11 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
                         continue
                     seen.append((nx, ny, heads))
                     lanes = _lanes_of(wp)
+                    mx, my, mz = _enu_z(frame, nx, ny, ground(nx, ny))
                     masts.append({
-                        "x": _enu(frame, nx, ny)[0],
-                        "y": _enu(frame, nx, ny)[1],
-                        "z": round(ground(nx, ny), 2),
+                        "x": mx,
+                        "y": my,
+                        "z": mz,
                         "yaw_deg": round(heads, 1),            # compass bearing the heads face
                         "travel_deg": round(_bearing(*trav, conv), 1),
                         "arm_m": round(lanes * 3.66 / 2 + 1.4, 2),
@@ -568,11 +584,12 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
         tl = math.hypot(tx, ty) or 1.0
         sgn = -1.0 if p.get("direction") == "backward" else 1.0
         trav = (tx / tl * sgn, ty / tl * sgn)
+        sx, sy, sz = _enu_z(frame, x, y, ground(x, y))
         signs.append({
             "kind": kind,
-            "x": _enu(frame, x, y)[0],
-            "y": _enu(frame, x, y)[1],
-            "z": round(ground(x, y), 2),
+            "x": sx,
+            "y": sy,
+            "z": sz,
             "yaw_deg": round(_bearing(-trav[0], -trav[1], conv), 1),
             "travel_deg": round(_bearing(*trav, conv), 1),
         })
@@ -637,7 +654,7 @@ def _parking(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
                 "access": p.get("access"),
                 "name": p.get("name"),
                 "area_m2": round(float(part.area), 1),
-                "z": round(z, 2),
+                "z": _enu_z(frame, cx, cy, z)[2],
                 "ring": ring,
                 "holes": [_enu_ring(frame, h.coords[:-1]) for h in part.interiors],
             })
@@ -862,9 +879,10 @@ def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
                 if part.is_empty or part.geom_type != "LineString" or part.length < 20:
                     continue
                 pts = np.array(part.coords)
+                zs = np.array([ground(float(x), float(y)) for x, y in pts], dtype=float)
                 lines.append({
                     "kind": pw, "voltage": p.get("voltage"), "circuits": p.get("circuits"),
-                    "coords": [[*_enu(frame, x, y), round(ground(x, y), 2)] for x, y in pts],
+                    "coords": _enu_cols(frame, pts, zs),
                 })
         elif pw in ("tower", "pole", "portal") and g["type"] == "Point":
             x, y = frame.from_wgs(*g["coordinates"][:2])
@@ -875,7 +893,8 @@ def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
                 h = float(str(p.get("height", "")).rstrip("m ").strip())
             except ValueError:
                 h = None
-            supports.append({"kind": pw, "x": _enu(frame, x, y)[0], "y": _enu(frame, x, y)[1], "z": round(ground(x, y), 2), "height_m": h or HEIGHT.get(pw, 10.0)})
+            px, py, pz = _enu_z(frame, x, y, ground(x, y))
+            supports.append({"kind": pw, "x": px, "y": py, "z": pz, "height_m": h or HEIGHT.get(pw, 10.0)})
     if src is not None:
         src.close()
     return {"lines": lines, "supports": supports}
@@ -1509,6 +1528,14 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             zs = np.zeros(len(s_dense))
     spine_rel = _enu_cols(frame, pts, zs)
 
+    # The profile, the structures and the spine all describe ONE road. The spine coords are now
+    # true ENU; anything measured off the same grade has to land on the same curve or the relief
+    # datum and the deck clearances are measured against a plane the road no longer lies on.
+    # `s_dense` are the spine stations that `pts`/`zs` were sampled at, so the converted spine
+    # interpolates straight back onto the profile's own stations.
+    s_dense_a = np.asarray(s_dense, dtype=float)
+    spine_z = np.asarray([c[2] for c in spine_rel], dtype=float)
+
     siblings = []
     for sib in spine.get("siblings", []):
         g = sib["geometry"]
@@ -1531,12 +1558,28 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     if prof:
         step = max(1, int(round(10.0 / prof["step_m"])))
         keys = ["left_8", "right_8", "left_15", "right_15", "left_40", "right_40"]
+        road_z_curved = np.interp(np.asarray(prof["s"], dtype=float), s_dense_a, spine_z)
         profile_10 = {
             "s": prof["s"][::step],
-            "road_z": prof["road_z"][::step],
+            "road_z": np.round(road_z_curved, 2)[::step].tolist(),
             "ground_rel": {k: prof["ground_rel"][k][::step] for k in keys if k in prof["ground_rel"]},
             "canopy": {k: prof["canopy"][k][::step] for k in ("left_15", "right_15", "left_40", "right_40") if k in prof["canopy"]},
         }
+
+    # The deck heights are the one ABSOLUTE height in a structure; `clearance_m` and
+    # `height_above_ground_m` are already differences and must not be touched. A deck is a point
+    # on the spine, so it curves with the spine.
+    structures = []
+    if prof:
+        for st0 in prof["structures"]:
+            st = dict(st0)
+            smid = 0.5 * (float(st.get("s_start", 0.0)) + float(st.get("s_end", st.get("s_start", 0.0))))
+            x = float(np.interp(smid, s_dense_a, pts[:, 0]))
+            y = float(np.interp(smid, s_dense_a, pts[:, 1]))
+            for k in ("deck_z_min", "deck_z_max"):
+                if st.get(k) is not None:
+                    st[k] = _enu_z(frame, x, y, float(st[k]))[2]
+            structures.append(st)
 
     surface = json.loads((site_dir / "surface.json").read_text()) if (site_dir / "surface.json").exists() else None
     crossings = json.loads((site_dir / "crossings.json").read_text()) if (site_dir / "crossings.json").exists() else []
@@ -1588,7 +1631,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "layers": layers,
         "spine": {"coords": spine_rel, "photo_s": spine["photo_s"], "length_m": round(float(line.length), 1), "segments": spine.get("segments", [])},
         "siblings": siblings,
-        "structures": prof["structures"] if prof else [],
+        "structures": structures,
         # The crossing keeps its structure tags. `tunnel`/`layer`/`bridge` are what tell a road that
         # goes OVER from one that goes UNDER: the crossing classifier in osm.py already reads them,
         # and the viewer cannot render a portal or a soffit without them, so they are no longer

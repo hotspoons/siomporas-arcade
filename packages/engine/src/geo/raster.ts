@@ -52,6 +52,14 @@ export class RasterFrame {
    * transcendentals at all, converging to the lattice's own accuracy.
    */
   private readonly enu: Float64Array
+  /**
+   * The lattice points' own ENU UP at the ellipsoid (h = 0), precomputed: [u0, u1, ...].
+   *
+   * This is the curvature half of the placement. `toEnu` computes it exactly, but every height
+   * lookup in the viewer needs it and `toEnu` costs a geodetic transform; the up surface is a
+   * smooth bilinear patch on these points, so `toEnuUp` reads it without a transcendental.
+   */
+  private readonly enuUp: Float64Array
   /** affine ENU->grid seed for the inverse: [a, b, c, d, e, f] with u = a*x + b*y + c etc. */
   private readonly inv: number[]
 
@@ -64,11 +72,13 @@ export class RasterFrame {
     this.anchor = anchor
     const n = this.n
     this.enu = new Float64Array(n * n * 2)
+    this.enuUp = new Float64Array(n * n)
     const p: number[] = [0, 0, 0]
     for (let k = 0; k < n * n; k++) {
       anchor.toLocal(this.lon[k], this.lat[k], 0, p)
       this.enu[k * 2] = p[0]
       this.enu[k * 2 + 1] = p[1]
+      this.enuUp[k] = p[2]
     }
     this.inv = this.fitInverse()
   }
@@ -106,6 +116,34 @@ export class RasterFrame {
   toEnu(u: number, v: number, h: number, out: number[] | Float64Array | Float32Array = [0, 0, 0], o = 0): typeof out {
     const g = this.geodeticAt(u, v)
     return this.anchor.toLocal(g.lon, g.lat, h, out, o)
+  }
+
+  /**
+   * The UP component of `toEnu(u, v, h)` — the height a terrain vertex, a road or a tree stands
+   * at — without the geodetic transform.
+   *
+   * The height enters through the ellipsoid normal, which over a raster (a few km) is within a
+   * tenth of a millimetre of the anchor's up, so the up is the surface's own bilinear drop plus
+   * exactly `h`. The drop is `enuUp` interpolated. Against `toEnu` it agrees to about a
+   * centimetre: the up is not linear in the lat/lon the lattice interpolates, and that curvature
+   * is what is left — a centimetre is one DEM count at the bake's 0.01 m scale, so it is the
+   * quantisation, not a lie. This is the hottest lookup in the viewer — every `heightAt` goes
+   * through it — so it must not allocate or call a transcendental.
+   */
+  toEnuUp(u: number, v: number, h: number): number {
+    const n = this.n
+    const fu = Math.min(n - 1, Math.max(0, u * (n - 1)))
+    const fv = Math.min(n - 1, Math.max(0, (1 - v) * (n - 1)))
+    const j0 = Math.min(n - 2, Math.floor(fu))
+    const i0 = Math.min(n - 2, Math.floor(fv))
+    const tu = fu - j0
+    const tv = fv - i0
+    const a = i0 * n + j0
+    const b = a + 1
+    const c = a + n
+    const d = c + 1
+    const E = this.enuUp
+    return (1 - tv) * ((1 - tu) * E[a] + tu * E[b]) + tv * ((1 - tu) * E[c] + tu * E[d]) + h
   }
 
   /**

@@ -69,6 +69,26 @@ describe('RasterFrame on a real baked lattice', () => {
     }
     expect(worst).toBeLessThan(0.01)
   })
+
+  it('toEnuUp matches the exact ellipsoid up, so heightAt and the mesh agree', () => {
+    // Every `heightAt` in the viewer goes through `toEnuUp` (bilinear lattice drop + h) rather
+    // than `toEnu` (a geodetic transform). The whole round-earth fix rests on those two agreeing:
+    // if they do not, the strip, the trees and the car sit somewhere other than the terrain drawn
+    // under them. Check both rasters, at ground and at deck height.
+    let worst = 0
+    for (const rf of [dem, new RasterFrame({ size: [500, 500], geo: R.tile.geo as never }, anchor)]) {
+      for (let u = 0; u <= 1.0001; u += 0.125) {
+        for (let v = 0; v <= 1.0001; v += 0.125) {
+          const uu = Math.min(u, 1), vv = Math.min(v, 1)
+          for (const h of [0, 50, 200]) {
+            const exact = (rf.toEnu(uu, vv, h) as number[])[2]
+            worst = Math.max(worst, Math.abs(rf.toEnuUp(uu, vv, h) - exact))
+          }
+        }
+      }
+    }
+    expect(worst).toBeLessThan(0.02) // measured ~1 cm = one DEM count at 0.01 m
+  })
 })
 
 describe('containment — the thing toGrid cannot answer', () => {

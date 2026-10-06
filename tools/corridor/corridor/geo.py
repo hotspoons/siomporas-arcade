@@ -148,6 +148,24 @@ class Frame:
         e, n, _ = self.anchor_frame().to_local(lon, lat, 0.0)
         return e, n
 
+    def to_enu3(self, x, y, h):
+        """
+        UTM easting/northing plus a height -> true ENU metres (east, north, UP) about the anchor.
+
+        The vector counterpart of what the viewer does to a raster. The horizontal is taken at
+        h = 0, like `to_enu`, so every layer shares ONE horizontal grid; the vertical is the exact
+        ellipsoid up at height `h`, which is where the curvature lives. A point 12 km out is 11.3 m
+        below the tangent plane and one 25 km out is ~49 m, and a flat z drew the road on that
+        plane while the viewer's terrain mesh — placed from the raster's geodetic lattice, so
+        already curved — sat on the ground. `to_enu` alone was therefore half a conversion: true
+        east/north, UTM-height z. This is the other half.
+        """
+        lon, lat = self.to_wgs(x, y)
+        af = self.anchor_frame()
+        e, n, _ = af.to_local(lon, lat, 0.0)
+        _, _, u = af.to_local(lon, lat, h)
+        return e, n, u
+
     def control_lattice(self, bbox: tuple[float, float, float, float], n: int = 9) -> dict:
         """
         A geodetic control lattice over a raster's UTM bbox, for the viewer to interpolate.

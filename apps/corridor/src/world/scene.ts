@@ -640,8 +640,19 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   const terrainWeather = accumUniforms()
   /** one object shared by every terrain material: a style's hold on the photo (0 as shot, 1 grey) */
   const terrainDesat = { value: STYLE[initialStyle].desaturate }
-  /** Every terrain surface — the overview and each tile — is the same material with its own map. */
-  const terrainMaterial = (map: THREE.Texture | null) => {
+  /**
+   * Every terrain surface — the overview and each tile — is the same material with its own map.
+   *
+   * `fallbackAllowed` is the base texture's second gate, and the pyramid is why it exists. Its
+   * coarse levels are the BACKING STORE: a finer tile arrives and `seat()` drops the parent eight
+   * metres under it (tuning PYR_DROP_M). Painting turf on those dropped parents put grass at the
+   * wrong height — visible as grass standing in a hole the moment a leaf was missing (Rich,
+   * 2026-10-06). Only the TOP level (the leaf DEM, `z === zmax`) and the inferred coarse ground
+   * (the overview/horizon, which is never dropped) may wear it. Where a real texture exists it is
+   * always shown: the shader guards the sample with `#ifndef USE_MAP`, so a photo that streams in
+   * after the material was built simply wins.
+   */
+  const terrainMaterial = (map: THREE.Texture | null, fallbackAllowed = true) => {
     const m = new THREE.MeshStandardMaterial({ map, color: map ? 0xffffff : bare, roughness: 1, metalness: 0 })
     // Per tile, so the legend can tint this mesh without touching any other. The objects are the
     // uniform values: writing them takes effect next frame, with no shader rebuild.
@@ -657,9 +668,10 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       shader.uniforms.uLodOn = lodOn
       // The base texture only stands in where there is no photo. `uFallback` is the shared turf (it
       // arrives with the surface sets, after this closure is built, so the object is shared and its
-      // value read at draw time); `on` is 0 for any material that carries its own imagery.
+      // value read at draw time); `on` is 0 for any material that carries its own imagery, or one
+      // whose ground is a dropped coarse level.
       shader.uniforms.uFallback = terrainFallbackTex
-      shader.uniforms.uFallbackOn = map ? { value: 0 } : terrainFallbackOn
+      shader.uniforms.uFallbackOn = map || !fallbackAllowed ? { value: 0 } : terrainFallbackOn
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nvarying vec2 vLodUv;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWWorld = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * objectNormal);\nvLodUv = uv;')
@@ -667,8 +679,11 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nvarying vec2 vLodUv;\nuniform vec3 uBare;\nuniform float uDesat;\nuniform vec3 uLodTint;\nuniform float uLodOn;\nuniform sampler2D uFallback;\nuniform float uFallbackOn;\n${ACCUM_PARS}`)
         // a placeholder tile past the overview's edge carries the (-1, -1) uv sentinel: bare ground
         // there, not the overview's last row stretched across the rim; then the style's
-        // desaturation of the photo (the material colour, the ground tint, multiplies after)
-        .replace('#include <map_fragment>', `#include <map_fragment>\nif (uFallbackOn > 0.5) diffuseColor.rgb = texture2D(uFallback, vWWorld.xz * 0.35).rgb;\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2))), uDesat);\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);`)
+        // desaturation of the photo (the material colour, the ground tint, multiplies after).
+        // The base texture is a FALLBACK, so it may only paint a material that has no map at all —
+        // `USE_MAP` is compile-time, and three rebuilds the program when a photo arrives, so a tile
+        // born bare and later textured stops falling back without any state to keep in step.
+        .replace('#include <map_fragment>', `#include <map_fragment>\n#ifndef USE_MAP\nif (uFallbackOn > 0.5) diffuseColor.rgb = texture2D(uFallback, vWWorld.xz * 0.35).rgb;\n#endif\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2))), uDesat);\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);`)
         // AFTER lighting, so the legend colour is what you see and a shadow cannot wash it out.
         // The border is a couple of pixels of the tile's own 0..1 uv, so it stays a line at every
         // zoom instead of a band that grows with the tile.
@@ -787,7 +802,10 @@ if (uLodOn > 0.5) {
       materialFor: (t) => {
         // Bare until the tile's own photo arrives. The overview's UVs are the whole site, so
         // painting it onto a quadtree tile stretches one picture across every tile.
-        const m = terrainMaterial(null)
+        //
+        // The base turf is allowed only on the TOP level. Every coarser level is backing store that
+        // `seat()` drops under a resident child; turf there is grass at a seam nobody should see.
+        const m = terrainMaterial(null, t.z === L.pyramid!.zmax)
         // Finer levels are biased further forward. A partial quad keeps its parent to cover the
         // empty quadrants, and the child has to win the depth test on the ground they share.
         const bias = 1 + t.z - L.pyramid!.zmin

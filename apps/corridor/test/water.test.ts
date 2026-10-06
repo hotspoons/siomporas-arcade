@@ -65,4 +65,17 @@ describe('streamed water', () => {
     streamed.flush()
     expect(namesOf(streamed)).toEqual(before)
   })
+
+  // In the browser the builder is created during build and cells are added to it (some of them
+  // synchronously, before `buildSite` returns); the merge happens later, from the near update's
+  // `tick`. This pins that path, which a direct `flush()` call would not.
+  it('merges added cells from tick once the stream has quieted', async () => {
+    const streamed = buildWater(null, () => null)
+    streamed.add(cell([line('a')], [area('p')]))
+    expect(countNamed(streamed, 'water:streams:')).toBe(0)
+    await new Promise((r) => setTimeout(r, 260))
+    streamed.tick(0)
+    expect(countNamed(streamed, 'water:streams:')).toBe(1)
+    expect(countNamed(streamed, 'water:areas:')).toBe(1)
+  })
 })

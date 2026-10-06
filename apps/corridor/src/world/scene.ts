@@ -2231,43 +2231,67 @@ if (uLodOn > 0.5) {
        * whether a carriageway of another `who` passes UNDER this footprint.
        */
       const stCellM = 20
-      const spansBelow = (cx: number, cy: number, cz: number, w: number) => {
+      const spansBelow = (cx: number, cy: number, cz: number, w: number, hx: number, hz: number, halfLen: number) => {
         const c0 = Math.floor(cx / stCellM), c1 = Math.floor(cz / stCellM)
-        const r = Math.ceil((w + 24) / stCellM)
+        const r = Math.ceil((w + halfLen + 8) / stCellM)
         for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) {
           for (const p of stGrid.get(`${c0 + a},${c1 + b}`) ?? []) {
             if (p.who === self) continue
-            const dx = p.x - cx, dz = p.z - cz
-            const reach = w + p.half + 8
-            if (dx * dx + dz * dz > reach * reach) continue
+            const ux = p.x - cx, uz = p.z - cz
+            // the other carriageway must run BENEATH the deck, not alongside it: a ramp drawing a
+            // parallel line 15 m over would otherwise make the whole approach read as a bridge
+            const along = ux * hx + uz * hz
+            if (Math.abs(along) > halfLen + 4) continue
+            const lat = Math.abs(ux * hz - uz * hx)
+            if (lat > w) continue
             if (p.y == null) continue
             if (p.y < cy - T.OVERPASS_CLEAR_M) return true
           }
         }
         return false
       }
+      // Walk the deck segment by segment, then decide which segments are truly over open air. A
+      // segment-by-segment decision alone flickers: a ramp wanders in and out of the deck's
+      // footprint, so a lone slab would stand with clear air either side of it and Rich read the
+      // result as "a second bridge with a different lane of traffic inside the first" (2026-10-06).
+      // Gather first, smooth the run, then build — so a deck is one continuous piece or nothing.
+      type Seg = { dx: number; dz: number; seg: number; l: number; w: number; cx: number; cy: number; cz: number; sx: number; sz: number; ry: number; ok: boolean }
+      const segs: Seg[] = []
       for (let k = 0; k + 1 < list.length; k++) {
         const A = list[k], B = list[k + 1]
         // A genuine deck, not fill: the station grid already carries the isDeck flag, so this walk
         // costs no extra DEM samples. (Walking the curve at 4 m with a heightAt per step made a
         // single branch unit take a 7 s slice — Rich's underpass probe, 2026-10-06.)
-        if (!A.elev || !B.elev) continue
-        if (Math.abs(B.s - A.s) > 12) continue // a gap in the road, not a deck
+        if (!A.elev || !B.elev) { segs.push(null as unknown as Seg); continue }
+        if (Math.abs(B.s - A.s) > 12) { segs.push(null as unknown as Seg); continue } // a gap in the road, not a deck
         const dx = B.x - A.x, dz = B.z - A.z
         const seg = Math.hypot(dx, dz)
-        if (seg < 0.5 || seg > 12) continue
+        if (seg < 0.5 || seg > 12) { segs.push(null as unknown as Seg); continue }
         const w = (A.half + B.half) / 2 + 0.6
         const dir = new THREE.Vector3(dx, B.y - A.y, dz)
         const l = dir.length() + 0.05
         dir.normalize()
         const side = dir.clone().cross(up)
         const cx = (A.x + B.x) / 2, cy = (A.y + B.y) / 2, cz = (A.z + B.z) / 2
-        if (!spansBelow(cx, cy, cz, w)) continue
-        const ry = bridgeYaw(dir)
+        segs.push({
+          dx, dz, seg, l, w, cx, cy, cz,
+          sx: side.x, sz: side.z, ry: bridgeYaw(dir),
+          ok: spansBelow(cx, cy, cz, w, dx / seg, dz / seg, seg / 2),
+        })
+      }
+      // A slab earns its keep only as part of a run: drop any segment whose neighbours do not span.
+      // The fascia then reads as one bridge, not a stutter of disconnected walls.
+      for (let k = 0; k < segs.length; k++) {
+        if (!segs[k]?.ok) continue
+        if (!segs[k - 1]?.ok && !segs[k + 1]?.ok) segs[k].ok = false
+      }
+      for (const s of segs) {
+        if (!s?.ok) continue
+        const { l, w, cx, cy, cz, sx, sz, ry } = s
         place(new THREE.BoxGeometry(2 * (w - 0.3), 0.5, l), cx, cy - 1.35, cz, ry)
         for (const sgn of [-1, 1]) {
-          place(new THREE.BoxGeometry(0.4, 1.0, l), cx + side.x * sgn * w, cy + 0.5, cz + side.z * sgn * w, ry)
-          place(new THREE.BoxGeometry(0.8, 1.6, l), cx + side.x * sgn * (w - 0.3), cy - 0.9, cz + side.z * sgn * (w - 0.3), ry)
+          place(new THREE.BoxGeometry(0.4, 1.0, l), cx + sx * sgn * w, cy + 0.5, cz + sz * sgn * w, ry)
+          place(new THREE.BoxGeometry(0.8, 1.6, l), cx + sx * sgn * (w - 0.3), cy - 0.9, cz + sz * sgn * (w - 0.3), ry)
         }
       }
       if (!parts.length) return

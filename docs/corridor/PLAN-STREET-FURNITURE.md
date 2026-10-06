@@ -5,6 +5,30 @@ this sits beside is in `PLAN-WORLD-SCALE.md`'s orbit and already built (`world/o
 **Audience:** whoever picks up the furniture work next — the main agent, or a person.
 **Companion:** [`LANES-AND-SIGNALS.md`](LANES-AND-SIGNALS.md), [`DESIGN.md`](DESIGN.md).
 
+## Done in the first pass (2026-10-06, overnight)
+
+- **Walks never cover roads (4)** — `furniture.ts` `clearSpans` clips each walk *segment* against the
+  carriageway instead of keeping or dropping a whole station by its endpoints. Unit-tested
+  (`test/furniture.test.ts`). Not yet eyeballed on a screen.
+- **Kerbs (3), the hard part** — `furniture.ts kerbCorner` is the corner rule: an offset kerb line
+  per way, mitered to the intersection on a gentle bend (the right-angle kerb), chamfered to two
+  vertices on a real street corner (the bevel). Unit-tested. The run-join pass that calls it is not
+  written.
+- **Trails and rail (6), the decision** — `world/trail.ts trailPaving` picks dirt/gravel/paved from
+  `surface` then `trailblazed`, defaulting an untagged path to DIRT. Unit-tested
+  (`test/trail.test.ts`). `trailMesh` and the bake that carries the ways are not written.
+- **Overpass geometry (under bridges)** — `props.ts overpassMesh` grew a recessed soffit slab and
+  three span girders, and refuses to build a pier whose foot lands on a carriageway (the call site
+  passes an `edgeDistanceWorld` test).
+- **The crossing tags (6, unblocker)** — `export.py` no longer strips `tunnel`/`layer`/`bridge` from a
+  crossing record; `site.ts Crossing` carries them optionally. This is what a portal needs; the
+  portal itself is not built.
+- **The ground under an overpass** — not furniture, but the reason the rest is visible: an elevated
+  carriageway is a deck, never the ground (`world/overpass.ts isDeck`, physics `physGroundAt` +
+  streamed trimesh `decksNear`). See the commit and `probes/corridor-overpass.mjs`.
+
+Everything else below is designed and not built.
+
 ---
 
 ## What Rich asked for

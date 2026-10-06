@@ -906,6 +906,48 @@ export function clearSpans(n: number, clear: (t: number) => boolean): { spans: [
   return { spans, onRoad }
 }
 
+/**
+ * Where a kerb goes at a corner: a MITER (right angle) or a BEVEL, as real sidewalks do.
+ *
+ * `buildSidewalks` sweeps each way on its own, and OSM splits ways at the corner node, so two kerbs
+ * arrive at a corner and stop. This is the rule that joins them, kept pure so it can be wrong
+ * visibly and tested without a renderer:
+ *
+ *   · the kerb runs `offset` metres to one side of the way, so at the node each way contributes its
+ *     offset point, `node + p(dir) * offset`;
+ *   · where the turn is gentle (≤ `bevelDeg`), the two offset lines are extended to their
+ *     INTERSECTION — the miter, a right-angle kerb, one vertex;
+ *   · where it is sharper (a real street corner), the long miter spike is cut and the two offset
+ *     points are joined by a straight chamfer — a bevel, two vertices.
+ *
+ * `inDir` points ALONG the incoming way toward the node; `outDir` points along the outgoing way away
+ * from it, so a straight road has them equal. Site frame (x, z); `z = -north`. Returns the corner
+ * vertices in order.
+ */
+export function kerbCorner(
+  nx: number,
+  nz: number,
+  inX: number,
+  inZ: number,
+  outX: number,
+  outZ: number,
+  offset: number,
+  bevelDeg: number,
+): [number, number][] {
+  const p1x = nx - inZ * offset
+  const p1z = nz + inX * offset
+  const p2x = nx - outZ * offset
+  const p2z = nz + outX * offset
+  const dot = inX * outX + inZ * outZ
+  const ang = (Math.acos(Math.max(-1, Math.min(1, dot))) * 180) / Math.PI
+  if (ang > bevelDeg) return [[p1x, p1z], [p2x, p2z]]
+  // the intersection of the two offset lines: solve p1 + t·in = p2 + s·out
+  const den = inX * outZ - inZ * outX
+  if (Math.abs(den) < 1e-6) return [[p1x, p1z]] // parallel: already the same point on a straight
+  const t = ((p2x - p1x) * outZ - (p2z - p1z) * outX) / den
+  return [[p1x + inX * t, p1z + inZ * t]]
+}
+
 export interface SidewalkResult {
   group: THREE.Group
   counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number }

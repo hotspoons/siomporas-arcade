@@ -6,7 +6,7 @@
 // pure function of a segment: which sub-spans are clear of the carriageway. It is arithmetic, so it
 // is tested here and only trusted on a screen after.
 import { describe, expect, it } from 'vitest'
-import { clearSpans } from '../src/world/furniture'
+import { clearSpans, kerbCorner } from '../src/world/furniture'
 
 // exactly the road, as a fraction of the segment, is on the carriageway
 const roadBetween = (a: number, b: number) => (t: number) => t < a || t >= b
@@ -40,5 +40,34 @@ describe('clipping a walk span against a road', () => {
     const { spans, onRoad } = clearSpans(1, () => false)
     expect(spans).toEqual([])
     expect(onRoad).toBe(2)
+  })
+})
+
+describe('the kerb at a corner', () => {
+  // the kerb sits 3 m to the left of a way running north (site +z), and the joint turns east
+  const off = 3
+
+  it('miter to a right angle when bevels are off', () => {
+    const v = kerbCorner(0, 0, 0, 1, 1, 0, off, 180)
+    expect(v).toEqual([[-3, 3]])
+  })
+
+  it('bevel a right angle into two vertices', () => {
+    const v = kerbCorner(0, 0, 0, 1, 1, 0, off, 30)
+    expect(v).toEqual([[-3, 0], [0, 3]])
+    // neither vertex is further from the node than the offset, by Pythagoras
+    for (const [x, z] of v) expect(Math.hypot(x, z)).toBeCloseTo(off, 6)
+  })
+
+  it('miters a straight run back to the one offset point', () => {
+    expect(kerbCorner(0, 0, 0, 1, 0, 1, off, 30)).toEqual([[-3, 0]])
+  })
+
+  it('keeps a gentle bend a miter', () => {
+    const c = Math.cos((10 * Math.PI) / 180)
+    const s = Math.sin((10 * Math.PI) / 180)
+    const v = kerbCorner(0, 0, 0, 1, s, c, off, 30)
+    expect(v).toHaveLength(1)
+    expect(Math.abs(v[0][0] + off)).toBeLessThan(0.05)
   })
 })

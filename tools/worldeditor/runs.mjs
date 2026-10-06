@@ -93,9 +93,9 @@ export class Runs {
     // across the cluster, one cheap finalizer. `run.phase`/`run.jobs` carry the state so a pod
     // restart resumes at the phase it was in (reconcile below).
     //
-    // Sharding is automatic above `shardAboveM` when that is configured (OFF by default until the
-    // per-shard export path lands — see the note there). `sharded: true` forces it on any world,
-    // which is how the plan -> shard -> finalize path is exercised before a real large world.
+    // Sharding is automatic above `shardAboveM` when that is configured (OFF by default — see the
+    // note on `#shouldShard`). `sharded: true` forces it on any world, which is how the
+    // plan -> shard -> finalize path is exercised before a real large world.
     const sharded = opts.sharded ?? (await this.#shouldShard(slug))
     if (sharded) {
       return this.#start({ kind: 'bake', slug, args: [], label: `bake ${slug} (sharded)`, sharded: true, phaseArgs: opts })
@@ -108,9 +108,13 @@ export class Runs {
 
   /** A world large enough that one Job's bbox is the problem: > `shardAboveM` half-width.
    *
-   * OFF BY DEFAULT. Auto-sharding turns on only when `cfg.shardAboveM` is set, because the sharded
-   * path does not yet run `export_tiles`/`pyramid.bake` per shard — an auto-sharded world would
-   * come out with no tiles until that lands. Request `{"sharded":true}` to force it for the spike.
+   * OFF BY DEFAULT, and not because the sharded path is incomplete — the finalizer's `export_site`
+   * already writes the tiles, pyramid and vectors (dc-metro was baked this way; its shard dirs hold
+   * no `web/`, the parent does). It is off because shards are not yet sized to a memory budget and
+   * are not spread across nodes (docs/corridor/PLAN-SHARDED-BAKE.md Phase 2): `partition` caps at 16
+   * shards of `max_side_m` 8 km, so a world much larger than dc-metro would widen the blocks past
+   * the observed ~139 GiB shard peak instead of adding shards. Request `{"sharded":true}` to force
+   * it for the spike.
    */
   async #shouldShard(slug) {
     if (slug === 'all') return false

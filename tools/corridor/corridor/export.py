@@ -969,6 +969,46 @@ def _first_xy(coords):
     return (coords[0][0], coords[0][1]) if coords else None
 
 
+#: A WAY IS NOT A POINT. Keying it by its first vertex (the `_TILE_KEY` default) drops it from
+#: every other tile it crosses, so a 2.5 km road whose first point happens to sit in one tile
+#: vanishes from the tile it actually bridges: the viewer streams no spline there, `decksNear` has
+#: no carriageway to make a deck from, and the car falls through the overpass (Paul, 2026-10-06 —
+#: Whitfield Chapel Road, r50979409, keyed to tile 12_5 but crossing 13_3). Every vertex's tile gets
+#: the way; the viewer dedupes by `id` (scene.ts `takeBranch`), so a road in two loaded tiles is
+#: built once. The value is the coordinate field, or None for a bare polyline (the item IS the list).
+_WAY_COORDS = {
+    "sidewalks": "coords",
+    "driveways": "coords",
+    "barriers": "coords",
+    "stubs": "coords",
+    "branches": "coords",
+    "power.lines": "coords",
+    "water.lines": "pts",
+    "siblings": None,
+    "sidewalk_zones": None,
+}
+
+
+def _way_tiles(item, field, size_m):
+    """Every distinct tile a polyline's vertices fall in, in site metres."""
+    coords = item if field is None else (item.get(field) if isinstance(item, dict) else None)
+    if not coords:
+        return []
+    seen: set[tuple[int, int]] = set()
+    out: list[tuple[int, int]] = []
+    for p in coords:
+        if not p:
+            continue
+        x, y = p[0], p[1]
+        if x is None or y is None:
+            continue
+        cell = (math.floor(x / size_m), math.floor(y / size_m))
+        if cell not in seen:
+            seen.add(cell)
+            out.append(cell)
+    return out
+
+
 def _polyline_xy(f):
     return (f[0][0], f[0][1]) if f else None
 
@@ -1095,15 +1135,45 @@ def _empty_tiled(out: dict) -> None:
             out[name] = None
 
 
+def _way_key(item, field):
+    """A stable identity for a way, so the same road read back from two tiles is one road.
+
+    A way is now written into every tile it crosses (`_WAY_COORDS`), so reassembling a tree from
+    its tiles would double — or triple — it without this. Prefer the bake's `id` (branches carry
+    one); fall back to the coordinate list for an un-id'd sidewalk or power line.
+    """
+    ident = item.get("id") if isinstance(item, dict) else None
+    if ident:
+        return ("id", ident)
+    coords = item if field is None else (item.get(field) if isinstance(item, dict) else None)
+    return ("xy", tuple((p[0], p[1]) for p in coords or []))
+
+
 def _load_tiled(web: Path, vt: dict) -> dict:
     """Reassemble the arrays a tree already has in its tiles, for a re-tile to build on.
 
     Reads both schemas: the current `cells` index, and the older `buildings`-only one (whose tile
     files may still hold footprints after an earlier backfill moved them out of the manifest).
+    Ways are deduped by `_way_key`, because a way that crosses tiles is in all of them.
     """
     d = web / vt.get("dir", "vt/0")
     cells = vt.get("cells") or vt.get("buildings") or []
     arrays: dict = {}
+    seen_ways: dict[str, set] = {}
+
+    def push(leaf: str, full: str, arr, dst: list) -> None:
+        if full not in _WAY_COORDS:
+            dst.extend(arr)
+            return
+        field = _WAY_COORDS[full]
+        seen = seen_ways.setdefault(full, set())
+        for it in arr:
+            key = _way_key(it, field)
+            if key in seen:
+                continue
+            seen.add(key)
+            dst.append(it)
+
     for c in cells:
         f = d / f"{c['x']}_{c['y']}.json"
         if not f.exists():
@@ -1113,9 +1183,9 @@ def _load_tiled(web: Path, vt: dict) -> dict:
             if isinstance(v, dict):
                 node = arrays.setdefault(k, {})
                 for sub, arr in v.items():
-                    node.setdefault(sub, []).extend(arr)
+                    push(sub, f"{k}.{sub}", arr, node.setdefault(sub, []))
             else:
-                arrays.setdefault(k, []).extend(v)
+                push(k, k, v, arrays.setdefault(k, []))
     return arrays
 
 
@@ -1139,13 +1209,20 @@ def _vector_tiles(web: Path, arrays: dict, size_m: float = 1000.0) -> dict:
     cells: dict[tuple[int, int], dict] = {}
 
     def put(leaf: str, parent: str | None, item) -> None:
-        key = (_TILE_KEY.get(f"{parent}.{leaf}") if parent else None) or _TILE_KEY.get(leaf)
-        xy = key(item) if key else None
-        if not xy or xy[0] is None or xy[1] is None:
-            return
-        cell = cells.setdefault((math.floor(xy[0] / size_m), math.floor(xy[1] / size_m)), {})
-        node = cell if parent is None else cell.setdefault(parent, {})
-        node.setdefault(leaf, []).append(item)
+        full = f"{parent}.{leaf}" if parent else leaf
+        if full in _WAY_COORDS:
+            # A way lands in EVERY tile it touches, not just the one its first vertex is in.
+            leaves = _way_tiles(item, _WAY_COORDS[full], size_m)
+        else:
+            key = (_TILE_KEY.get(full) if parent else None) or _TILE_KEY.get(leaf)
+            xy = key(item) if key else None
+            if not xy or xy[0] is None or xy[1] is None:
+                return
+            leaves = [(math.floor(xy[0] / size_m), math.floor(xy[1] / size_m))]
+        for cxy in leaves:
+            cell = cells.setdefault(cxy, {})
+            node = cell if parent is None else cell.setdefault(parent, {})
+            node.setdefault(leaf, []).append(item)
 
     for name, items in arrays.items():
         if items is None:

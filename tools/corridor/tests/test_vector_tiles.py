@@ -184,5 +184,47 @@ class VectorTilesTest(unittest.TestCase):
                 self.assertIn(leaf, cell, leaf)
 
 
+    def test_a_way_lands_in_every_tile_it_crosses(self):
+        # A road keyed by its first vertex vanishes from every tile it actually bridges, so the
+        # viewer streams no spline there and the overpass deck has nothing to build from. Every
+        # vertex's tile gets it; the viewer (and _load_tiled) dedupe by id.
+        arrays = {
+            "branches": [{"id": "r1", "coords": [[950.0, 950.0, 0.0], [1050.0, 950.0, 0.0], [2050.0, 950.0, 0.0]]}],
+            "power": {"lines": [{"id": "p1", "coords": [[800.0, 800.0, 0.0], [1800.0, 800.0, 0.0]]}]},
+            "siblings": [[[790.0, 790.0], [1790.0, 790.0]]],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            web = Path(d)
+            idx = export._vector_tiles(web, arrays)
+            self.assertEqual(sorted((t["x"], t["y"], t["n"]) for t in idx["branch"]),
+                             [(0, 0, 1), (1, 0, 1), (2, 0, 1)])
+            for name in ("0_0", "1_0", "2_0"):
+                got = json.loads((web / "vt" / "0" / f"{name}.json").read_text())
+                self.assertEqual(len(got["branches"]), 1, name)
+            for name in ("0_0", "1_0"):
+                got = json.loads((web / "vt" / "0" / f"{name}.json").read_text())
+                self.assertEqual(len(got["power"]["lines"]), 1, name)
+                self.assertEqual(len(got["siblings"]), 1, name)
+            # read back once each, however many tiles they crossed
+            back = export._load_tiled(web, idx)
+            self.assertEqual(len(back["branches"]), 1)
+            self.assertEqual(len(back["power"]["lines"]), 1)
+            self.assertEqual(len(back["siblings"]), 1)
+
+    def test_a_way_read_back_and_retiled_does_not_multiply(self):
+        # The backfill reads the tiles, overlays the inline arrays, and re-tiles. A way in several
+        # tiles must come back as one, or a re-tile doubles the network.
+        arrays = {"branches": [{"id": "r9", "coords": [[900.0, 900.0, 0.0], [1100.0, 900.0, 0.0]]},
+                               {"id": "r8", "coords": [[1150.0, 900.0, 0.0], [1250.0, 900.0, 0.0]]}]}
+        with tempfile.TemporaryDirectory() as d:
+            web = Path(d)
+            idx = export._vector_tiles(web, arrays)
+            back = export._load_tiled(web, idx)
+            self.assertEqual(sorted(b["id"] for b in back["branches"]), ["r8", "r9"])
+            idx2 = export._vector_tiles(web, back)
+            back2 = export._load_tiled(web, idx2)
+            self.assertEqual(sorted(b["id"] for b in back2["branches"]), ["r8", "r9"])
+
+
 if __name__ == "__main__":
     unittest.main()

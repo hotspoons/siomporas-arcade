@@ -1340,8 +1340,19 @@ if (uLodOn > 0.5) {
     }
     for (const o of extra) takeNow.add(o)
   }
+  const takenBranchKeys = new Set<string>()
   const takeBranch = (br: NonNullable<Manifest['branches']>[number]): boolean => {
     if (!br.coords || br.coords.length < 2) return false
+    /*
+     * A WAY IS NOW WRITTEN INTO EVERY TILE IT CROSSES, so the same branch arrives again with the
+     * next tile along its length. Without this the road would be built twice — two meshes, two
+     * splines, two sets of stations — everywhere two of its tiles are loaded together. Dedupe by
+     * the bake's `id`, falling back to a coordinate fingerprint for an un-id'd branch.
+     */
+    const c0 = br.coords[0]
+    const key = br.id ?? `${c0[0]},${c0[1]},${br.coords.length},${br.name ?? ''}`
+    if (takenBranchKeys.has(key)) return false
+    takenBranchKeys.add(key)
     const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
     let cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal')
     cB.arcLengthDivisions = Math.max(100, rawB.length * 8)
@@ -3414,9 +3425,16 @@ if (uLodOn > 0.5) {
   const SEG_M = 250
   type Seg = { ax: number; ay: number; dx: number; dy: number; l2: number }
   const segGrid = new Map<number, Seg[]>()
+  const indexedBranchSegs = new Set<string>()
   const addBranchSegments = (b: NonNullable<Manifest['branches']>[number]) => {
     const c = b.coords
     if (!c) return
+    // A way is now in every tile it crosses, so the pump meets the same branch more than once.
+    // Index its segments once — same key `takeBranch` dedupes on.
+    const c0 = c[0]
+    const key = b.id ?? `${c0?.[0]},${c0?.[1]},${c.length},${b.name ?? ''}`
+    if (indexedBranchSegs.has(key)) return
+    indexedBranchSegs.add(key)
     for (let k = 1; k < c.length; k++) {
       const ax = c[k - 1][0], ay = c[k - 1][1], bx = c[k][0], by = c[k][1]
       const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1

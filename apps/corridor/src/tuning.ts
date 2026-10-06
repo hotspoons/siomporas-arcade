@@ -1671,6 +1671,29 @@ export let PHYS_RADIUS_M = 180
 /** the ground's friction coefficient before a profile's own grip is applied */
 export let PHYS_GROUND_FRICTION = 1
 /**
+ * HOW FAR ABOVE THE BARE EARTH A CARRIAGEWAY HAS TO BE TO STOP BEING GROUND.
+ *
+ * The physics ground is one height per column, so where a road crosses over another it can be
+ * only one of them. It follows the earth: a carriageway standing this far above the DEM is a
+ * bridge or overpass DECK, skipped by the grader and carried by its own trimesh collider (the same
+ * trick a stunt loop uses) — the "invisible tunnel" under the structure. A fill embankment is IN
+ * the DEM, so it stays ground; a genuine structure's DEM is the valley below, so it does not. Three
+ * metres separates "a different road above me" from "my own shoulder".
+ * Paul, 2026-10-06: driving the ramp over the Beltway the car fell to the highway underneath
+ * halfway across, and approaching an overpass on the Beltway it hit an invisible wall — both are
+ * this number being absent (the ground snapped to whichever carriageway was laterally nearest).
+ */
+export let OVERPASS_CLEAR_M = 3.0
+/**
+ * The lateral slack, metres past a carriageway's pavement edge, at which it still counts as
+ * "covering" a point when the QA view (`site.edgeLevels`) lists the levels at a crossing. Small:
+ * an overpass passes OVER the point, and a merely parallel road must not be called a level.
+ */
+export let OVERPASS_COVER_M = 1.0
+/** how far the elevated-deck colliders reach from the eye, and how far it moves before they rebuild */
+export let DECK_RADIUS_M = 170
+export let DECK_REFRESH_M = 55
+/**
  * How high `groundUnder` starts its ray, metres.
  *
  * Absolute, because world Y here IS height above NAVD88 — the bake anchors the frame at h = 0. It
@@ -2799,6 +2822,10 @@ export const TUNE_TABS: TuneTab[] = [
           tune('PHYS_TILE_BUDGET', () => PHYS_TILE_BUDGET, (v) => (PHYS_TILE_BUDGET = v), [1, 8], 1, 'tiles built per frame. THE HITCH KNOB'),
           tune('PHYS_RADIUS_M', () => PHYS_RADIUS_M, (v) => (PHYS_RADIUS_M = v), [64, 600], 10, 'how far the solid ground reaches'),
           tune('PHYS_GROUND_FRICTION', () => PHYS_GROUND_FRICTION, (v) => (PHYS_GROUND_FRICTION = v), [0, 2], 0.05),
+          tune('OVERPASS_CLEAR_M', () => OVERPASS_CLEAR_M, (v) => (OVERPASS_CLEAR_M = v), [0.5, 12], 0.5, 'height (m) above the DEM that makes a carriageway a deck, not ground'),
+          tune('OVERPASS_COVER_M', () => OVERPASS_COVER_M, (v) => (OVERPASS_COVER_M = v), [0, 6], 0.25, 'lateral slack (m) for the edgeLevels QA view'),
+          tune('DECK_RADIUS_M', () => DECK_RADIUS_M, (v) => (DECK_RADIUS_M = v), [64, 500], 10, 'how far the elevated-deck colliders reach'),
+          tune('DECK_REFRESH_M', () => DECK_REFRESH_M, (v) => (DECK_REFRESH_M = v), [10, 200], 5, 'eye travel before the deck colliders rebuild'),
         ],
       },
       {

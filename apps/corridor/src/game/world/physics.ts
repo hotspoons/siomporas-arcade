@@ -231,7 +231,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     solverIterations: T.PHYS_ITERATIONS,
     impactThreshold: T.PHYS_IMPACT_N,
   })
-  const terrain = new Terrain(phys, site.groundAt, {
+  const terrain = new Terrain(phys, site.physGroundAt, {
     tile: T.PHYS_TILE_M,
     cells: T.PHYS_TILE_CELLS,
     radius: T.PHYS_RADIUS_M,
@@ -412,6 +412,38 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       if (body) phys.world.removeRigidBody(body)
       soft.delete(held.collider.handle)
       standing.delete(i)
+    }
+  }
+
+  /*
+   * THE BRIDGE DECKS YOU DRIVE ON.
+   *
+   * The physics ground is one height per column, so at a grade-separated crossing it follows the
+   * LOWER carriageway (site.physGroundAt) and the upper one has no ground at all. It has a surface
+   * instead: `site.decksNear` hands back the elevated carriageways as trimesh ribbons around the
+   * eye, and this streams them like the trees and props — built when one comes into range, dropped
+   * when it goes, replacing the ground the heightfield had to give up. The geometry is cached per
+   * carriageway, so a rebuild is only ever a new key arriving or an old one leaving, never a
+   * remove-and-replace under a car that is standing on it.
+   */
+  const deckCols = new Map<string, NonNullable<ReturnType<typeof addSurface>>>()
+  let decksAt = { x: Infinity, z: Infinity }
+  function refreshDecks(x: number, z: number) {
+    if (Math.hypot(x - decksAt.x, z - decksAt.z) < T.DECK_REFRESH_M) return
+    decksAt = { x, z }
+    const decks = site.decksNear(x, z, T.DECK_RADIUS_M)
+    const want = new Set<string>()
+    for (const d of decks) {
+      want.add(d.key)
+      if (deckCols.has(d.key)) continue
+      const c = addSurface(phys, d.positions, d.indices, { friction: T.PHYS_GROUND_FRICTION })
+      if (c) deckCols.set(d.key, c)
+    }
+    for (const [k, c] of deckCols) {
+      if (want.has(k)) continue
+      const body = c.parent()
+      if (body) phys.world.removeRigidBody(body)
+      deckCols.delete(k)
     }
   }
 
@@ -726,6 +758,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       terrain.update(eye.x, eye.z, T.PHYS_TILE_BUDGET)
       refreshTrees(eye.x, eye.z)
       refreshProps(eye.x, eye.z)
+      refreshDecks(eye.x, eye.z)
       buildMs = terrain.stats.built ? performance.now() - t0 : 0
       phys.step(dt)
       syncDetached()
@@ -766,6 +799,11 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     free() {
       for (const d of detached) d.mesh.removeFromParent()
       detached.length = 0
+      for (const c of deckCols.values()) {
+        const body = c.parent()
+        if (body) phys.world.removeRigidBody(body)
+      }
+      deckCols.clear()
       standing.clear()
       props = null
       trees.clear()

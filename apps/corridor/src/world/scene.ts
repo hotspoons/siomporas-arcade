@@ -23,6 +23,7 @@ import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, setCropLight, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, WEATHER, accumUniforms, type Weather, type WeatherLook } from '../visuals/weather'
 import { buildStrip, refreshNormals, sinkUnderStrips } from './strip'
+import { deckRibbon, isDeck } from './overpass'
 import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
@@ -150,6 +151,18 @@ export interface Site {
   setWet: (wet: number) => void
   /** world-frame ground height under x,z: the fine strip near the road, the DEM beyond */
   groundAt: (x: number, z: number) => number | null
+  /**
+   * The ground the PHYSICS should stand on at a grade-separated crossing: like `groundAt`, but it
+   * follows the LOWER carriageway where one road passes over another, because a heightfield is one
+   * height per column. The upper carriageway is carried by `decksNear` instead. Off a crossing the
+   * two agree exactly.
+   */
+  physGroundAt: (x: number, z: number) => number | null
+  /**
+   * The elevated carriageways near a point as drivable trimesh ribbons in the SITE frame (x east,
+   * y north, z up), keyed by carriageway — the deck colliders for `physGroundAt`'s omitted levels.
+   */
+  decksNear: (x: number, z: number, r: number) => { key: string; positions: Float32Array; indices: Uint32Array }[]
   /** signed distance to the nearest pavement edge (negative on the pavement) */
   edgeDistance: (x: number, z: number) => number
   /** what the grass generator is told at world (x, z): -1 on pavement, a lot, a walk or air-photo paving; else metres from the nearest road. For probes. */
@@ -167,6 +180,8 @@ export interface Site {
   grassBlocked: (x: number, z: number) => boolean
   /** the full edge record at world (x, z): signed distance to the nearest pavement edge, which road (`who`, < 0 for a driveway or bulb), its surface height and along-track s. For probes. */
   edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number }
+  /** every carriageway whose pavement covers a point, lowest first — QA for a crossing */
+  edgeLevels: (x: number, z: number) => { who: number; y: number; d: number }[]
   /** kept (trimmed lawn) or rural (mown shoulder, tall grass) at world (x, z), from landuse then road class — see zoning.ts */
   zoneAt: (x: number, z: number) => 'kept' | 'rural' | null
   /**
@@ -1606,6 +1621,15 @@ if (uLodOn > 0.5) {
   let roadAtOut: (x: number, z: number) => { name: string | null; ref: string | null; highway: string | null; d: number } | null = () => null
   let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0, gx: 0, gz: 0 })
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
+  // the physics ground: the same field, but at a grade-separated crossing it follows the LOWER
+  // carriageway (the one graded to the earth) rather than the nearest — the upper one is carried by
+  // its own deck collider. Only the physics asks this; the drawn strip must follow the road it draws.
+  let physGroundAtOut: (x: number, z: number) => number | null = () => null
+  let edgeLevelsOut: (x: number, z: number) => { who: number; y: number; d: number }[] = () => []
+  // the elevated carriageways near a point, as drivable trimesh ribbons in the site frame (x east,
+  // y north, z up) — the deck colliders that keep a car on a bridge whose ground fell to the road
+  // below it. Built once per carriageway and cached.
+  let decksNearOut: (x: number, z: number, r: number) => { key: string; positions: Float32Array; indices: Uint32Array }[] = () => []
   let roadInfoWorld: (x: number, z: number) => { d: number; who: number } = () => ({ d: Infinity, who: -1 })
   /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
   let roadHeightWorld: (x: number, z: number) => number | null = () => null
@@ -1665,22 +1689,32 @@ if (uLodOn > 0.5) {
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
     // station carrying its own half width. Grass, verges and tree exclusion all ask this.
     const stCell = 20
-    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number; off: number; y?: number }[]>()
+    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number; off: number; y?: number; elev?: boolean }[]>()
+    // every station of a carriageway, in order — the deck builder walks one whole road to find its
+    // elevated runs, and the hashed grid cannot answer that without a full scan
+    const stationsByWho: { x: number; z: number; half: number; off: number; s: number; y: number; dx: number; dz: number; elev?: boolean }[][] = []
     // one height function per carriageway: the SAME spline the road mesh is drawn from
     const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len })), ...branchAts.map((b) => ({ at: b.at, len: b.len }))]
     const branchWho0 = 1 + sibAts.length // `who` of the first branch in the station grid
     const halfOf = (who: number, s: number) => (who === 0 ? pavedHalfAt(s) : who < branchWho0 ? pavedWidth(2) / 2 : branchAts[who - branchWho0].half)
     const addStations = (who: number, halfAt: (s: number) => number, offAt: (s: number) => number = () => 0) => {
       const c = curves[who]
+      const list: { x: number; z: number; half: number; off: number; s: number; y: number; dx: number; dz: number; elev?: boolean }[] = []
       for (let s = 0; s <= c.len; s += 5) {
         const st = c.at(s)
         const d = st.dir.clone().setY(0).normalize()
         const k = `${Math.floor(st.pos.x / stCell)},${Math.floor(st.pos.z / stCell)}`
         const arr = stGrid.get(k)
-        const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), off: offAt(s), who }
+        // IS THIS STATION UP IN THE AIR? A carriageway whose spline stands a level above the bare
+        // earth is a bridge or an overpass deck, not ground to grade to — it is carried as a trimesh
+        // collider instead. See `edgeDistance`'s `grade`. `heightAt` takes site (x, north), so -z.
+        const elev = isDeck(st.pos.y, heightAt(st.pos.x, -st.pos.z), T.OVERPASS_CLEAR_M)
+        const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), off: offAt(s), who, y: st.pos.y, elev }
         if (arr) arr.push(rec)
         else stGrid.set(k, [rec])
+        list.push({ x: st.pos.x, z: st.pos.z, half: rec.half, off: rec.off, s, y: rec.y, dx: d.x, dz: d.z, elev })
       }
+      stationsByWho[who] = list
     }
     addStations(0, pavedHalfAt, pavedOffsetAt)
     for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
@@ -1765,7 +1799,7 @@ if (uLodOn > 0.5) {
     }
     placeBulbs()
     /** signed distance to the nearest pavement edge, and which carriageway that was */
-    const edgeDistance = (x: number, z: number, exclude = -1, roadsOnly = false): { d: number; who: number; y: number; s: number; gx: number; gz: number } => {
+    const edgeDistance = (x: number, z: number, exclude = -1, roadsOnly = false, grade = false): { d: number; who: number; y: number; s: number; gx: number; gz: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
       let best = Infinity, who = -1, bp: (typeof stGrid extends Map<string, (infer R)[]> ? R : never) | null = null
       // how the distance GROWS from the winning station: away from its centreline inside the
@@ -1778,6 +1812,12 @@ if (uLodOn > 0.5) {
           if (!arr) continue
           for (const p of arr) {
             if (p.who === exclude || (roadsOnly && p.who < 0)) continue
+            // THE LEVEL RULE (grade mode, the physics ground): an elevated carriageway is a deck, not
+            // the earth, so it is not a candidate at all. The point under an overpass then grades to
+            // the road below (or the DEM where there is none), and the overpass rides its own trimesh
+            // collider — the "invisible tunnel" under the structure. Without this the ground snapped
+            // to whichever deck was laterally nearest, a 7.65 m wall on the Beltway (Paul, 2026-10-06).
+            if (grade && p.elev) continue
             // lateral distance to the station's tangent, so a point between two stations measures
             // to the road and not to the nearer station's dot
             const ux = x - p.x, uz = z - p.z
@@ -1825,9 +1865,78 @@ if (uLodOn > 0.5) {
       const sOn = Math.min(c.len, Math.max(0, bp.s + along))
       const y = c.at(sOn).pos.y // the spline IS the road surface
       const [gx, gz] = grad()
-      return { d: best, who, y, s: sOn, gx, gz }
+      return { d: best, who: bp.who, y, s: sOn, gx, gz }
     }
     const roadDistance = (x: number, z: number) => edgeDistance(x, z).d
+    /**
+     * EVERY carriageway whose pavement covers a point, lowest first — the raw vertical picture at a
+     * crossing, for QA and probes. `edgeInfo` returns only the winner, which is exactly the fact a
+     * grade-separation bug hides behind.
+     */
+    const edgeLevelsAt = (x: number, z: number): { who: number; y: number; d: number }[] => {
+      const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
+      const byWho = new Map<number, { who: number; y: number; d: number }>()
+      for (let a = -3; a <= 3; a++) {
+        for (let b = -3; b <= 3; b++) {
+          const arr = stGrid.get(`${cx + a},${cz + b}`)
+          if (!arr) continue
+          for (const p of arr) {
+            if (p.who < 0 || p.y === undefined) continue
+            const ux = x - p.x, uz = z - p.z
+            const along = ux * p.dx + uz * p.dz
+            const lat = Math.abs(uz * p.dx - ux * p.dz - p.off)
+            const d = (Math.abs(along) <= T.EDGE_BAND_M ? lat : Math.hypot(ux, uz)) - p.half
+            if (d > T.OVERPASS_COVER_M) continue
+            const had = byWho.get(p.who)
+            if (!had || d < had.d) byWho.set(p.who, { who: p.who, y: p.y, d })
+          }
+        }
+      }
+      return [...byWho.values()].sort((a, b) => a.y - b.y)
+    }
+    edgeLevelsOut = edgeLevelsAt
+    /**
+     * THE ELEVATED DECKS NEAR A POINT, as drivable ribbons.
+     *
+     * The physics ground is one height per column, so at a grade-separated crossing it can only be
+     * the LOWER carriageway; the upper one has to be a real surface of its own or the car falls
+     * through it the moment the ground switches (Paul, 2026-10-06). This builds that surface: for
+     * every carriageway with a station near the point, walk its whole station list and emit a
+     * triangle ribbon over the stretches where its spline stands more than OVERPASS_CLEAR_M above
+     * the bare earth. A trimesh, the same shape a stunt loop uses, because only a trimesh can be a
+     * road that is above itself.
+     *
+     * Site frame (x east, y north, z up) — `addSurface` converts to the physics frame once.
+     */
+    const deckCache = new Map<number, { positions: Float32Array; indices: Uint32Array } | null>()
+    const buildDeck = (who: number) => deckRibbon(stationsByWho[who], heightAt, T.OVERPASS_CLEAR_M)
+    decksNearOut = (x, z, r) => {
+      const n = Math.ceil(r / stCell) + 1
+      const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
+      const whos = new Set<number>()
+      for (let a = -n; a <= n; a++) {
+        for (let b = -n; b <= n; b++) {
+          const arr = stGrid.get(`${cx + a},${cz + b}`)
+          if (!arr) continue
+          for (const p of arr) {
+            if (p.who < 0) continue
+            const ddx = p.x - x, ddz = p.z - z
+            if (ddx * ddx + ddz * ddz <= r * r) whos.add(p.who)
+          }
+        }
+      }
+      const out: { key: string; positions: Float32Array; indices: Uint32Array }[] = []
+      for (const who of whos) {
+        let g = deckCache.get(who)
+        if (g === undefined) {
+          if (deckCache.size > 2048) deckCache.clear()
+          g = buildDeck(who)
+          deckCache.set(who, g)
+        }
+        if (g) out.push({ key: `deck:${who}`, positions: g.positions, indices: g.indices })
+      }
+      return out
+    }
     /**
      * Is pavement within `limit` metres? The tree planter asks this of every new cell. The full
      * edge walk is a 7×7 of station cells plus the spline, which grass needs (gradient and height).
@@ -1938,8 +2047,8 @@ if (uLodOn > 0.5) {
     // built lazily around the eye instead of 427 of them at load. Past the verge, and past a
     // parapet on the primary, it answers null and the caller falls back to the DEM.
     const offsetFn = adjustments.active ? (x: number, y: number) => adjustments.at(x, y, adjScratch).ground_offset_m : null
-    const gradedHeight = (x: number, z: number): number | null => {
-      const e = edgeDistance(x, z)
+    const gradedHeight = (x: number, z: number, grade = false): number | null => {
+      const e = edgeDistance(x, z, -1, false, grade)
       if (!Number.isFinite(e.d)) return null
       const primary = e.who < branchWho0
       if (e.d > (primary ? VERGE : T.BRANCH_VERGE)) return null
@@ -2347,6 +2456,7 @@ if (uLodOn > 0.5) {
     makeDriveways()
     const groundNear = (x: number, y: number) => gradedHeight(x, -y) ?? heightAt(x, y)
     groundAtWorld = (x, z) => gradedHeight(x, z) ?? heightAt(x, -z)
+    physGroundAtOut = (x, z) => gradedHeight(x, z, true) ?? heightAt(x, -z)
     edgeDistanceWorld = (x, z) => edgeDistance(x, z).d
     // the same field, but blind to driveways: a sidewalk SHOULD cross a drive, so a rule that
     // keeps concrete off the carriageway has to ask about carriageways only
@@ -3726,6 +3836,8 @@ if (uLodOn > 0.5) {
     surfaces: () => surfacesDoc,
     setSeason,
     groundAt: groundAtWorld,
+    physGroundAt: (x, z) => physGroundAtOut(x, z),
+    decksNear: (x, z, r) => decksNearOut(x, z, r),
     edgeDistance: edgeDistanceWorld,
     setSplatMask: (u) => {
       let n = 0
@@ -3753,6 +3865,7 @@ if (uLodOn > 0.5) {
     grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
     grassBlocked: (x, z) => grassBlockedOut(x, z),
     edgeInfo: (x, z, exclude, roadsOnly) => edgeInfoOut(x, z, exclude, roadsOnly),
+    edgeLevels: (x, z) => edgeLevelsOut(x, z),
     zoneAt: (x, z) => zoneAtOut(x, z),
     roadAt: (x, z) => roadAtOut(x, z),
     junctionMeet,

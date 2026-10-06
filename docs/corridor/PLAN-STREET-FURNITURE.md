@@ -26,6 +26,13 @@ this sits beside is in `PLAN-WORLD-SCALE.md`'s orbit and already built (`world/o
 - **The ground under an overpass** — not furniture, but the reason the rest is visible: an elevated
   carriageway is a deck, never the ground (`world/overpass.ts isDeck`, physics `physGroundAt` +
   streamed trimesh `decksNear`). See the commit and `probes/corridor-overpass.mjs`.
+- **The one bug underneath all of it (fixed, `f7cf98b`)** — a branch was tiled by its first vertex, so
+  a road that bridges a tile it does not start in streamed no spline there and the deck had nothing to
+  carry. `_vector_tiles` now writes a way into every tile its vertices fall in (`_WAY_COORDS`), and the
+  viewer dedupes by id (`takeBranch`, `addBranchSegments`) so a road in two loaded tiles is built
+  once. `_load_tiled` dedupes too, so a re-tile does not multiply. Verified on dc-metro against a
+  serve-time proxy applying the same replication: the Whitfield Chapel Road overpass carries the car
+  at y≈58.5 (sank 0); before, it fell to ≈50.4 in a second.
 
 Everything else below is designed and not built.
 
@@ -234,6 +241,7 @@ A branch is tiled by its **first point** (`_TILE_KEY` in `export.py`), and the v
 branch only when the eye reaches that tile. A long road whose first point is far from part of its
 own length is therefore missing exactly where you are — which is how the dc-metro overpass ramp was
 absent from the grid under its own deck (`probes/corridor-overpass.mjs` documents this). Every
-"furniture missing at spot X" report can be this rather than a builder bug. Fixing it — key a way to
-**every** tile its geometry touches, or stream by bbox overlap — should probably come before more
-furniture, because otherwise each new kind inherits the same holes.
+"furniture missing at spot X" report can be this rather than a builder bug.
+
+**Fixed, `f7cf98b`.** `_vector_tiles` keys a polyline to every tile its vertices fall in; the viewer
+dedupes replicated ways by id. The new kinds below no longer inherit the holes.

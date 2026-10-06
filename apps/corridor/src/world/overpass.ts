@@ -64,6 +64,8 @@ export function deckRibbon(
   /** bare earth under a SITE point: x east, y north (-world z) — the DEM sampler */
   earthAt: (x: number, y: number) => number,
   clear: number,
+  /** drop a quad: for a carriageway whose line merely duplicates a wider one (see scene.ts) */
+  skipQuad?: (a: DeckStation, b: DeckStation) => boolean,
 ): DeckGeom | null {
   if (!list || list.length < 2) return null
   const pos: number[] = []
@@ -76,6 +78,7 @@ export function deckRibbon(
     const dz = B.z - A.z
     const seg = Math.hypot(dx, dz)
     if (seg < 0.5 || seg > 12) continue
+    if (skipQuad && skipQuad(A, B)) continue
     const midx = (A.x + B.x) / 2
     const midz = (A.z + B.z) / 2
     if ((A.y + B.y) / 2 - earthAt(midx, -midz) <= clear) continue

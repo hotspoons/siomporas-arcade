@@ -1970,7 +1970,35 @@ if (uLodOn > 0.5) {
      * Site frame (x east, y north, z up) — `addSurface` converts to the physics frame once.
      */
     const deckCache = new Map<number, { positions: Float32Array; indices: Uint32Array } | null>()
-    const buildDeck = (who: number) => deckRibbon(stationsByWho[who], heightAt, T.OVERPASS_CLEAR_M)
+    /**
+     * Does this carriageway station merely duplicate a WIDER one on the same line?
+     *
+     * An OSM interchange's ramp shares the main road's centreline — its shape points sit on it — a
+     * metre higher. That is not a second structure: the wider road is already there, drawn and
+     * collided. The ramp's own surface, deck collider and bridge concrete are all suppressed where
+     * this is true, or the hero car wedges under asphalt nobody can see (Rich, 2026-10-06). The
+     * parallel-direction test keeps at-grade cross streets — which run ACROSS us — out of it.
+     */
+    const dupAt = (self: number, x: number, y: number, z: number, half: number, hx: number, hz: number): boolean => {
+      const c0 = Math.floor(x / stCell), c1 = Math.floor(z / stCell)
+      const rr = Math.ceil((half + 3) / stCell)
+      for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) {
+        for (const p of stGrid.get(`${c0 + a},${c1 + b}`) ?? []) {
+          if (p.who === self) continue
+          if (!(p.half > half + 0.5)) continue
+          if (p.y == null || Math.abs(p.y - y) > 2.5) continue
+          if (p.dx * hx + p.dz * hz < 0.7) continue
+          if (Math.abs((p.x - x) * hz - (p.z - z) * hx) > half + 0.5) continue
+          return true
+        }
+      }
+      return false
+    }
+    const buildDeck = (who: number) => deckRibbon(stationsByWho[who], heightAt, T.OVERPASS_CLEAR_M, (a, b) => {
+      const hx = b.x - a.x, hz = b.z - a.z
+      const h = Math.hypot(hx, hz) || 1
+      return dupAt(who, (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2, (a.half + b.half) / 2, hx / h, hz / h)
+    })
     decksNearOut = (x, z, r) => {
       const n = Math.ceil(r / stCell) + 1
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
@@ -2355,21 +2383,7 @@ if (uLodOn > 0.5) {
       const r = branchAts[i].at(s)
       const q = r.pos
       const h = Math.hypot(r.dir.x, r.dir.z) || 1
-      const hx = r.dir.x / h, hz = r.dir.z / h
-      const half = branchAts[i].half
-      const c0 = Math.floor(q.x / stCell), c1 = Math.floor(q.z / stCell)
-      const rr = Math.ceil((half + 3) / stCell)
-      for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) {
-        for (const p of stGrid.get(`${c0 + a},${c1 + b}`) ?? []) {
-          if (p.who === branchWho0 + i) continue
-          if (!(p.half > half + 0.5)) continue
-          if (p.y == null || Math.abs(p.y - q.y) > 2.5) continue
-          if (p.dx * hx + p.dz * hz < 0.7) continue
-          if (Math.abs((p.x - q.x) * hz - (p.z - q.z) * hx) > half + 0.5) continue
-          return true
-        }
-      }
-      return false
+      return dupAt(branchWho0 + i, q.x, q.y, q.z, branchAts[i].half, r.dir.x / h, r.dir.z / h)
     }
     const buildBranchRoad = async (i: number, budget: Budget) => {
       if (roadBuilt.has(i)) return

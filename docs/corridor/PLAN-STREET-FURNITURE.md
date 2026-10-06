@@ -78,6 +78,11 @@ S4-3 (school) with an S5-1 fluorescent yellow-green outline, plus a speed plate.
 `export.py` — a list of `{ s, side, kind: 'school'|'school_speed', speed }` derived from the OSM
 ways/points, which is a small bake change and not a rebake of the heavy arrays.
 
+*Answered 2026-10-06:* `amenity=school` **does** survive — `vt.counts.pois` is 13 873 and schools are
+in the tiled `pois` (three in a six-tile sample). So a first pass can place a sign on the carriageway
+nearest each school POI without any bake change; a proper zone-edge pair still wants a `school_zones`
+array (the start/end and the `maxspeed:school` span are not recoverable from the point alone).
+
 **Approach.** For each zone edge, place a post at the kerb the same way `buildFurniture` places a
 mast (step sideways with `edgeDistance` until clear), facing **against** travel so the driver reads
 it. A zone start gets the diamond; the paired end gets the optional END SCHOOL ZONE plate. Colour

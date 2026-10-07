@@ -124,7 +124,8 @@ function ribbon(
 
 // A long way is written into every tile it crosses (export.py `_WAY_COORDS`), so the same path can
 // arrive from two cells. `takeBranch` dedupes roads by id; trails ride `sidewalks`, which has no
-// such dedupe, so this does it. Clearing on a slug change keeps a reload from skipping a real way.
+// such dedupe, so this does it. Page-lifetime, like the `_vtiles` cache: it resets on a reload and
+// clears when the slug changes, which is the same scope every other viewer cache here uses.
 let drawnSlug = ''
 const drawnTrailIds = new Set<string>()
 

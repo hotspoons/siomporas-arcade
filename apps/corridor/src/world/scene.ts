@@ -29,7 +29,7 @@ import { deckRibbon, isDeck } from './overpass'
 import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
-import { buildBuildings, buildRoadIndex, type TexturePool } from './buildings'
+import { buildBuildings, buildRoadIndex, buildTiming, type TexturePool } from './buildings'
 import { loadSurfacesDoc, resolveSurfaceSets, type SurfacesDoc } from '../assets/surfacesdoc'
 import { buildPower } from './power'
 import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './furniture'
@@ -209,6 +209,8 @@ export interface Site {
   pyramidStream: PyramidStream | null
   /** how many parsed vector tiles are cached; the LRU cap bounds this on a long drive */
   vtileCache: () => number
+  /** accumulated building-build timings, so a probe can see massing vs dressing vs normals */
+  buildingsTiming: () => typeof buildTiming
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
   /** the lowest elevation (m) among the terrain tiles now held; the sea plane's visibility gate */
@@ -4232,6 +4234,8 @@ if (uLodOn > 0.5) {
     pyramidStream: pyr,
     /** how many parsed vector tiles are cached; the LRU cap bounds this on a long drive */
     vtileCache: () => vectorTileCacheSize(),
+    /** where the building build time went: massing loop, dressing loop, final normals pass */
+    buildingsTiming: () => buildTiming,
     heightAt,
     lowestGround,
     graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst }),

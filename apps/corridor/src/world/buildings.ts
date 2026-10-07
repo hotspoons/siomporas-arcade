@@ -15,8 +15,8 @@ import * as THREE from 'three'
 import type { Manifest } from './site'
 import { Budget } from './budget'
 import { RoadIndex, planDressing, type DressingPart, type DressingSite, type Footprint } from './dressing'
-import { BUILDING_DRESSING, DRESS_WINDOW_WALLS } from '../tuning'
-import { pickFromPool } from '../assets/surfacesdoc'
+import { BUILDING_DRESSING, DRESS_WINDOW_WALLS, STREAM_LOCAL } from '../tuning'
+import { buildMassing, type MassArrays, type MassInput, type MassPool } from './massing'
 import kitSpec from '../../../../tools/assetlib/specs/buildings-dressing.json'
 
 /** site x, y (north), z (up) → three.js world; the same mapping scene.ts uses, kept local to avoid an import cycle */
@@ -30,99 +30,14 @@ export interface BuildingStats {
   dressed: number
 }
 
-/** Palette: siding by a stable hash of position, roofs darker, so a street is not one colour. */
-const WALLS: [number, number, number][] = [
-  [0.82, 0.78, 0.70], // cream
-  [0.72, 0.73, 0.68], // sage grey
-  [0.68, 0.60, 0.52], // tan
-  [0.55, 0.42, 0.36], // brick
-  [0.80, 0.80, 0.80], // white
-  [0.48, 0.52, 0.50], // slate green
-  [0.64, 0.56, 0.44], // clapboard
-]
-const ROOFS: [number, number, number][] = [
-  [0.28, 0.26, 0.25],
-  [0.34, 0.30, 0.27],
-  [0.24, 0.24, 0.26],
-  [0.38, 0.28, 0.24],
-]
-
 /**
- * Carve a footprint into rectangles, in the footprint's own frame.
- *
- * Rich: "steepled roofs don't follow the OSM data for the house layout." The first roof was one
- * ridge along the minimum rotated rectangle of the whole ring, so an L-shaped house wore a
- * bounding-box hat. A straight skeleton is the proper answer and a lot of code; suburban
- * footprints are rectilinear in practice, so this rasterises the ring at `cell` metres in the
- * frame of its long axis and pulls out the largest all-inside rectangle repeatedly (the
- * histogram-and-stack maximal rectangle, O(cells) a pass) until the ring is covered or the next
- * piece would be too narrow to roof. Each rectangle gets its own gable. An L is two gables that
- * meet; a T is three; a plain box is still one.
+ * Where the build time goes, accumulated across every cell. A probe reads it to decide what is
+ * worth moving off the main thread: the massing loop (walls, the roof carve), the dressing loop,
+ * and the final `computeVertexNormals` pass over the merged arrays.
  */
-function carveRects(ring: [number, number][], cx: number, cy: number, ux: number, uy: number, cell: number): { u0: number; u1: number; v0: number; v1: number }[] {
-  // the ring in the local frame: u along the long axis, v across
-  const loc = ring.map(([x, y]) => [(x - cx) * ux + (y - cy) * uy, -(x - cx) * uy + (y - cy) * ux] as [number, number])
-  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity
-  for (const [u, v] of loc) { if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v }
-  const cols = Math.max(1, Math.ceil((u1 - u0) / cell)), rows = Math.max(1, Math.ceil((v1 - v0) / cell))
-  if (cols * rows > 12000) return []
-  const inside = new Uint8Array(cols * rows)
-  let total = 0
-  for (let r = 0; r < rows; r++) {
-    const v = v0 + (r + 0.5) * cell
-    for (let c = 0; c < cols; c++) {
-      const u = u0 + (c + 0.5) * cell
-      // even-odd point in polygon
-      let hit = false
-      for (let i = 0, j = loc.length - 1; i < loc.length; j = i++) {
-        const [ui, vi] = loc[i], [uj, vj] = loc[j]
-        if (vi > v !== vj > v && u < ((uj - ui) * (v - vi)) / (vj - vi) + ui) hit = !hit
-      }
-      if (hit) { inside[r * cols + c] = 1; total++ }
-    }
-  }
-  const out: { u0: number; u1: number; v0: number; v1: number }[] = []
-  let covered = 0
-  const heights = new Int32Array(cols)
-  for (let pass = 0; pass < 6 && covered < total * 0.94; pass++) {
-    // largest rectangle of uncovered inside cells
-    let best = { area: 0, r0: 0, r1: 0, c0: 0, c1: 0 }
-    heights.fill(0)
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) heights[c] = inside[r * cols + c] ? heights[c] + 1 : 0
-      const stack: number[] = []
-      for (let c = 0; c <= cols; c++) {
-        const h = c < cols ? heights[c] : 0
-        while (stack.length && heights[stack[stack.length - 1]] >= h) {
-          const top = stack.pop()!
-          const hh = heights[top]
-          const left = stack.length ? stack[stack.length - 1] + 1 : 0
-          const area = hh * (c - left)
-          if (area > best.area) best = { area, r0: r - hh + 1, r1: r, c0: left, c1: c - 1 }
-        }
-        stack.push(c)
-      }
-    }
-    const w = (best.c1 - best.c0 + 1) * cell, d = (best.r1 - best.r0 + 1) * cell
-    if (best.area === 0 || Math.min(w, d) < 2.4) break
-    for (let r = best.r0; r <= best.r1; r++) for (let c = best.c0; c <= best.c1; c++) { inside[r * cols + c] = 0; covered++ }
-    out.push({ u0: u0 + best.c0 * cell, u1: u0 + (best.c1 + 1) * cell, v0: v0 + best.r0 * cell, v1: v0 + (best.r1 + 1) * cell })
-  }
-  return out
-}
+export const buildTiming = { calls: 0, footprints: 0, massMs: 0, dressMs: 0, normMs: 0, workerMass: 0, localMass: 0 }
 
-function hash2(x: number, y: number): number {
-  let n = Math.imul(Math.round(x * 7.3) | 0, 374761393) ^ Math.imul(Math.round(y * 7.3) | 0, 668265263)
-  n = Math.imul(n ^ (n >>> 13), 1274126177)
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967296
-}
-
-/** Signed area of a ring in site coords; positive is counter-clockwise. */
-function signedArea(ring: [number, number][]): number {
-  let a = 0
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1]
-  return a / 2
-}
+/* the massing palette, carve and pushTri live in massing.ts now, off the main thread */
 
 interface Build {
   pos: number[]
@@ -146,21 +61,7 @@ export interface TexturePool {
 }
 
 /** the building's textures, or nothing: the current triangle's layer while a building is pushed */
-let currentLayer = -1
-
-function pushTri(b: Build, a: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, colour: [number, number, number], pal: number) {
-  const k = b.pos.length / 3
-  const textured = currentLayer >= 0
-  for (const v of [a, c, d]) {
-    b.pos.push(v.x, v.y, v.z)
-    // a textured face is drawn white under its map; the palette colour would tint the bricks
-    if (textured) b.col.push(1, 1, 1)
-    else b.col.push(colour[0], colour[1], colour[2])
-    b.pal.push(pal)
-    b.lay.push(currentLayer)
-  }
-  b.idx.push(k, k + 1, k + 2)
-}
+/* the massing's `pushTri` and layer cursor live in massing.ts now — this file draws dressing only */
 
 /* ------------------------------------------------------------------------------------------- *
  * DRESSING
@@ -405,22 +306,116 @@ async function texturePoolMaterial(mat: THREE.MeshStandardMaterial, pool: Textur
   mat.needsUpdate = true
 }
 
+/* ------------------------------------------------------------------------------------------- *
+ * MASSING WORKER
+ *
+ * `buildMassing` (massing.ts) is pure; this is only the plumbing that runs it on a worker. The
+ * worker returns the merged arrays as transferables and the main thread wraps them, so none of
+ * the per-vertex work — or the massing's allocation — happens on the main thread. With
+ * STREAM_LOCAL = 0 (or no Worker) it falls back to building on the budgeted main thread.
+ * ------------------------------------------------------------------------------------------- */
+
+let massWorker: Worker | null = null
+let massSeq = 0
+const massPending = new Map<number, { ok: (v: MassArrays) => void; fail: (e: Error) => void }>()
+let massWorkerBroken = false
+
+function massWorkerFor(): Worker | null {
+  if (massWorkerBroken || STREAM_LOCAL <= 0) return null
+  if (typeof Worker === 'undefined') return null
+  if (!massWorker) {
+    try {
+      massWorker = new Worker(new URL('./buildings.worker.ts', import.meta.url), { type: 'module' })
+    } catch (err) {
+      massWorkerBroken = true
+      console.warn('building massing worker unavailable; building on the main thread', err)
+      return null
+    }
+    massWorker.onmessage = (ev: MessageEvent) => {
+      const p = massPending.get(ev.data.id as number)
+      if (!p) return
+      massPending.delete(ev.data.id as number)
+      if (ev.data.error) p.fail(new Error(String(ev.data.error)))
+      else p.ok({
+        pos: ev.data.pos as Float32Array,
+        col: ev.data.col as Float32Array,
+        pal: ev.data.pal as Int16Array,
+        lay: ev.data.lay as Float32Array,
+        idx: ev.data.idx as Uint32Array,
+        norm: ev.data.norm as Float32Array,
+        gabled: ev.data.gabled as number,
+        fromLidar: ev.data.fromLidar as number,
+      })
+    }
+    massWorker.onerror = (ev) => {
+      massWorkerBroken = true
+      console.warn('building massing worker failed; building on the main thread', ev.message)
+      for (const p of massPending.values()) p.fail(new Error(ev.message || 'massing worker'))
+      massPending.clear()
+      massWorker?.terminate()
+      massWorker = null
+    }
+  }
+  return massWorker
+}
+
+function massOffThread(list: MassInput[], pool: MassPool | null): Promise<MassArrays> {
+  const worker = massWorkerFor()
+  if (!worker) return Promise.reject(new Error('no massing worker'))
+  const id = ++massSeq
+  return new Promise((ok, fail) => {
+    const timer = setTimeout(() => {
+      if (!massPending.has(id)) return
+      massPending.delete(id)
+      fail(new Error('building massing timed out'))
+    }, 30000)
+    massPending.set(id, {
+      ok: (v) => { clearTimeout(timer); ok(v) },
+      fail: (e) => { clearTimeout(timer); fail(e) },
+    })
+    worker.postMessage({ id, list, pool })
+  })
+}
+
+/** The massing arrays: the worker when there is one, else `buildMassing` on the budget. */
+async function massArrays(list: MassInput[], pool: MassPool | null, budget: Budget): Promise<MassArrays> {
+  if (massWorkerFor()) {
+    try {
+      const r = await massOffThread(list, pool)
+      buildTiming.workerMass++
+      return r
+    } catch (err) {
+      console.warn('building massing worker failed; building on the main thread', err)
+    }
+  }
+  buildTiming.localMass++
+  return buildMassing(list, pool, () => budget.tick())
+}
+
 export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean; pool?: TexturePool | null; budget?: Budget } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
   const group = new THREE.Group()
   group.name = 'buildings'
   const list = manifest.buildings ?? []
-  const b: Build = { pos: [], col: [], pal: [], lay: [], idx: [] }
   // the dressing is its own geometry, not more triangles in the massing: a style's `recolour`
   // sweeps every massing vertex through the wall and roof palettes, and a window swept to a
   // siding colour is a hole that fills itself in
   const dg: Build = { pos: [], col: [], pal: [], lay: [], idx: [] }
   const roads = opts.roads ?? buildRoadIndex(manifest)
   const dress = opts.dress !== false && BUILDING_DRESSING > 0
-  let gabled = 0
   let fromLidar = 0
   let dressed = 0
 
   const budget = opts.budget ?? new Budget(sliceMs)
+  buildTiming.calls++
+  buildTiming.footprints += list.length
+
+  // PASS 1 — the ground, and the massing inputs. `groundAt` (a strip near the road, the DEM
+  // beyond) is the one main-thread sampler, and it is sampled once per ring vertex; the massing
+  // is a pure function of these numbers, so it runs in the worker and only the merged arrays
+  // come back.
+  const sites: MassInput[] = []
+  const dressList: { bd: Footprint; base: number; cx: number; cy: number }[] = []
+  const tGround0 = performance.now()
   for (const bd of list) {
     await budget.tick()
     const ring = (bd.ring ?? []) as [number, number][]
@@ -436,129 +431,53 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     }
     if (!Number.isFinite(base)) continue
     base -= 0.3
-
-    // wind the ring counter-clockwise so wall quads face outward
-    const cw = signedArea(ring) < 0
-    const r = cw ? [...ring].reverse() : ring
-    const seed = hash2(r[0][0], r[0][1])
-    const wi = Math.floor(seed * WALLS.length) % WALLS.length
-    const ri = Math.floor(hash2(r[0][1], r[0][0]) * ROOFS.length) % ROOFS.length
-    const wall = WALLS[wi]
-    const roof = ROOFS[ri]
-    // the world's pools, when it has them: a wall material and a roof material per building,
-    // stable for the building and the seed (surfacesdoc.ts)
-    const pool = opts.pool ?? null
-    const wallLayer = pool?.walls.length ? pool.walls.findIndex((w) => w.id === pickFromPool(pool.walls.map((w) => w.id), Math.floor(seed * 65536), pool.seed)) : -1
-    const roofLayer = pool?.roofs.length ? pool.walls.length + pool.roofs.findIndex((w) => w.id === pickFromPool(pool.roofs.map((w) => w.id), Math.floor(hash2(r[0][1], r[0][0]) * 65536), pool.seed + 7)) : -1
-    currentLayer = wallLayer
-
-    // house-sized things get a gable; sheds, strip malls, warehouses and towers stay flat
-    const area = bd.area_m2 ?? 0
-    const rect = bd.rect
-    const gable = !!rect && area > 25 && area < 500 && h < 12 && rect.d > 3
-    const eaves = gable ? base + h * 0.7 : base + h
-
-    for (let i = 0; i < r.length; i++) {
-      const [x0, y0] = r[i]
-      const [x1, y1] = r[(i + 1) % r.length]
-      const a = toWorld(x0, y0, base)
-      const c = toWorld(x1, y1, base)
-      const d = toWorld(x1, y1, eaves)
-      const e = toWorld(x0, y0, eaves)
-      pushTri(b, a, c, d, wall, wi)
-      pushTri(b, a, d, e, wall, wi)
-    }
-
-    if (gable && rect) {
-      // rect.yaw_deg is a MATH angle counter-clockwise from east describing the long axis (see
-      // buildings.py) — the long axis is therefore (cos, sin) of it, in SITE coordinates. The
-      // ring is carved into rectangles in that frame and each one gets a gable along ITS long
-      // side; a ring that carves to nothing (a round or diagonal footprint) falls back to one
-      // ridge over the bounding rectangle, as before.
-      const cxs = r.reduce((s, p) => s + p[0], 0) / r.length
-      const cys = r.reduce((s, p) => s + p[1], 0) / r.length
-      const a2 = (rect.yaw_deg * Math.PI) / 180
-      const ux = Math.cos(a2), uy = Math.sin(a2) // along the long axis
-      const vx = -uy, vy = ux // across it
-      const cell = Math.max(0.5, Math.sqrt(area) / 40)
-      let pieces = carveRects(r, cxs, cys, ux, uy, cell)
-      if (!pieces.length) pieces = [{ u0: -rect.w / 2, u1: rect.w / 2, v0: -rect.d / 2, v1: rect.d / 2 }]
-      const ridgeY = base + h
-      const OVER = 0.3 // eaves overhang past the wall
-      const at = (u: number, v: number, y: number) => toWorld(cxs + ux * u + vx * v, cys + uy * u + vy * v, y)
-      for (const q of pieces) {
-        const w = q.u1 - q.u0, d = q.v1 - q.v0
-        const alongU = w >= d // the ridge runs along the longer side
-        const pu0 = q.u0 - OVER, pu1 = q.u1 + OVER, pv0 = q.v0 - OVER, pv1 = q.v1 + OVER
-        // the ridge line, at the piece's centre across its short axis; a narrow piece stays
-        // lower so a porch roof does not tower over the house it is attached to
-        const rise = Math.min(h - (eaves - base), Math.min(w, d) * 0.45)
-        const ry = eaves + rise
-        const um = (pu0 + pu1) / 2, vm = (pv0 + pv1) / 2
-        const e00 = at(pu0, pv0, eaves), e10 = at(pu1, pv0, eaves), e11 = at(pu1, pv1, eaves), e01 = at(pu0, pv1, eaves)
-        if (alongU) {
-          const rA = at(pu0, vm, ry), rB = at(pu1, vm, ry)
-          currentLayer = roofLayer
-          pushTri(b, e00, e10, rB, roof, 100 + ri)
-          pushTri(b, e00, rB, rA, roof, 100 + ri)
-          pushTri(b, e11, e01, rA, roof, 100 + ri)
-          pushTri(b, e11, rA, rB, roof, 100 + ri)
-          currentLayer = wallLayer
-          pushTri(b, e00, rA, e01, wall, wi)
-          pushTri(b, e10, e11, rB, wall, wi)
-        } else {
-          const rA = at(um, pv0, ry), rB = at(um, pv1, ry)
-          currentLayer = roofLayer
-          pushTri(b, e10, e11, rB, roof, 100 + ri)
-          pushTri(b, e10, rB, rA, roof, 100 + ri)
-          pushTri(b, e01, e00, rA, roof, 100 + ri)
-          pushTri(b, e01, rA, rB, roof, 100 + ri)
-          currentLayer = wallLayer
-          pushTri(b, e00, e10, rA, wall, wi)
-          pushTri(b, e11, e01, rB, wall, wi)
-        }
-      }
-      void ridgeY
-      gabled++
-    } else {
-      // flat roof: fan from the centroid, which is exact for convex rings and close enough for
-      // the simplified L-shapes the bake emits
-      const cxs = r.reduce((s, p) => s + p[0], 0) / r.length
-      const cys = r.reduce((s, p) => s + p[1], 0) / r.length
-      const mid = toWorld(cxs, cys, eaves)
-      currentLayer = roofLayer
-      for (let i = 0; i < r.length; i++) {
-        const [x0, y0] = r[i]
-        const [x1, y1] = r[(i + 1) % r.length]
-        pushTri(b, mid, toWorld(x0, y0, eaves), toWorld(x1, y1, eaves), roof, 100 + ri)
-      }
-    }
-    currentLayer = -1
-
+    sites.push({ ring, height: h, heightSrc: bd.height_src, area: bd.area_m2 ?? 0, rect: bd.rect ?? null, base })
     if (dress) {
-      const c: [number, number] = [r.reduce((t, q) => t + q[0], 0) / r.length, r.reduce((t, q) => t + q[1], 0) / r.length]
-      dressed += dressBuilding(dg, bd as Footprint, base, roads?.nearest(c[0], c[1]) ?? null, groundAt)
+      let cx = 0, cy = 0
+      for (const p of ring) { cx += p[0]; cy += p[1] }
+      dressList.push({ bd: bd as Footprint, base, cx: cx / ring.length, cy: cy / ring.length })
     }
   }
+  buildTiming.massMs += performance.now() - tGround0
+
+  const pool: MassPool | null = opts.pool
+    ? { wallIds: opts.pool.walls.map((w) => w.id), roofIds: opts.pool.roofs.map((w) => w.id), seed: opts.pool.seed }
+    : null
+  const mass = await massArrays(sites, pool, budget)
+
+  // PASS 2 — the dressing. Its one main-thread input beyond the massing's is the street facing,
+  // which comes from the road index, so it stays here for now (moving it means precomputing the
+  // driveway slabs' corner ground samples — a follow-up).
+  const tDress0 = performance.now()
+  if (dress) {
+    for (const d of dressList) {
+      await budget.tick()
+      dressed += dressBuilding(dg, d.bd, d.base, roads?.nearest(d.cx, d.cy) ?? null, groundAt)
+    }
+  }
+  buildTiming.dressMs += performance.now() - tDress0
 
   let recolour = (_w: [number, number, number][], _r: [number, number, number][]) => {}
-  if (b.idx.length) {
+  const tn = performance.now()
+  if (mass.idx.length) {
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3))
-    const colAttr = new THREE.Float32BufferAttribute(b.col, 3)
+    geo.setAttribute('position', new THREE.BufferAttribute(mass.pos, 3))
+    const colAttr = new THREE.BufferAttribute(mass.col, 3)
     geo.setAttribute('color', colAttr)
-    geo.setAttribute('layer', new THREE.Float32BufferAttribute(b.lay, 1))
-    geo.setIndex(b.idx)
-    geo.computeVertexNormals()
+    geo.setAttribute('layer', new THREE.BufferAttribute(mass.lay, 1))
+    // the worker already computed the faces' normals — the massing shares no vertices, so each
+    // vertex's normal is its face normal, and there is no computeVertexNormals pass here
+    geo.setAttribute('normal', new THREE.BufferAttribute(mass.norm, 3))
+    geo.setIndex(new THREE.BufferAttribute(mass.idx, 1))
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide })
-    if (opts.pool && b.lay.some((l) => l >= 0)) await texturePoolMaterial(mat, opts.pool)
+    if (opts.pool && mass.lay.some((l) => l >= 0)) await texturePoolMaterial(mat, opts.pool)
     const mesh = new THREE.Mesh(geo, mat)
     mesh.name = 'buildings:massing'
     group.add(mesh)
     // a style swaps the palettes: every vertex remembers which entry it drew, so this is one
     // pass over the colour attribute and no geometry — and a textured vertex is left alone
-    const pal = Int16Array.from(b.pal)
-    const lay = Int16Array.from(b.lay)
+    const pal = mass.pal
+    const lay = mass.lay
     recolour = (walls, roofs) => {
       const arr = colAttr.array as Float32Array
       for (let i = 0; i < pal.length; i++) {
@@ -585,7 +504,8 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     mesh.name = 'buildings:dressing'
     group.add(mesh)
   }
-  return { group, stats: { count: list.length, gabled, fromLidar, dressed }, recolour }
+  buildTiming.normMs += performance.now() - tn
+  return { group, stats: { count: list.length, gabled: mass.gabled, fromLidar, dressed }, recolour }
 }
 
 /**

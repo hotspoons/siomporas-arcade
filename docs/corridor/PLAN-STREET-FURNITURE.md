@@ -279,7 +279,9 @@ pass. Needs a rebake.
    `kind` with `surface`/`trailblazed`; `trail.ts buildTrailsAndRail` sweeps the ribbons. Needs a
    rebake. Sleepers and tunnel portals still open.
 5. **Tunnels (bridge side, see `PLAN-WORLD-SCALE.md`)** — the crossing tags now reach the viewer;
-   the portal/interior mesh is not written.
+   the portal/interior mesh is not written. **Not attempted (2026-10-07):** a portal needs the road
+   strip and the camera-inside decision, both in the shared `scene.ts`, and it is a screen-check
+   feature; deferred rather than guessed at blind.
 
 Nothing here raises `MAX_M` or touches the sharded bake; every item is per-tile or resident-small.
 

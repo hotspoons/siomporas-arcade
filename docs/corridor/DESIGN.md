@@ -372,6 +372,17 @@ within 7 m of a real mapped sidewalk is skipped (61 of 809 on Crofton). 748 side
   a raster that can be nodata (a VRT through `LazyRaster`, an out-of-coverage DEM) must be filled
   or guarded before it is written. One NaN token cost the Crofton network site its entire
   manifest (2026-09-21).
+- **NAIP no-data is exact zero across all three channels, and every NAIP read must fill it.** A
+  `boundless=True, fill_value=0` read stamps zeros wherever a window runs past the source, so an
+  edge of coverage comes out as a black slab with a dead straight edge; the eye reads it as a hole
+  in the ground. The per-tile path and the pyramid each replaced it with the window's own valid
+  mean, but `overview()` did not — and because the overview is ONE mosaic of the whole site, its
+  holes were full-height bands straight across the ground (on dc-metro-take-2, 38 % of
+  `naip_overview.jpg`; 2026-10-07). All three now share `network_tiles._fill_naip_blank`. A window
+  that is entirely no-data is left alone: no valid mean exists to borrow, and NAIP absent for the
+  whole view is a different failure than an edge running past coverage. Watch for the same shape
+  wherever a coarse fallback layer is assembled differently from the fine one — the fine path will
+  be fixed and the fallback silently won't.
 
 ## 7 · How to add a road (one page)
 

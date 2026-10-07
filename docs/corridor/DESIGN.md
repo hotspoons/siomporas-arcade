@@ -70,6 +70,19 @@ The near/impostor switch is a hard boundary today (a `TREE_FADE_M` crossfade is 
 agent's lane). Impostor cards lie flat above `IMPOSTOR_FLAT_PITCH` so a top-down view is not
 fanned cards over the road.
 
+### The streamed terrain pyramid
+
+`lod/pyramidstream.ts` streams geo-quadtree tiles z8–z14 and drops a parent under a resident child.
+**A tile is loaded nearest the eye first.** `diff()` returns the wanted set in the selector's
+coarse-to-fine walk order, which leaves the tile under the camera near the END, and the byte budget
+fills from the front — so the budget filled with the far coarse ring and the one tile the eye stood
+on never loaded. Its parent stayed resident for good, and a parent samples the height every ~100 m,
+so on a slope it rose metres above the road, rail and grass laid on the 2 m surface: the coarse
+ground poking through them (dc-metro-take-2, 2026-10-07). The load is now ordered by distance to the
+eye, so the ground under the camera is fetched first and the far ring waits. Raising `PYR_DROP_M`
+cannot fix this: the drop only fires when a finer child is *already resident*, and the bug is that
+the child never arrived.
+
 ## 4 · Grass as tiles
 
 The first grass re-seeded the whole ring every 5 m of travel — up to 400 000 blades, a ground
@@ -383,6 +396,14 @@ within 7 m of a real mapped sidewalk is skipped (61 of 809 on Crofton). 748 side
   whole view is a different failure than an edge running past coverage. Watch for the same shape
   wherever a coarse fallback layer is assembled differently from the fine one — the fine path will
   be fixed and the fallback silently won't.
+- **A sharded bake fetches NAIP only along each shard's OWN chains' corridor (`buffer(300 m)`).** If
+  a shard's naip stage came out empty or partial, the merged VRT has a ~1 km black patch with a dead
+  straight edge — dc-metro-take-2 had shards 1,2,7 empty (19 KB) and 8,10 partial (10–13 MB) against
+  a full ~150 MB, leaving black ground beside the road (2026-10-07). The service had data, so the fix
+  is to re-run those shard naip stages (`corridor shard <slug> <i> --skip dem,lidar,geology,horizon`),
+  then **rebuild the merged overviews** (`shards.add_overviews_all`) before the export. `pyramid._sample`
+  reads the merged `naip_1m.tif` through GDAL, which uses `naip_1m.tif.ovr` when it decimates — a
+  stale overview serves the OLD holes even after the shards are replaced.
 
 ## 7 · How to add a road (one page)
 

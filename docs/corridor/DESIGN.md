@@ -218,6 +218,30 @@ tie, which in a subdivision is most junctions, the road that runs THROUGH outran
 ends at it. That is a T, and the stem stops. Only two equal roads both running through is a real
 crossroads. After the fix: 369 two-way, 27 all-way, 12 signalised, 522 signs.
 
+**No stop sign stands on a freeway** (2026-10-07, `agent/street-furniture`). Rich found a STOP on the
+shoulder of the Capital Beltway. Three defects, all in the *inference*, not the drawing:
+
+1. **The spine was ranked as a `secondary`.** `spine_utm.json`'s `primary` block carries the spine's
+   identity (`ident: "Capital Beltway"`) but not its OSM tags; the class lives in the spine's own
+   `segments` (154 of them, every one `highway=motorway`). `_roads` read only the block, found no
+   `highway`, and defaulted to `secondary` (rank 6). A `motorway_link` joins at rank 8 and therefore
+   OUTRANKED the motorway it merges into.
+2. **`main` could be empty even where a road runs through.** `main` held arms of the *top* rank that
+   *run through*; here the top rank was the ramp, which *ends*, so `main` was empty and the junction
+   fell to `all_way_stop` — every arm stops, the motorway included. That is the sign Rich saw.
+3. **A divided road read as a crossroads.** A divided highway is two one-way ways, and OSM splits a
+   road at every junction, so one road arrives as several ids. `main` saw the two carriageways as two
+   equal through roads and again went all-way (Baltimore-Washington Parkway, the Beltway's local/
+   express split, every divided arterial meeting a side street).
+
+The fixes: rank the spine from its `segments`; group arms by **corridor** (name, then `ident`/`ref`,
+never the `«unnamed»` placeholder) so one road is one road; and a **`motorway` carriageway is never a
+stopping arm** — whatever the inference or a stray OSM node said — with a junction left with no
+stopper marked `uncontrolled` rather than a stop. Measured on dc-metro-take-2: motorway arms that
+stop 3 → 0, trunk 18 → 2, all-way stops 3935 → 3422, stop signs 35934 → 33738. The two trunks left
+are both major roads meeting at a way boundary; a `trunk` in the US is often an at-grade arterial, so
+it is deliberately not blanket-exempt the way `motorway` is.
+
 **Exactly one phase is superior.** Testing "does this phase contain an arm of the top rank" made
 both phases superior at a crossing of two equal roads and produced a 252 s cycle — four minutes of
 green split two ways. It is now the phase holding the superior ROAD. Rich's timings: 120 s major,

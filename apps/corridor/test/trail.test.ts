@@ -1,7 +1,7 @@
 // What a trail is paved with, from its tags. Rich, 2026-10-06: "use trailblazed to decide
 // 'paving', e.g. dirt". The rule is arithmetic on OSM's vocabulary, so it is tested here.
 import { describe, expect, it } from 'vitest'
-import { buildTrailsAndRail, trailKind, trailPaving, type TrailRun } from '../src/world/trail'
+import { buildTrailsAndRail, sleeperPlacements, trailKind, trailPaving, type TrailRun } from '../src/world/trail'
 
 describe('routing a bake kind to a trail or a walk', () => {
   it('sends sidewalks and crossings to the concrete sweep', () => {
@@ -34,12 +34,34 @@ describe('sweeping trails and rail into ribbons', () => {
     expect(counts.trails).toBe(1)
   })
 
-  it('draws rail as ballast plus two steel ribbons', () => {
+  it('draws rail as ballast plus two steel ribbons and a sleeper bed', () => {
     const rail: TrailRun = { ...line, kind: 'rail', id: 'r9' }
     const { group, counts } = buildTrailsAndRail([rail], ground, 'site-c')
     expect(counts.rail).toBe(1)
-    // ballast + steel are two different colours, so two meshes
-    expect(group.children).toHaveLength(2)
+    // ballast + steel are two different colours, so two meshes; sleepers are one InstancedMesh
+    expect(group.children).toHaveLength(3)
+    expect(group.getObjectByName('rail:sleepers')).toBeTruthy()
+  })
+})
+
+describe('where the sleepers go', () => {
+  it('places one tie per spacing along a straight run, across the track', () => {
+    const ties = sleeperPlacements([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }], 1)
+    expect(ties).toHaveLength(11) // 0..10 inclusive
+    expect(ties[0]).toMatchObject({ x: 0, z: 0 })
+    // local +Z is the track (+x here), so angle = atan2(1, 0) = pi/2
+    expect(ties[1].angle).toBeCloseTo(Math.PI / 2, 6)
+    expect(ties[10].x).toBeCloseTo(10, 6)
+  })
+
+  it('interpolates height and carries the bend into the tie angle', () => {
+    const ties = sleeperPlacements([{ x: 0, y: 0, z: 0 }, { x: 10, y: 2, z: 0 }, { x: 10, y: 2, z: 10 }], 5)
+    const last = ties[ties.length - 1]
+    expect(last.x).toBeCloseTo(10, 6)
+    expect(last.z).toBeCloseTo(10, 6)
+    expect(last.y).toBeCloseTo(2, 6)
+    // the second leg runs toward +z, so local +Z is +z: atan2(0, 1) = 0
+    expect(last.angle).toBeCloseTo(0, 6)
   })
 })
 

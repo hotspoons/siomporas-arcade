@@ -277,11 +277,16 @@ pass. Needs a rebake.
    shared `scene.ts`.
 4. **Trails/rail (6)** — *built 2026-10-07 (first pass).* `_sidewalks` emits the ways under their own
    `kind` with `surface`/`trailblazed`; `trail.ts buildTrailsAndRail` sweeps the ribbons. Needs a
-   rebake. Sleepers and tunnel portals still open.
-5. **Tunnels (bridge side, see `PLAN-WORLD-SCALE.md`)** — the crossing tags now reach the viewer;
-   the portal/interior mesh is not written. **Not attempted (2026-10-07):** a portal needs the road
-   strip and the camera-inside decision, both in the shared `scene.ts`, and it is a screen-check
-   feature; deferred rather than guessed at blind.
+   rebake. **Sleepers now built (2026-10-07):** `trail.ts sleeperPlacements` stations a tie every
+   `RAIL_SLEEPER_SPACING_M` (0.65 m), each oriented across the track, drawn as one `InstancedMesh`
+   (`rail:sleepers`) rather than a mesh each. Pure and unit-tested. Viewer-only, no rebake.
+5. **Tunnels (bridge side, see `PLAN-WORLD-SCALE.md`)** — the crossing tags reach the viewer;
+   the portal/interior mesh is not written. **Still not attempted (2026-10-07):** a portal needs the
+   road strip and the camera-inside decision, both in the shared `scene.ts`, and it is a screen-check
+   feature; deferred rather than guessed at blind. **`scene.ts` is now free** (the other agent's
+   `spine` commits landed), but **dc-metro has no road tunnels to draw**: its only `tunnel=*`
+   crossings are 20 waterway culverts, so a road portal has nothing to verify against here. It waits
+   for a site that actually has one, or for the culvert-mouth question.
 
 Nothing here raises `MAX_M` or touches the sharded bake; every item is per-tile or resident-small.
 
@@ -296,6 +301,12 @@ shows the swept walk and kerb running beside the road — the "look at a screen"
 built per cell and do not accumulate there). Still open, and correctly so: the general entrance
 side-hint and tunnel portals need the shared `scene.ts`, which another agent is still editing
 uncommitted (HEAD `6e7d0bb`).
+
+**A second re-export is in flight (2026-10-07 17:xxZ)** for the freeway stop-sign fix (commit
+`60bf53a`, job `corridor-reexport-dc-stopsign`). The other agent committed and stopped, so this push
+also carried their `6e7d0bb` and `3d4a60f` (spine). The fix is bake-side only
+(`intersections.py`), so `--allow-missing` is used as before; verify the Beltway shoulder after it
+promotes.
 
 ---
 

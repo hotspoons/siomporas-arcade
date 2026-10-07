@@ -60,11 +60,19 @@ export const TRAIL_LIFT_M = 0.06
 /** rail steel sits on top of its ballast (m), and is drawn this narrow (m) */
 export const RAIL_STEEL_LIFT_M = 0.16
 export const RAIL_STEEL_W = 0.09
+/** the sleepers (ties) the steel is spiked to: their size, spacing along the track, and lift so a
+ *  tie sits on the ballast rather than in it (m) */
+export const RAIL_SLEEPER_W = 2.6
+export const RAIL_SLEEPER_H = 0.14
+export const RAIL_SLEEPER_THICK_M = 0.24
+export const RAIL_SLEEPER_SPACING_M = 0.65
+export const RAIL_SLEEPER_LIFT_M = TRAIL_LIFT_M + 0.09
 
 /** The ribbon colours, one material each. Not textures: these are metres across and seen at speed. */
 const TRAIL_HEX: Record<TrailPaving, number> = { dirt: 0x8a6b4a, gravel: 0xa39d92, paved: 0x8d8d86 }
 const RAIL_BALLAST_HEX = 0x6f6a63
 const RAIL_STEEL_HEX = 0x9aa0a6
+const RAIL_SLEEPER_HEX = 0x4a3b2a
 
 /** One baked path or rail way, as it arrives on `manifest.sidewalks`. */
 export interface TrailRun {
@@ -85,8 +93,41 @@ export function trailKind(kind: string): boolean {
   return kind !== 'sidewalk' && kind !== 'crossing'
 }
 
-/** accumulate one ribbon into a shared position/index buffer, one mesh per colour at the end */
-function ribbon(
+/**
+ * Where the sleepers go along a rail run: one every `spacing` metres, each carrying the local
+ * bearing so its long axis lies ACROSS the track. Pure, so the spacing and the interpolation are
+ * tested without a renderer. `pts` is already draped on the ground (`buildTrailsAndRail`), so the
+ * tie's own height is interpolated too and the caller only adds its lift.
+ */
+export function sleeperPlacements(
+  pts: { x: number; y: number; z: number }[],
+  spacing: number,
+): { x: number; y: number; z: number; angle: number }[] {
+  const out: { x: number; y: number; z: number; angle: number }[] = []
+  if (pts.length < 2 || spacing <= 0) return out
+  let s = 0
+  let next = 0
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]
+    const b = pts[i]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const dz = b.z - a.z
+    const seg = Math.hypot(dx, dz)
+    if (seg < 1e-6) continue
+    // local +Z runs down the track, so a tie's width (its local X) lies across it
+    const angle = Math.atan2(dx / seg, dz / seg)
+    while (next <= s + seg) {
+      const t = (next - s) / seg
+      out.push({ x: a.x + dx * t, y: a.y + dy * t, z: a.z + dz * t, angle })
+      next += spacing
+    }
+    s += seg
+  }
+  return out
+}
+
+/** accumulate one ribbon into a shared position/index buffer, one mesh per colour at the end */function ribbon(
   pts: { x: number; z: number; y: number }[],
   w: number,
   lift: number,
@@ -131,8 +172,8 @@ const drawnTrailIds = new Set<string>()
 
 /**
  * Sweep every baked trail and railway into a few meshes: one per paving (dirt/gravel/paved), one
- * ballast and one steel for the rails. No kerb, no clip, no corner join — a path has none of those,
- * which is the whole point.
+ * ballast and one steel for the rails, and one InstancedMesh of sleepers. No kerb, no clip, no corner
+ * join — a path has none of those, which is the whole point.
  */
 export function buildTrailsAndRail(
   runs: TrailRun[],
@@ -155,6 +196,7 @@ export function buildTrailsAndRail(
     }
     return s
   }
+  const sleepers: { x: number; y: number; z: number; angle: number }[] = []
 
   for (const r of runs) {
     if (!trailKind(r.kind)) continue
@@ -178,6 +220,9 @@ export function buildTrailsAndRail(
       const half = RAIL_GAUGE_M / 2
       ribbon(pts, RAIL_STEEL_W, TRAIL_LIFT_M + RAIL_STEEL_LIFT_M, half, steel.pos, steel.idx)
       ribbon(pts, RAIL_STEEL_W, TRAIL_LIFT_M + RAIL_STEEL_LIFT_M, -half, steel.pos, steel.idx)
+      for (const t of sleeperPlacements(pts, RAIL_SLEEPER_SPACING_M)) {
+        sleepers.push({ x: t.x, y: t.y + RAIL_SLEEPER_LIFT_M, z: t.z, angle: t.angle })
+      }
       counts.rail++
     } else {
       const paving = trailPaving({ surface: r.surface, trailblazed: r.trailblazed })
@@ -198,6 +243,28 @@ export function buildTrailsAndRail(
     mesh.name = `trail:${hex.toString(16)}`
     mesh.frustumCulled = false
     group.add(mesh)
+  }
+  // Sleepers are many identical boxes, so one InstancedMesh rather than a mesh each: a tie every
+  // RAIL_SLEEPER_SPACING_M over a whole network is tens of thousands of them.
+  if (sleepers.length) {
+    const geo = new THREE.BoxGeometry(RAIL_SLEEPER_W, RAIL_SLEEPER_H, RAIL_SLEEPER_THICK_M)
+    const mat = new THREE.MeshStandardMaterial({ color: RAIL_SLEEPER_HEX, roughness: 0.95, metalness: 0 })
+    const inst = new THREE.InstancedMesh(geo, mat, sleepers.length)
+    const m = new THREE.Matrix4()
+    const q = new THREE.Quaternion()
+    const up = new THREE.Vector3(0, 1, 0)
+    const one = new THREE.Vector3(1, 1, 1)
+    const p = new THREE.Vector3()
+    sleepers.forEach((t, i) => {
+      q.setFromAxisAngle(up, t.angle)
+      p.set(t.x, t.y, t.z)
+      m.compose(p, q, one)
+      inst.setMatrixAt(i, m)
+    })
+    inst.instanceMatrix.needsUpdate = true
+    inst.frustumCulled = false
+    inst.name = 'rail:sleepers'
+    group.add(inst)
   }
   counts.metres = Math.round(counts.metres)
   return { group, counts }

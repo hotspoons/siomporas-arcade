@@ -1687,17 +1687,27 @@ if (uLodOn > 0.5) {
   const gradeEye = new THREE.Vector3(NaN, NaN, NaN)
   let gradePumping = false
   let currentUnitKey = ''
+  /**
+   * How far a unit is from the eye for scheduling. The spine-window rebuild is positioned by
+   * `pavedS`, not by the eye, and a fast drive slides `pavedS` forward faster than the pump
+   * drains: the queued revamp is then left well behind the eye. Gating it on STREAM_BUILD_M (as
+   * every branch and building unit is) left it unselected forever — `pavedS` had already moved,
+   * so no further slide would fire either, and the spine's asphalt stayed a kilometre back with
+   * the pump idle and nothing pending. Rich, 2026-10-07: the outer carriageway of the Capital
+   * Beltway was grass where the car stood. One cheap unit, always in range once queued.
+   */
+  const unitDist = (u: GradeUnit) => u.key === 'spine-window' ? -Infinity : Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r
   /** the nearest unfinished unit inside STREAM_BUILD_M of the eye, or null */
   const nextUnit = (): GradeUnit | null => {
     let best: GradeUnit | null = null, bd = Infinity
     for (const u of gradeUnits) {
       if (u.done) continue
-      const d = Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r
+      const d = unitDist(u)
       if (d < bd) { bd = d; best = u }
     }
     return best && bd <= T.STREAM_BUILD_M ? best : null
   }
-  const pendingNear = () => { let n = 0; for (const u of gradeUnits) if (!u.done && Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r <= T.STREAM_BUILD_M) n++; return n }
+  const pendingNear = () => { let n = 0; for (const u of gradeUnits) if (!u.done && unitDist(u) <= T.STREAM_BUILD_M) n++; return n }
   // THE PUMP IS A MACROTASK LOOP, NOT A FRAME HOOK. Building on requestAnimationFrame would tie
   // the build to the frame rate (a slow frame, a hidden tab: no build — see reference-raf-budget-
   // deadlock), so the frame only tells the pump where the eye is. One unit runs at a time. Its
@@ -4334,6 +4344,18 @@ if (uLodOn > 0.5) {
         nearest: near.slice(0, 10),
         branches: branchAts.length,
         meet: { calls: meetStats.calls, lastMs: Math.round(meetStats.lastMs), worstMs: Math.round(meetStats.worstMs), totalMs: Math.round(meetStats.totalMs), branches: meetStats.branches },
+        spineWin: {
+          windowed: windowedSpine,
+          homeS: Math.round(homeS),
+          pavedS: Math.round(pavedS),
+          lo: Math.round(spineLo),
+          hi: Math.round(spineHi),
+          mainSt: mainSt.length,
+          done: gradeUnits.find((u) => u.key === 'spine-window')?.done ?? null,
+          eye: { x: Math.round(gradeEye.x), z: Math.round(gradeEye.z) },
+          nearest: (() => { const n = nearestSpine(gradeEye.x, gradeEye.z); return { s: Math.round(n.s), dist: +n.dist.toFixed(1) } })(),
+          vis: { base: roadBase.filter((o) => o.visible).length, holed: roadHoled.filter((o) => o.visible).length, skip: !!roadSkip },
+        },
       }
     },
     spineAt,

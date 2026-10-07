@@ -305,11 +305,14 @@ built per cell and do not accumulate there). Still open, and correctly so: the g
 side-hint and tunnel portals need the shared `scene.ts`, which another agent is still editing
 uncommitted (HEAD `6e7d0bb`).
 
-**A second re-export is in flight (2026-10-07 17:xxZ)** for the freeway stop-sign fix (commit
-`60bf53a`, job `corridor-reexport-dc-stopsign`). The other agent committed and stopped, so this push
-also carried their `6e7d0bb` and `3d4a60f` (spine). The fix is bake-side only
-(`intersections.py`), so `--allow-missing` is used as before; verify the Beltway shoulder after it
-promotes.
+**Two re-exports for the freeway stop-sign fix (2026-10-07).** Commit `60bf53a`
+(job `corridor-reexport-dc-stopsign`) promoted the freeway fixes; a screen-check against Rich's own
+stance then showed one sign left — the **ramp's**, drawn on the Beltway shoulder — so `6c4d229`
+(job `corridor-reexport-dc-merge`) added the merge rule and promoted. Verified live: junction
+`x50220992` is `uncontrolled`, no stop sign stands within 60 m, and Rich's stance now shows the
+Beltway shoulder clear. Live counts moved `16345 two-way + 3222 all-way (31598 signs)` →
+`16305 + 3220 (31553 signs)`. The other agent committed and stopped, so these pushes also carried
+their `6e7d0bb` and `3d4a60f` (spine).
 
 ---
 

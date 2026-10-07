@@ -6,7 +6,7 @@
 // pure function of a segment: which sub-spans are clear of the carriageway. It is arithmetic, so it
 // is tested here and only trusted on a screen after.
 import { describe, expect, it } from 'vitest'
-import { clearSpans, kerbCorner } from '../src/world/furniture'
+import { clearSpans, kerbCorner, kerbJoinRings, type KerbEnd } from '../src/world/furniture'
 
 // exactly the road, as a fraction of the segment, is on the carriageway
 const roadBetween = (a: number, b: number) => (t: number) => t < a || t >= b
@@ -69,5 +69,42 @@ describe('the kerb at a corner', () => {
     const v = kerbCorner(0, 0, 0, 1, s, c, off, 30)
     expect(v).toHaveLength(1)
     expect(Math.abs(v[0][0] + off)).toBeLessThan(0.05)
+  })
+})
+
+describe('joining two walk ends into one corner', () => {
+  // a 2 m band, kerb 15 cm, standing on ground at y = 10; only the colours of `ring` are read
+  const end = (fwdX: number, fwdZ: number, side: 1 | -1): KerbEnd => ({
+    x: 0, z: 0, y: 10, fwdX, fwdZ, side, w: 2, kerb: 0.15, kerbed: true, clear: true,
+    ring: [
+      [0, 10, 0, 0, 1, 0.6, 0.6, 0.6],
+      [0, 10.17, 0, 0, 1, 0.6, 0.6, 0.6],
+      [0, 10, 0, 0, 1, 0.7, 0.7, 0.7],
+    ],
+  })
+
+  it('bevels a right angle into two bands, one per vertex', () => {
+    const r = kerbJoinRings(end(1, 0, 1), end(0, 1, 1), 30)
+    expect(r).not.toBeNull()
+    expect(r!).toHaveLength(2)
+    // the kerb foot runs (0,1) → (-1,0), and the top sits one kerb + lift above the ground
+    expect(r![0][0].slice(0, 3)).toEqual([0, 10, 1])
+    expect(r![1][0].slice(0, 3)).toEqual([-1, 10, 0])
+    expect(r![0][1][1]).toBeCloseTo(10 + 0.15 + 0.02, 6)
+  })
+
+  it('mitres a gentle bend into one vertex', () => {
+    const c = Math.cos((10 * Math.PI) / 180)
+    const s = Math.sin((10 * Math.PI) / 180)
+    const r = kerbJoinRings(end(0, 1, 1), end(s, c, 1), 30)
+    expect(r!).toHaveLength(1)
+  })
+
+  it('refuses kerbs on opposite sides', () => {
+    expect(kerbJoinRings(end(1, 0, 1), end(0, 1, -1), 30)).toBeNull()
+  })
+
+  it('refuses a straight-through split, already joined inside each run', () => {
+    expect(kerbJoinRings(end(1, 0, 1), end(1, 0, 1), 30)).toBeNull()
   })
 })

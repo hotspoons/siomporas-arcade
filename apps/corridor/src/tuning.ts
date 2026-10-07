@@ -1577,6 +1577,21 @@ export let SIDEWALK_PAINT_LIFT = 0.025
 /** the painted band's width across the crossing × this */
 export let SIDEWALK_CROSSING_W = 1
 /**
+ * Two walk ends closer than this are the same corner node, and the run-join reads them as one.
+ *
+ * OSM splits a sidewalk at the corner NODE, so the two ways' ends land within a metre or two of
+ * each other but are separate runs; this is the radius that says "these are the same corner".
+ */
+export let KERB_JOIN_M = 3
+/**
+ * A turn sharper than this gets a two-vertex BEVEL; a gentler one keeps the single-point MITER.
+ *
+ * A 90° street corner mitres to a point `offset·√2` out — ~2.1 m for a 1.5 m offset, a long spike
+ * over a wheelchair ramp, which is why real sidewalks bevel the corner instead. A gentle bend's
+ * miter is close to the offset point and reads fine.
+ */
+export let KERB_BEVEL_DEG = 30
+/**
  * Linear furniture is cut into chunks this many metres across so frustum culling can fire. One
  * merged mesh per kind has a site-sized bounding sphere and is submitted in full from anywhere.
  */
@@ -2543,6 +2558,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SIDEWALK_BAR_PITCH', () => SIDEWALK_BAR_PITCH, (v) => (SIDEWALK_BAR_PITCH = v), [0.4, 4], 0.1, 'crossing bar spacing (m)'),
           tune('SIDEWALK_PAINT_LIFT', () => SIDEWALK_PAINT_LIFT, (v) => (SIDEWALK_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over ground (m)'),
           tune('SIDEWALK_CROSSING_W', () => SIDEWALK_CROSSING_W, (v) => (SIDEWALK_CROSSING_W = v), [0.4, 3], 0.05, 'painted band width ×'),
+          tune('KERB_JOIN_M', () => KERB_JOIN_M, (v) => (KERB_JOIN_M = v), [0.5, 10], 0.5, 'walk ends nearer than this are one corner (m)'),
+          tune('KERB_BEVEL_DEG', () => KERB_BEVEL_DEG, (v) => (KERB_BEVEL_DEG = v), [5, 175], 5, 'sharper turns bevel instead of mitre (deg)'),
           tune('FURNITURE_CHUNK_M', () => FURNITURE_CHUNK_M, (v) => (FURNITURE_CHUNK_M = v), [50, 2000], 25, 'm per cull chunk for linear furniture'),
           tune('BRANCH_VERGE', () => BRANCH_VERGE, (v) => (BRANCH_VERGE = v), [4, 40], 1, 'm of verge on a branch road strip'),
         ],

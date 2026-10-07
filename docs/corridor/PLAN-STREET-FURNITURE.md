@@ -12,8 +12,11 @@ this sits beside is in `PLAN-WORLD-SCALE.md`'s orbit and already built (`world/o
   (`test/furniture.test.ts`). Not yet eyeballed on a screen.
 - **Kerbs (3), the hard part** — `furniture.ts kerbCorner` is the corner rule: an offset kerb line
   per way, mitered to the intersection on a gentle bend (the right-angle kerb), chamfered to two
-  vertices on a real street corner (the bevel). Unit-tested. The run-join pass that calls it is not
-  written.
+  vertices on a real street corner (the bevel). Unit-tested. **The run-join pass is now written**
+  (`kerbJoinRings` + the `KERB_JOIN_M` pass in `buildSidewalks`, 2026-10-07): the first/last station
+  of every walk is kept as a `KerbEnd`, ends within `KERB_JOIN_M` on the same kerb side are joined
+  with the miter/bevel band, and only where both kerb feet are clear of a carriageway. Unit-tested;
+  not yet eyeballed on a screen.
 - **Trails and rail (6), the decision** — `world/trail.ts trailPaving` picks dirt/gravel/paved from
   `surface` then `trailblazed`, defaulting an untagged path to DIRT. Unit-tested
   (`test/trail.test.ts`). `trailMesh` and the bake that carries the ways are not written.
@@ -225,9 +228,8 @@ and rail is not a road at all, so neither reaches the viewer — and neither car
 
 ## Order, and what needs a rebake
 
-1. ~~**Kerbs (3)** and **walks (4)**~~ — the pure cores are done and tested (`kerbCorner`,
-   `clearSpans`); what remains is the run-join pass that calls `kerbCorner` at a shared node, and a
-   look at a screen.
+1. ~~**Kerbs (3)** and **walks (4)**~~ — the pure cores (`kerbCorner`, `clearSpans`) and the run-join
+   pass (`kerbJoinRings`) are done and unit-tested; what remains is a look at a screen.
 2. **Signs (1, 2)** — viewer, plus a small optional `school_zones` bake array. Not started.
 3. **Entrances (5)** — small bake classifier change + viewer guard. Not started.
 4. **Trails/rail (6)** — the largest: `network.py` must emit the ways (with `surface`/`trailblazed`)

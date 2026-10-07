@@ -956,9 +956,70 @@ export function kerbCorner(
   return [[p1x + inX * t, p1z + inZ * t]]
 }
 
+/**
+ * One end of a swept sidewalk, held so a corner can be joined to whatever meets it.
+ *
+ * `fwd` is the way's own forward tangent at the station (increasing index), and `side` is the kerb
+ * side measured about that tangent — so `kerb foot = p + side·(w/2)·left(fwd)`, which is exactly the
+ * `p1` `kerbCorner` builds from the same `fwd`. That correspondence is why the join never has to
+ * reason about which way OSM happened to order the way.
+ */
+export interface KerbEnd {
+  x: number
+  z: number
+  y: number
+  fwdX: number
+  fwdZ: number
+  side: 1 | -1
+  w: number
+  kerb: number
+  /** true when a carriageway is near enough that this end carries a kerb (not a path in a park) */
+  kerbed: boolean
+  /** true when its kerb foot is not deep inside a road — the corner patch may not cross asphalt */
+  clear: boolean
+  ring: number[][]
+}
+
+/**
+ * The bands that carry a kerb around the corner where two walk ends meet, in order, between them.
+ *
+ * The plan's run-join: OSM splits a sidewalk at the corner node, so the sweep of each way stops a
+ * couple of metres from the corner and leaves a notch. `kerbCorner` gives the road-side boundary
+ * (miter, or a two-point bevel on a real street corner); the back edge is the same boundary at the
+ * opposite offset, so the whole band fills. Returns null when the two ends cannot be one corner —
+ * kerbs on opposite sides, or directions so close the patch would be degenerate.
+ */
+export function kerbJoinRings(a: KerbEnd, b: KerbEnd, bevelDeg: number): number[][][] | null {
+  if (a.side !== b.side) return null
+  // both forward tangents the same way: a straight-through split, already joined inside each run
+  if (a.fwdX * b.fwdX + a.fwdZ * b.fwdZ > 0.999) return null
+  const nx = (a.x + b.x) / 2
+  const nz = (a.z + b.z) / 2
+  const half = a.side * ((a.w + b.w) / 4)
+  const kp = kerbCorner(nx, nz, a.fwdX, a.fwdZ, b.fwdX, b.fwdZ, half, bevelDeg)
+  const bp = kerbCorner(nx, nz, a.fwdX, a.fwdZ, b.fwdX, b.fwdZ, -half, bevelDeg)
+  if (kp.length !== bp.length) return null
+  const kh = (a.kerb + b.kerb) / 2
+  const rings: number[][][] = []
+  for (let k = 0; k < kp.length; k++) {
+    const t = kp.length === 1 ? 0 : k / (kp.length - 1)
+    const y = a.y + (b.y - a.y) * t
+    const kx = kp[k][0]
+    const kz = kp[k][1]
+    const bx = bp[k][0]
+    const bz = bp[k][1]
+    rings.push([
+      [kx, y, kz, 0, 1, a.ring[0][5], a.ring[0][6], a.ring[0][7]],
+      [kx, y + kh + T.SIDEWALK_LIFT, kz, 0, 1, a.ring[1][5], a.ring[1][6], a.ring[1][7]],
+      [bx, y + kh + T.SIDEWALK_LIFT, bz, 0, 1, a.ring[2][5], a.ring[2][6], a.ring[2][7]],
+    ])
+  }
+  return rings
+}
+
 export interface SidewalkResult {
   group: THREE.Group
-  counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number }
+  counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number; corners: number }
 }
 
 export async function buildSidewalks(
@@ -976,7 +1037,7 @@ export async function buildSidewalks(
 ): Promise<SidewalkResult> {
   const group = new THREE.Group()
   group.name = 'sidewalks'
-  const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0, overRoad: 0 }
+  const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0, overRoad: 0, corners: 0 }
   const runs = manifest.sidewalks ?? []
   if (!runs.length) return { group, counts }
 
@@ -999,6 +1060,9 @@ export async function buildSidewalks(
     }
     return Math.sqrt(best)
   }
+
+  // the first and last station of every walk, kept for the corner join below
+  const kerbEnds: { first: KerbEnd | null; last: KerbEnd | null }[] = []
 
   for (const r of runs) {
     await yieldFn?.()
@@ -1071,6 +1135,8 @@ export async function buildSidewalks(
 
     counts.walks++
     const w = Math.max(0.9, r.width_m) * T.SIDEWALK_WIDTH_SCALE
+    let runFirst: KerbEnd | null = null
+    let runLast: KerbEnd | null = null
     /*
      * WHICH ROAD IS THIS WALK'S OWN?
      *
@@ -1115,6 +1181,18 @@ export async function buildSidewalks(
         { out: (-side * w) / 2, y: kerb + T.SIDEWALK_LIFT, c: cWalk },
       ]
       const here = profile.map((q) => [pts[i].x + px * q.out, pts[i].y + q.y, pts[i].z + pz * q.out, 0, 1, q.c.r, q.c.g, q.c.b])
+      if (i === 0 || i === pts.length - 1) {
+        const end: KerbEnd = {
+          x: pts[i].x, z: pts[i].z, y: pts[i].y,
+          fwdX: dx / l, fwdZ: dz / l,
+          side, w, kerb,
+          kerbed: nearest <= T.SIDEWALK_KERB_MAX_FROM_ROAD,
+          clear: roadInfo(here[0][0], here[0][2]).d >= -T.SIDEWALK_OWN_CLEAR_M,
+          ring: here,
+        }
+        if (i === 0) runFirst = end
+        runLast = end
+      }
       /*
        * KEEP THE CONCRETE OFF THE CARRIAGEWAY.
        *
@@ -1176,6 +1254,45 @@ export async function buildSidewalks(
         }
       }
       ring = here
+    }
+    if (runFirst && runLast) kerbEnds.push({ first: runFirst, last: runLast })
+  }
+
+  /*
+   * JOIN THE KERBS AROUND A CORNER.
+   *
+   * A walk is swept one OSM way at a time, and OSM splits a way at the corner node — so two runs
+   * arrive within a metre or two of the same point and stop, and the bands leave a notch on the
+   * kerb side. Read the ends that share a node together and fill the wedge with `kerbCorner`: a
+   * miter on a gentle bend, a two-point bevel on a real street corner. Only ends that both carry a
+   * kerb, and whose kerb foot is not already out in a carriageway, are joined — so the patch cannot
+   * put concrete back over the asphalt the clip just cleared.
+   */
+  {
+    const used = new Set<KerbEnd>()
+    for (const a of kerbEnds) {
+      for (const ae of [a.first, a.last]) {
+        if (!ae || !ae.kerbed || !ae.clear || used.has(ae)) continue
+        let best: KerbEnd | null = null
+        let bestD = T.KERB_JOIN_M
+        for (const b of kerbEnds) {
+          if (b === a) continue
+          for (const be of [b.first, b.last]) {
+            if (!be || !be.kerbed || !be.clear || used.has(be)) continue
+            const d = Math.hypot(be.x - ae.x, be.z - ae.z)
+            if (d < bestD) { bestD = d; best = be }
+          }
+        }
+        if (!best) continue
+        const rings = kerbJoinRings(ae, best, T.KERB_BEVEL_DEG)
+        if (!rings) continue
+        used.add(ae)
+        used.add(best)
+        let prev = ae.ring
+        for (const r of rings) { concrete.strip(prev, r); prev = r }
+        concrete.strip(prev, best.ring)
+        counts.corners++
+      }
     }
   }
 

@@ -350,6 +350,13 @@ DRIVABLE = (
     "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link", "living_street",
 )
 
+# --- school zones ------------------------------------------------------------------------------
+# Rich: "school-zone signs at school-zone edges". The zone is the stretch of road beside an
+# `amenity=school`; the signs mark where it starts and ends. Kept as two numbers because the
+# geometry is a projection of the school point onto the nearest road, not a transcribed boundary.
+SCHOOL_ZONE_REACH_M = 120.0
+SCHOOL_SIGN_MAX_FROM_ROAD = 40.0
+
 
 def _bearing(dx: float, dy: float, conv: float = 0.0) -> float:
     """
@@ -420,7 +427,7 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
     if not gj_p.exists():
         return {"masts": [], "signs": []}
     import rasterio
-    from shapely.geometry import Point, box
+    from shapely.geometry import Point, box, shape
 
     site_box = box(*bbox)
     dem_p = site_dir / "dem_1m.tif"
@@ -593,6 +600,73 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
             "yaw_deg": round(_bearing(-trav[0], -trav[1], conv), 1),
             "travel_deg": round(_bearing(*trav, conv), 1),
         })
+
+    # SCHOOL ZONE signs. A school is an `amenity=school` point or area; the zone is the stretch of
+    # road beside it. Find the nearest non-freeway carriageway, project the school onto it, and stand
+    # the diamond at one end (facing the traffic that enters the zone there) and the END plate at the
+    # other. Emitted through `signals.signs` on purpose: it is already bucketed and tiled with the
+    # stop signs, so no viewer plumbing is needed and a zone streams with its own kilometre.
+    drivable = [f for f in features
+                if f["properties"].get("highway") in DRIVABLE and f["geometry"]["type"] == "LineString"]
+    school_pts = []
+    for f in features:
+        p = f["properties"]
+        if p.get("amenity") != "school":
+            continue
+        g = f["geometry"]
+        if g["type"] == "Point":
+            lon, lat = g["coordinates"][:2]
+        elif g["type"] in ("Polygon", "MultiPolygon"):
+            lon, lat = shape(g).centroid.x, shape(g).centroid.y
+        else:
+            continue
+        x, y = frame.from_wgs(lon, lat)
+        if site_box.contains(Point(x, y)):
+            school_pts.append((x, y))
+
+    def nearest_seg(x: float, y: float):
+        best = None
+        for f in drivable:
+            cs = f["geometry"]["coordinates"]
+            for i in range(len(cs) - 1):
+                ax, ay = frame.from_wgs(cs[i][0], cs[i][1])
+                bx, by = frame.from_wgs(cs[i + 1][0], cs[i + 1][1])
+                dx, dy = bx - ax, by - ay
+                l2 = dx * dx + dy * dy or 1.0
+                t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / l2))
+                d2 = (ax + t * dx - x) ** 2 + (ay + t * dy - y) ** 2
+                if best is None or d2 < best[0]:
+                    best = (d2, f, i, t)
+        return best
+
+    for x, y in school_pts:
+        near = nearest_seg(x, y)
+        if near is None:
+            continue
+        d2, f, i, t = near
+        if d2 > SCHOOL_SIGN_MAX_FROM_ROAD ** 2:
+            continue
+        if f["properties"].get("highway") in ("motorway", "trunk", "motorway_link", "trunk_link"):
+            continue
+        cs = f["geometry"]["coordinates"]
+        ax, ay = frame.from_wgs(cs[i][0], cs[i][1])
+        bx, by = frame.from_wgs(cs[i + 1][0], cs[i + 1][1])
+        dx, dy = bx - ax, by - ay
+        l = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / l, dy / l
+        qx, qy = ax + t * dx, ay + t * dy
+        half = SCHOOL_ZONE_REACH_M / 2.0
+        for sgn, kind in ((-1.0, "school"), (1.0, "school_end")):
+            px, py = qx + ux * half * sgn, qy + uy * half * sgn
+            sx, sy, sz = _enu_z(frame, px, py, ground(px, py))
+            # the sign faces the traffic: the start diamond faces the +u approach, the end plate the -u
+            face = (-ux, -uy) if sgn < 0 else (ux, uy)
+            signs.append({
+                "kind": kind,
+                "x": sx, "y": sy, "z": sz,
+                "yaw_deg": round(_bearing(face[0], face[1], conv), 1),
+                "travel_deg": round(_bearing(-face[0], -face[1], conv), 1),
+            })
 
     if src is not None:
         src.close()

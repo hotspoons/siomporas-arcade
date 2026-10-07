@@ -97,6 +97,15 @@ is the fluorescent yellow-green (`#c7ea46`), not the ordinary warning yellow —
 traffic; no post stands on a carriageway (reuse the edge-clear walk). No school in the world → no
 posts, no error.
 
+**Built 2026-10-07 (first pass).** Not as a separate `school_zones` array — the signs ride the
+existing `signals.signs` stream, so they bucket and tile with the stop signs for free. `export.py`
+`_signals` now finds `amenity=school` points/areas, projects the school onto the nearest non-freeway
+carriageway (within `SCHOOL_SIGN_MAX_FROM_ROAD`), and emits `kind="school"` at one end of a
+`SCHOOL_ZONE_REACH_M` stretch and `kind="school_end"` at the other, each facing the traffic entering
+from that end. The viewer draws them in `furniture.ts`: a black-bordered diamond on fluorescent
+yellow-green `#c7ea46` with the walking figures (S1-1), and the END SCHOOL ZONE plate (S4-3). The
+zone fn is not yet unit-tested (it needs an OSM fixture and a rasterio DEM); the viewer selection is.
+
 ---
 
 ## 2. Major-road intersection signage
@@ -119,6 +128,13 @@ which the manifest already holds.
 
 **Test.** A 4-way signalised junction on a `primary` gets a panel per boom; a side-street stop does
 not. A motorway_link crossing named in `crossings` gets an exit panel.
+
+**Built 2026-10-07 (first pass, boom signs only).** `furniture.ts boomSignAt` (pure, unit-tested)
+picks a boom for a panel when a signalised junction of at least `FURNITURE_BOOM_MIN_ARMS` arms has a
+superior road of at least `FURNITURE_BOOM_MIN_RANK` within `FURNITURE_BOOM_SNAP_M`; the panel is a
+green body and a white lane-assignment face hung `FURNITURE_BOOM_DROP` under the arm, instanced per
+(arm, side) bucket beside the mast. Exit signs (the `motorway_link` half) are **not built**: a tiled
+world does not carry `crossings` in its per-cell manifest, so they need a bake field first.
 
 ---
 
@@ -230,7 +246,8 @@ and rail is not a road at all, so neither reaches the viewer — and neither car
 
 1. ~~**Kerbs (3)** and **walks (4)**~~ — the pure cores (`kerbCorner`, `clearSpans`) and the run-join
    pass (`kerbJoinRings`) are done and unit-tested; what remains is a look at a screen.
-2. **Signs (1, 2)** — viewer, plus a small optional `school_zones` bake array. Not started.
+2. **Signs (1, 2)** — *school-zone signs and boom signs built 2026-10-07; exit signs still open.*
+   Viewer plus the school `signals.signs` records; no `school_zones` array after all.
 3. **Entrances (5)** — small bake classifier change + viewer guard. Not started.
 4. **Trails/rail (6)** — the largest: `network.py` must emit the ways (with `surface`/`trailblazed`)
    and `trail.ts trailPaving` is the decision, already tested; `trailMesh` and the builder are not

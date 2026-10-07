@@ -34,7 +34,7 @@ const toWorld = (x: number, y: number) => new THREE.Vector3(x, 0, -y)
 
 export interface FurnitureResult {
   group: THREE.Group
-  counts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; signsOnTheLeft: number; noRoadNearby: number; armNoRoad: number }
+  counts: { masts: number; signs: number; boomSigns: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; signsOnTheLeft: number; noRoadNearby: number; armNoRoad: number }
   /**
    * Where each mast ACTUALLY ended up, after the kerb walk and the arm measurement.
    *
@@ -263,11 +263,89 @@ function mastGeometry(lanes: number, arm: number, side: number): THREE.BufferGeo
 }
 
 /**
+ * A junction a boom sign may hang at, flattened from `manifest.intersections`.
+ *
+ * `rank` is the OSM functional class of the superior road (intersections.py `RANK`: primary 7,
+ * secondary 6, tertiary 5). A side street's two-way stop is not signed — its superior road ranks
+ * too low — so a panel only appears over the booms of a real arterial.
+ */
+export interface BoomJunction { x: number; y: number; control: string; arms: number; rank: number }
+
+/**
+ * Whether a mast at (mx, my) hangs a panel: a signalised junction of at least `minArms` arms whose
+ * superior road ranks at least `minRank`, within `snapM`.
+ *
+ * Pure, so Rich's "major-road intersection signage" rule is a unit test — a primary crossroads is
+ * signed, a side-street stop is not — and not only a look at a screen.
+ */
+export function boomSignAt(mx: number, my: number, junctions: BoomJunction[], snapM: number, minRank: number, minArms: number): boolean {
+  for (const j of junctions) {
+    if (j.control !== 'signals' || j.arms < minArms || j.rank < minRank) continue
+    if (Math.hypot(j.x - mx, j.y - my) <= snapM) return true
+  }
+  return false
+}
+
+/** The panel body: highway green, hung under the arm at 55 % of its reach, facing −Z like the heads. */
+function boomPanelGeometry(side: number, arm: number, w: number, h: number): THREE.BufferGeometry {
+  const body = new THREE.BoxGeometry(w, h, 0.07)
+  body.translate(side * arm * 0.55, T.FURNITURE_SIGNAL_HEIGHT - T.FURNITURE_BOOM_DROP - h / 2, 0)
+  return tint(body, 0x0f5132)
+}
+
+let boomTexture: THREE.CanvasTexture | null = null
+/** A generic lane-assignment legend (the MUTCD R3-8 family): white plate, black border and arrow. */
+function boomPanelTexture(): THREE.CanvasTexture {
+  if (boomTexture) return boomTexture
+  const W = 256
+  const H = 96
+  const cv = document.createElement('canvas')
+  cv.width = W
+  cv.height = H
+  const ctx = cv.getContext('2d')!
+  ctx.fillStyle = '#f4f4f0'
+  ctx.fillRect(0, 0, W, H)
+  ctx.strokeStyle = '#141414'
+  ctx.lineWidth = 8
+  ctx.strokeRect(5, 5, W - 10, H - 10)
+  ctx.fillStyle = '#141414'
+  ctx.beginPath()
+  ctx.moveTo(W / 2, 16)
+  ctx.lineTo(W / 2 + 22, 40)
+  ctx.lineTo(W / 2 + 9, 40)
+  ctx.lineTo(W / 2 + 9, 80)
+  ctx.lineTo(W / 2 - 9, 80)
+  ctx.lineTo(W / 2 - 9, 40)
+  ctx.lineTo(W / 2 - 22, 40)
+  ctx.closePath()
+  ctx.fill()
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  boomTexture = tex
+  return tex
+}
+
+/** The painted face of a boom panel, in front of the body. */
+function boomPanelFace(side: number, arm: number, w: number, h: number): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
+  const g = new THREE.PlaneGeometry(w - 0.08, h - 0.08)
+  g.rotateY(Math.PI)
+  g.translate(side * arm * 0.55, T.FURNITURE_SIGNAL_HEIGHT - T.FURNITURE_BOOM_DROP - h / 2, -0.045)
+  const material = new THREE.MeshStandardMaterial({ map: boomPanelTexture(), roughness: 0.5, metalness: 0.05 })
+  makeRetroreflective(material, retro.uniforms, 1)
+  retro.add(material, 'sign')
+  return { geometry: g, material }
+}
+
+/**
  * The post and the back plate of a sign; the legend is a separate textured face (`signFace`),
  * because the post is vertex-coloured metal and the face is a painted picture, and one instanced
  * mesh cannot be both.
  */
-function signPostGeometry(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
+type SignKind = 'stop' | 'give_way' | 'school' | 'school_end'
+const SIGN_KINDS: SignKind[] = ['stop', 'give_way', 'school', 'school_end']
+
+function signPostGeometry(kind: SignKind): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
   const H = T.FURNITURE_SIGN_HEIGHT
   const post = new THREE.CylinderGeometry(0.035, 0.035, H, 5)
@@ -286,17 +364,23 @@ function signPostGeometry(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
  * signs are mounted like 22.5 degrees off" (2026-09-26). thetaStart = π/8 rotates the polygon half
  * a step so a flat edge is on top, which is how an octagon is hung.
  */
-function signOutline(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
+function signOutline(kind: SignKind): THREE.BufferGeometry {
   // MUTCD: a 30" STOP is 0.76 m across the flats (circumradius 0.41); FURNITURE_SIGN_SCALE is Rich's
   // "about twice as big as they are in the renderings" (2026-09-26) on top of that
   const S = T.FURNITURE_SIGN_SCALE
-  const g = kind === 'stop' ? new THREE.CircleGeometry(0.41 * S, 8, Math.PI / 8) : new THREE.CircleGeometry(0.45 * S, 3, -Math.PI / 2)
+  let g: THREE.BufferGeometry
+  if (kind === 'stop') g = new THREE.CircleGeometry(0.41 * S, 8, Math.PI / 8)
+  else if (kind === 'give_way') g = new THREE.CircleGeometry(0.45 * S, 3, -Math.PI / 2)
+  // a school sign is a DIAMOND: a square on its corner, vertex up (MUTCD S1-1's silhouette)
+  else if (kind === 'school') g = new THREE.CircleGeometry(0.42 * S, 4, Math.PI / 2)
+  // END SCHOOL ZONE is a wide plate, not a polygon (MUTCD S4-3 family)
+  else g = new THREE.PlaneGeometry(1.25 * S, 0.42 * S)
   g.rotateY(Math.PI) // face −Z, the way every head here faces
   return g
 }
 
 /** The painted face, its texture drawn once and shared by every sign of that kind on the site. */
-function signFace(kind: 'stop' | 'give_way'): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
+function signFace(kind: SignKind): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
   const geometry = signOutline(kind)
   geometry.translate(0, T.FURNITURE_SIGN_HEIGHT - 0.05, -0.04)
   // a regulatory sign is prismatic sheeting: by day a painted plate, at night the brightest thing
@@ -314,18 +398,22 @@ const signTextures = new Map<string, THREE.CanvasTexture>()
  * is drawn on a square and the geometry clips it to the outline; the border is drawn as its own
  * inset polygon so it is white in the texture, not a rim the geometry happens to leave.
  */
-function signTexture(kind: 'stop' | 'give_way'): THREE.CanvasTexture {
+function signTexture(kind: SignKind): THREE.CanvasTexture {
   const had = signTextures.get(kind)
   if (had) return had
+  // the plate is wide; the canvas matches its aspect so the legend is not squashed
   const S = 256
+  const W = kind === 'school_end' ? 320 : S
+  const H = kind === 'school_end' ? 100 : S
   const cv = document.createElement('canvas')
-  cv.width = cv.height = S
+  cv.width = W
+  cv.height = H
   const ctx = cv.getContext('2d')!
   const poly = (n: number, r: number, start: number) => {
     ctx.beginPath()
     for (let i = 0; i < n; i++) {
       const a = start + (i / n) * Math.PI * 2
-      const x = S / 2 + Math.cos(a) * r, y = S / 2 - Math.sin(a) * r
+      const x = W / 2 + Math.cos(a) * r, y = H / 2 - Math.sin(a) * r
       if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     }
@@ -345,7 +433,7 @@ function signTexture(kind: 'stop' | 'give_way'): THREE.CanvasTexture {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText('STOP', S / 2, S / 2 + 4)
-  } else {
+  } else if (kind === 'give_way') {
     // give way: white triangle, red border, point down. The geometry's UV square is the triangle's
     // bounding box, so the drawing uses the same start angle the outline does.
     ctx.fillStyle = '#c62828'
@@ -358,6 +446,46 @@ function signTexture(kind: 'stop' | 'give_way'): THREE.CanvasTexture {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText('YIELD', S / 2, S / 2 - 22)
+  } else if (kind === 'school') {
+    // S1-1: a black-bordered DIAMOND on fluorescent yellow-green — #c7ea46, not ordinary warning
+    // yellow, which is the whole tell that this is a school sign and not a curve warning
+    ctx.fillStyle = '#141414'
+    poly(4, S / 2 - 6, Math.PI / 2)
+    ctx.fill()
+    ctx.fillStyle = '#c7ea46'
+    poly(4, S / 2 - 16, Math.PI / 2)
+    ctx.fill()
+    ctx.fillStyle = '#141414'
+    const person = (cx: number, cy: number, h: number) => {
+      ctx.beginPath()
+      ctx.arc(cx, cy - h * 0.34, h * 0.14, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.moveTo(cx - h * 0.18, cy + h * 0.5)
+      ctx.lineTo(cx - h * 0.09, cy - h * 0.04)
+      ctx.lineTo(cx + h * 0.09, cy - h * 0.04)
+      ctx.lineTo(cx + h * 0.18, cy + h * 0.5)
+      ctx.lineTo(cx + h * 0.05, cy + h * 0.5)
+      ctx.lineTo(cx, cy + h * 0.1)
+      ctx.lineTo(cx - h * 0.05, cy + h * 0.5)
+      ctx.closePath()
+      ctx.fill()
+    }
+    person(S * 0.39, S * 0.66, S * 0.34)
+    person(S * 0.63, S * 0.62, S * 0.42)
+  } else {
+    // S4-3: END SCHOOL ZONE, black on white
+    ctx.fillStyle = '#f7f7f2'
+    ctx.fillRect(0, 0, W, H)
+    ctx.strokeStyle = '#141414'
+    ctx.lineWidth = 8
+    ctx.strokeRect(6, 6, W - 12, H - 12)
+    ctx.fillStyle = '#141414'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = `bold ${Math.round(H * 0.26)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
+    ctx.fillText('END', W / 2, H * 0.26)
+    ctx.fillText('SCHOOL ZONE', W / 2, H * 0.61)
   }
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
@@ -387,7 +515,7 @@ export async function buildFurniture(
 ): Promise<FurnitureResult> {
   const group = new THREE.Group()
   group.name = 'furniture'
-  const counts = { masts: 0, signs: 0, movedOffPavement: 0, stillOnPavement: 0, onTheLeft: 0, signsOnTheLeft: 0, noRoadNearby: 0, armNoRoad: 0 }
+  const counts = { masts: 0, signs: 0, boomSigns: 0, movedOffPavement: 0, stillOnPavement: 0, onTheLeft: 0, signsOnTheLeft: 0, noRoadNearby: 0, armNoRoad: 0 }
   const placed: FurnitureResult['placed'] = []
   const data = manifest.signals
   if (!data) return { group, counts, placed }
@@ -476,6 +604,17 @@ export async function buildFurniture(
    */
   const nearARoad = (p: THREE.Vector3) => edgeDistance(p.x, p.z) <= T.FURNITURE_MAX_FROM_ROAD
 
+  // The junctions a boom sign may hang at, flattened once. Only the home/inline manifest carries
+  // the full list; a tiled world buckets `intersections` per cell, which is exactly the set a
+  // cell's masts need. `rank` is the superior road's functional class.
+  const boomJunctions: BoomJunction[] = []
+  for (const ix of manifest.intersections?.list ?? []) {
+    let rank = 0
+    for (const a of ix.approaches) if (a.superior) rank = Math.max(rank, a.rank)
+    boomJunctions.push({ x: ix.x, y: ix.y, control: ix.control, arms: ix.arms, rank })
+  }
+  const boomBuckets = new Map<number, { arm: number; side: number; at: { pos: THREE.Vector3; yaw: number }[] }>()
+
   for (const m of data.masts ?? []) {
     await yieldFn?.()
     const lanes = Math.max(1, Math.min(6, Math.round(m.lanes || 2)))
@@ -541,6 +680,13 @@ export async function buildFurniture(
     if (!byLanes.has(key)) byLanes.set(key, { arm: armLen, side: sign < 0 ? -1 : 1, at: [] })
     byLanes.get(key)!.at.push({ pos: p, yaw: m.yaw_deg, src: m })
     counts.masts++
+    // a major junction gets a panel under this boom. Matched on the mast's OWN manifest point
+    // (m.x, m.y), before the kerb walk moved it, because the junction is where OSM put the signal.
+    if (boomSignAt(m.x, m.y, boomJunctions, T.FURNITURE_BOOM_SNAP_M, T.FURNITURE_BOOM_MIN_RANK, T.FURNITURE_BOOM_MIN_ARMS)) {
+      if (!boomBuckets.has(key)) boomBuckets.set(key, { arm: armLen, side: sign < 0 ? -1 : 1, at: [] })
+      boomBuckets.get(key)!.at.push({ pos: p, yaw: m.yaw_deg })
+      counts.boomSigns++
+    }
   }
   for (const [key, b] of byLanes) {
     const lanes = Math.floor(Math.abs(key) / 1000)
@@ -563,11 +709,39 @@ export async function buildFurniture(
     group.add(mesh)
   }
 
-  // --- stop and give-way signs -----------------------------------------------------------------
-  const bySign = new Map<'stop' | 'give_way', { pos: THREE.Vector3; yaw: number; src: unknown }[]>()
+  // The boom panels: one instanced body and one face per (arm, side) bucket, on the masts that
+  // qualified. A no-op when no junction on the site is major enough, which is most of them.
+  for (const [, b] of boomBuckets) {
+    const body = new THREE.InstancedMesh(boomPanelGeometry(b.side, b.arm, T.FURNITURE_BOOM_W, T.FURNITURE_BOOM_H), metal, b.at.length)
+    body.name = 'furniture:boom'
+    const face = boomPanelFace(b.side, b.arm, T.FURNITURE_BOOM_W, T.FURNITURE_BOOM_H)
+    const faces = new THREE.InstancedMesh(face.geometry, face.material, b.at.length)
+    faces.name = 'furniture:boom:face'
+    const mat4 = new THREE.Matrix4()
+    const q = new THREE.Quaternion()
+    const one = new THREE.Vector3(1, 1, 1)
+    b.at.forEach((a, i) => {
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -(a.yaw * Math.PI) / 180)
+      mat4.compose(a.pos, q, one)
+      body.setMatrixAt(i, mat4)
+      faces.setMatrixAt(i, mat4)
+    })
+    body.instanceMatrix.needsUpdate = true
+    faces.instanceMatrix.needsUpdate = true
+    body.frustumCulled = false
+    faces.frustumCulled = false
+    group.add(body)
+    group.add(faces)
+  }
+
+  // --- stop, give-way and school-zone signs ----------------------------------------------------
+  const bySign = new Map<SignKind, { pos: THREE.Vector3; yaw: number; src: unknown }[]>()
   for (const s of data.signs ?? []) {
     await yieldFn?.()
-    const kind = s.kind === 'stop' ? 'stop' : 'give_way'
+    // a record kind we do not draw is skipped, not defaulted: a new bake's `school` must not be
+    // silently drawn as a give-way when an old viewer meets it
+    const kind = SIGN_KINDS.find((k) => k === s.kind)
+    if (!kind) continue
     const b = (s.yaw_deg * Math.PI) / 180
     const headDir = new THREE.Vector3(Math.sin(b), 0, -Math.cos(b))
     const travel = headDir.clone().negate()

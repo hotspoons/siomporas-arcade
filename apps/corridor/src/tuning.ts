@@ -1513,6 +1513,22 @@ export let FURNITURE_SETBACK_MAX = 16
 export let FURNITURE_SIGN_RIGHT_M = 12
 /** past this reach it is not a mast arm any more, and the signal is not placed (m) */
 export let FURNITURE_ARM_MAX = 14
+/**
+ * A junction "major" enough to hang a panel from its signal booms.
+ *
+ * Matched to the junction's superior road by OSM functional class (intersections.py RANK: primary
+ * is 7, secondary 6, tertiary 5); a side street's two-way stop never reaches it, and at a big
+ * junction of a primary and a residential street only the primary's booms are signed.
+ */
+export let FURNITURE_BOOM_MIN_RANK = 7
+/** and at least this many arms — a 4-way, not a T */
+export let FURNITURE_BOOM_MIN_ARMS = 4
+/** how far under the arm the panel hangs (m), and its face, in metres */
+export let FURNITURE_BOOM_DROP = 1.15
+export let FURNITURE_BOOM_W = 2.3
+export let FURNITURE_BOOM_H = 0.62
+/** a mast is signed when a qualifying junction is within this of it (m) */
+export let FURNITURE_BOOM_SNAP_M = 45
 
 /** a stall bay, in metres: the American standard is 8'6" × 18' */
 export let PARKING_STALL_W = 2.6
@@ -2520,6 +2536,11 @@ export const TUNE_TABS: TuneTab[] = [
           tune('FURNITURE_SETBACK_MAX', () => FURNITURE_SETBACK_MAX, (v) => (FURNITURE_SETBACK_MAX = v), [0, 40], 1, 'm back along the approach, out of the junction box'),
           tune('FURNITURE_SIGN_RIGHT_M', () => FURNITURE_SIGN_RIGHT_M, (v) => (FURNITURE_SIGN_RIGHT_M = v), [0, 30], 1, 'm right a sign looks before accepting the left'),
           tune('FURNITURE_ARM_MAX', () => FURNITURE_ARM_MAX, (v) => (FURNITURE_ARM_MAX = v), [4, 30], 0.5, 'm of arm before the mast is dropped instead'),
+          tune('FURNITURE_BOOM_MIN_RANK', () => FURNITURE_BOOM_MIN_RANK, (v) => (FURNITURE_BOOM_MIN_RANK = v), [0, 9], 1, 'junction rank that earns a boom sign (primary 7)'),
+          tune('FURNITURE_BOOM_MIN_ARMS', () => FURNITURE_BOOM_MIN_ARMS, (v) => (FURNITURE_BOOM_MIN_ARMS = v), [2, 8], 1, 'arms a junction needs for a boom sign'),
+          tune('FURNITURE_BOOM_DROP', () => FURNITURE_BOOM_DROP, (v) => (FURNITURE_BOOM_DROP = v), [0.3, 3], 0.05, 'm the panel hangs under the arm'),
+          tune('FURNITURE_BOOM_W', () => FURNITURE_BOOM_W, (v) => (FURNITURE_BOOM_W = v), [0.8, 5], 0.1, 'boom panel width (m)'),
+          tune('FURNITURE_BOOM_H', () => FURNITURE_BOOM_H, (v) => (FURNITURE_BOOM_H = v), [0.3, 2], 0.02, 'boom panel height (m)'),
         ],
       },
       {

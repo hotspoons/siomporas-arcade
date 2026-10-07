@@ -6,7 +6,7 @@
 // pure function of a segment: which sub-spans are clear of the carriageway. It is arithmetic, so it
 // is tested here and only trusted on a screen after.
 import { describe, expect, it } from 'vitest'
-import { clearSpans, kerbCorner, kerbJoinRings, type KerbEnd } from '../src/world/furniture'
+import { boomSignAt, clearSpans, kerbCorner, kerbJoinRings, type BoomJunction, type KerbEnd } from '../src/world/furniture'
 
 // exactly the road, as a fraction of the segment, is on the carriageway
 const roadBetween = (a: number, b: number) => (t: number) => t < a || t >= b
@@ -106,5 +106,31 @@ describe('joining two walk ends into one corner', () => {
 
   it('refuses a straight-through split, already joined inside each run', () => {
     expect(kerbJoinRings(end(1, 0, 1), end(1, 0, 1), 30)).toBeNull()
+  })
+})
+
+describe('which junctions earn a boom sign', () => {
+  const jx = (over: Partial<BoomJunction> = {}): BoomJunction => ({ x: 0, y: 0, control: 'signals', arms: 4, rank: 7, ...over })
+  // the viewer's defaults: primary-or-better (7), four arms, matched within 45 m
+  const at = (mx: number, my: number, list: BoomJunction[]) => boomSignAt(mx, my, list, 45, 7, 4)
+
+  it('signs a 4-way signalised junction on a primary', () => {
+    expect(at(10, 10, [jx()])).toBe(true)
+  })
+
+  it('does not sign a side-street stop', () => {
+    expect(at(0, 0, [jx({ control: 'two_way_stop' })])).toBe(false)
+  })
+
+  it('does not sign a signalised junction whose superior road is residential', () => {
+    expect(at(0, 0, [jx({ rank: 3 })])).toBe(false)
+  })
+
+  it('does not sign a T', () => {
+    expect(at(0, 0, [jx({ arms: 3 })])).toBe(false)
+  })
+
+  it('does not sign a mast far from the junction', () => {
+    expect(at(100, 0, [jx()])).toBe(false)
   })
 })

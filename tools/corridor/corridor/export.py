@@ -357,6 +357,17 @@ DRIVABLE = (
 SCHOOL_ZONE_REACH_M = 120.0
 SCHOOL_SIGN_MAX_FROM_ROAD = 40.0
 
+# --- trails and railways -----------------------------------------------------------------------
+# Rich, 2026-10-06: "render trails and railways". These are not carriageways, so the branch stream
+# drops them; they ride `sidewalks` under their own `kind`, already tiled and bucketed, and the
+# viewer (`world/trail.ts`) decides the paving from the raw `surface`/`trailblazed` pair.
+# `track` is deliberately absent: it is drivable and is already a branch, so drawing it again would
+# double it. `service` is a driveway, also already drawn.
+TRAIL_KINDS = ("path", "footway", "cycleway", "bridleway", "steps", "pedestrian")
+TRAIL_W = {"path": 1.2, "footway": 1.4, "cycleway": 2.0, "bridleway": 1.6, "steps": 1.4, "pedestrian": 3.0}
+RAIL_KINDS = ("rail", "light_rail", "tram", "narrow_gauge", "subway", "monorail", "funicular", "preserved")
+RAIL_BALLAST_W = 3.4
+
 
 def _bearing(dx: float, dy: float, conv: float = 0.0) -> float:
     """
@@ -944,6 +955,47 @@ def _sidewalks(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
                     if o.geom_type != "LineString" or o.length < 10:
                         continue
                     emit(out, o, "sidewalk", 1.8, False, "offset")
+
+    # TRAILS AND RAILWAYS. Not carriageways, so not roads; they ride `sidewalks` under their own
+    # `kind` and `buildSidewalks` routes those kinds to a ribbon builder rather than concrete. The
+    # `surface`/`trailblazed` tags are carried raw and the paving is decided once, in trail.ts.
+    for f in features:
+        p = f["properties"]
+        g = f["geometry"]
+        if g["type"] != "LineString":
+            continue
+        hw, rw = p.get("highway"), p.get("railway")
+        if hw in TRAIL_KINDS and p.get("footway") not in ("sidewalk", "crossing"):
+            kind, width = hw, width_of(p, TRAIL_W.get(hw, 1.4))
+        elif rw in RAIL_KINDS:
+            kind, width = "rail", width_of(p, RAIL_BALLAST_W)
+        else:
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(g["coordinates"]))
+        except Exception:
+            continue
+        ln = ln.intersection(site_box)
+        fid = str(f.get("id") or p.get("@id") or p.get("id") or "")
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 10:
+                continue
+            step = 3.0
+            ss = np.arange(0.0, part.length, step).tolist() + [part.length]
+            pts = np.array([part.interpolate(v).coords[0] for v in ss])
+            zs = grade(pts)
+            rec = {
+                "kind": kind,
+                "width_m": round(float(width), 2),
+                "marked": False,
+                "source": "way",
+                "surface": p.get("surface"),
+                "trailblazed": p.get("trailblazed"),
+                "coords": _enu_cols(frame, pts, zs),
+            }
+            if fid:
+                rec["id"] = fid
+            out.append(rec)
 
     if src is not None:
         src.close()

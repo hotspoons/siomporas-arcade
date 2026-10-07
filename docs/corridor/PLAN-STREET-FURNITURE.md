@@ -243,6 +243,18 @@ and rail is not a road at all, so neither reaches the viewer — and neither car
 **Test.** A `highway=track` with no `trailblazed` gets the dirt material; a `highway=cycleway` with
 `surface=asphalt` gets the paved one; `railway=rail` gets two rails.
 
+**Built 2026-10-07 (first pass).** Not through the branch stream: paths and rails ride the existing
+`sidewalks` array under their own `kind`, because `sidewalks` is already tiled and bucketed per cell,
+so a path streams with its own kilometre and **no `scene.ts` plumbing is needed**. `export.py
+_sidewalks` emits `path|footway|cycleway|bridleway|steps|pedestrian` (not `track`, which is drivable
+and already a branch) and `railway=rail|light_rail|tram|…` as `kind="rail"`, each carrying the raw
+`surface`/`trailblazed` and an OSM `id`. The viewer routes those kinds out of the concrete sweep in
+`buildSidewalks` into `trail.ts buildTrailsAndRail`: a ribbon per paving colour (dirt `#8a6b4a`,
+gravel `#a39d92`, paved `#8d8d86`), draped on `groundAt`; a rail is a ballast ribbon (`RAIL_BALLAST_W`)
+plus two steel ribbons at gauge. The same way written into every tile it crosses is deduped by `id`
+(the same reason `takeBranch` exists). Sleepers and the tunnel/portal treatment are **not** in this
+pass. Needs a rebake.
+
 ---
 
 ## Order, and what needs a rebake
@@ -252,9 +264,9 @@ and rail is not a road at all, so neither reaches the viewer — and neither car
 2. **Signs (1, 2)** — *school-zone, boom and exit signs built 2026-10-07.* Viewer plus the new
    `signals.signs` records; no `school_zones` array after all.
 3. **Entrances (5)** — small bake classifier change + viewer guard. Not started.
-4. **Trails/rail (6)** — the largest: `network.py` must emit the ways (with `surface`/`trailblazed`)
-   and `trail.ts trailPaving` is the decision, already tested; `trailMesh` and the builder are not
-   written. Needs a rebake of whatever world is being tested.
+4. **Trails/rail (6)** — *built 2026-10-07 (first pass).* `_sidewalks` emits the ways under their own
+   `kind` with `surface`/`trailblazed`; `trail.ts buildTrailsAndRail` sweeps the ribbons. Needs a
+   rebake. Sleepers and tunnel portals still open.
 5. **Tunnels (bridge side, see `PLAN-WORLD-SCALE.md`)** — the crossing tags now reach the viewer;
    the portal/interior mesh is not written.
 

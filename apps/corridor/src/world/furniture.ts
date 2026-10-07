@@ -29,6 +29,7 @@ import { makeRetroreflective, retro } from '../visuals/retro'
 import type { Manifest } from './site'
 import * as T from '../tuning'
 import { BoundsIndex } from './strip'
+import { buildTrailsAndRail, trailKind, type TrailRun } from './trail'
 
 const toWorld = (x: number, y: number) => new THREE.Vector3(x, 0, -y)
 
@@ -1225,7 +1226,7 @@ export function kerbJoinRings(a: KerbEnd, b: KerbEnd, bevelDeg: number): number[
 
 export interface SidewalkResult {
   group: THREE.Group
-  counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number; corners: number }
+  counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number; corners: number; trails: number; rail: number }
 }
 
 export async function buildSidewalks(
@@ -1243,7 +1244,7 @@ export async function buildSidewalks(
 ): Promise<SidewalkResult> {
   const group = new THREE.Group()
   group.name = 'sidewalks'
-  const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0, overRoad: 0, corners: 0 }
+  const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0, overRoad: 0, corners: 0, trails: 0, rail: 0 }
   const runs = manifest.sidewalks ?? []
   if (!runs.length) return { group, counts }
 
@@ -1269,9 +1270,15 @@ export async function buildSidewalks(
 
   // the first and last station of every walk, kept for the corner join below
   const kerbEnds: { first: KerbEnd | null; last: KerbEnd | null }[] = []
+  // paths and railways, routed out of the concrete sweep and into `buildTrailsAndRail` below
+  const trailRuns: TrailRun[] = []
 
   for (const r of runs) {
     await yieldFn?.()
+    if (trailKind(r.kind)) {
+      trailRuns.push({ kind: r.kind, width_m: r.width_m, coords: r.coords, surface: r.surface, trailblazed: r.trailblazed, id: r.id })
+      continue
+    }
     /*
      * DENSIFY FIRST.
      *
@@ -1504,6 +1511,13 @@ export async function buildSidewalks(
 
   concrete.addTo(group, 'sidewalk:concrete', new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide }))
   bars.addTo(group, 'sidewalk:crossingbars', new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 }))
+  // paths and railways ride this stream but are not walks: sweep them as ribbons
+  if (trailRuns.length) {
+    const t = buildTrailsAndRail(trailRuns, groundAt, manifest.slug)
+    group.add(t.group)
+    counts.trails = t.counts.trails
+    counts.rail = t.counts.rail
+  }
   counts.metres = Math.round(counts.metres)
   return { group, counts }
 }

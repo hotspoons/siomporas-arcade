@@ -253,7 +253,7 @@ export interface Manifest {
   /** `barrier=guard_rail|fence|wall|hedge` ways, with a vertex every 2 m and a grade (furniture.ts) */
   barriers?: { kind: string; height_m: number; material?: string | null; coords: [number, number, number][] }[] | null
   /** sidewalks and crossings: explicit `highway=footway` ways plus offsets from `sidewalk=*` roads */
-  sidewalks?: { kind: string; width_m: number; marked: boolean; source: string; coords: [number, number, number][] }[] | null
+  sidewalks?: { kind: string; width_m: number; marked: boolean; source: string; coords: [number, number, number][]; surface?: string | null; trailblazed?: string | null; id?: string }[] | null
   /** power lines and their supports (OSM power=line|minor_line, tower|pole) */
   power?: { lines: { kind: string; voltage?: string | null; coords: [number, number, number][] }[]; supports: { kind: string; x: number; y: number; z: number; height_m: number }[] } | null
   /** network sites: every road that is not the primary spine */

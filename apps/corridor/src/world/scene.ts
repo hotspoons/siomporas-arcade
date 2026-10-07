@@ -217,6 +217,22 @@ export interface Site {
   lowestGround: () => number
   /** the lazy grading: how much of the site's strips and buildings exist yet, and what they cost */
   graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string }
+  /**
+   * The road/branch streaming queue as the pump sees it: what it is building now, what is queued
+   * within `STREAM_BUILD_M` of the eye (broken down by kind), and how much wall time the junction
+   * meet is eating. A probe samples this while driving fast to catch roads lagging the car.
+   */
+  roadStream: () => {
+    pumping: boolean
+    current: string
+    pendingNear: number
+    nearBranch: number
+    nearStreet: number
+    nearBuildings: number
+    nearest: { key: string; d: number }[]
+    branches: number
+    meet: { calls: number; lastMs: number; worstMs: number; totalMs: number; branches: number }
+  }
   /** point + travel direction on the spine at along-track s (metres) */
   spineAt: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }
   /**
@@ -1525,6 +1541,10 @@ if (uLodOn > 0.5) {
   // correction fading out over JUNCTION_MEET_M along the inferior road. The superior road, and
   // the spine always, keep their grade.
   const junctionMeet = { junctions: 0, warped: 0, maxStep: 0, noTarget: 0 }
+  // Where the junction meet's wall time goes. `sync` re-meets the whole network once per arriving
+  // branch tile, and at 200 mph those tiles arrive faster than one pump unit at a time can drain
+  // them — a probe reads this to see whether the meet, not the asphalt, is the backlog.
+  const meetStats = { calls: 0, branches: 0, lastMs: 0, worstMs: 0, totalMs: 0 }
   let finishJunctions: (budget?: Budget) => Promise<number[]> = async () => []
   // node -> junction, so a branch knows the priority facts at the node it meets. A tiled world adds
   // to it as intersection tiles arrive (hydrateCell), and `finishJunctions` re-runs the meet.
@@ -1593,20 +1613,30 @@ if (uLodOn > 0.5) {
       }
     }
     const sync = async (budget?: Budget) => {
+      const t0 = performance.now()
       const warped: number[] = []
-      branchRaw.forEach((b, i) => { if (b.br.id) byId.set(b.br.id, i) })
-      // This pass re-meets EVERY branch, and it runs once per arriving branch tile — so as the
-      // network grows it is O(N) a call over data that mostly does not need it, and it sits in the
-      // `loadVectorTile` continuation with no yield. On dc-metro a late call measured 2.97 s in
-      // `gradeStats.worstMs` on a `branch-cell` unit — the same un-budgeted freeze as the street
-      // furniture, one scope down. It still re-runs (an arriving intersection can give an unmet
-      // junction a target at last), but it yields per branch, so the frame paints between.
-      for (let i = 0; i < branchRaw.length; i++) { await budget?.tick(); meetOne(branchRaw[i], i) }
-      for (let i = 0; i < branchRaw.length; i++) {
-        const b = branchRaw[i]
-        if (!b.dirty) continue
-        await budget?.tick()
-        b.recurve(); b.dirty = false; warped.push(i)
+      try {
+        branchRaw.forEach((b, i) => { if (b.br.id) byId.set(b.br.id, i) })
+        // This pass re-meets EVERY branch, and it runs once per arriving branch tile — so as the
+        // network grows it is O(N) a call over data that mostly does not need it, and it sits in the
+        // `loadVectorTile` continuation with no yield. On dc-metro a late call measured 2.97 s in
+        // `gradeStats.worstMs` on a `branch-cell` unit — the same un-budgeted freeze as the street
+        // furniture, one scope down. It still re-runs (an arriving intersection can give an unmet
+        // junction a target at last), but it yields per branch, so the frame paints between.
+        for (let i = 0; i < branchRaw.length; i++) { await budget?.tick(); meetOne(branchRaw[i], i) }
+        for (let i = 0; i < branchRaw.length; i++) {
+          const b = branchRaw[i]
+          if (!b.dirty) continue
+          await budget?.tick()
+          b.recurve(); b.dirty = false; warped.push(i)
+        }
+      } finally {
+        const dt = performance.now() - t0
+        meetStats.calls++
+        meetStats.branches = branchRaw.length
+        meetStats.lastMs = dt
+        meetStats.totalMs += dt
+        if (dt > meetStats.worstMs) meetStats.worstMs = dt
       }
       return warped
     }
@@ -1655,6 +1685,7 @@ if (uLodOn > 0.5) {
   let paintNow: { centre: THREE.Color; edge: THREE.Color } | null = null
   const gradeEye = new THREE.Vector3(NaN, NaN, NaN)
   let gradePumping = false
+  let currentUnitKey = ''
   /** the nearest unfinished unit inside STREAM_BUILD_M of the eye, or null */
   const nextUnit = (): GradeUnit | null => {
     let best: GradeUnit | null = null, bd = Infinity
@@ -1684,7 +1715,12 @@ if (uLodOn > 0.5) {
         u.done = true
         const budget = new Budget(T.STREAM_BUDGET_MS)
         const u0 = performance.now()
-        await u.run(budget)
+        currentUnitKey = u.key
+        try {
+          await u.run(budget)
+        } finally {
+          currentUnitKey = ''
+        }
         const slice = budget.finish().worstSliceMs
         gradeStats.built++
         gradeStats.ms += performance.now() - u0
@@ -4246,6 +4282,31 @@ if (uLodOn > 0.5) {
     heightAt,
     lowestGround,
     graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst }),
+    roadStream: () => {
+      const near: { key: string; d: number }[] = []
+      let nearBranch = 0, nearStreet = 0, nearBuildings = 0
+      for (const u of gradeUnits) {
+        if (u.done) continue
+        const d = Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r
+        if (d > T.STREAM_BUILD_M) continue
+        near.push({ key: u.key, d: Math.round(d) })
+        if (u.key.startsWith('branch')) nearBranch++
+        else if (u.key.startsWith('street')) nearStreet++
+        else if (u.key.startsWith('buildings')) nearBuildings++
+      }
+      near.sort((a, b) => a.d - b.d)
+      return {
+        pumping: gradePumping,
+        current: currentUnitKey,
+        pendingNear: pendingNear(),
+        nearBranch,
+        nearStreet,
+        nearBuildings,
+        nearest: near.slice(0, 10),
+        branches: branchAts.length,
+        meet: { calls: meetStats.calls, lastMs: Math.round(meetStats.lastMs), worstMs: Math.round(meetStats.worstMs), totalMs: Math.round(meetStats.totalMs), branches: meetStats.branches },
+      }
+    },
     spineAt,
     chains: () => {
       // the spine's tags are per segment; its middle stands for the whole for these numbers

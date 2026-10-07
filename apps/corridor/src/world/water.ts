@@ -41,12 +41,12 @@ export interface WaterLine {
   intermittent?: boolean
   length_m: number
   fall_m: number
-  pts: [number, number, number][] // site x, y relative to origin, z NAVD88
+  pts: [number, number, number][] // ENU east, north; ellipsoid UP (metres) — see export._enu_water
   falls: WaterFall[]
   /** optional WaterLook preset name; defaults to the site's default look */
   look?: string
 }
-export interface WaterArea { id: string; kind: string; name: string | null; area_m2: number; z: number; ring: [number, number][]; look?: string }
+export interface WaterArea { id: string; kind: string; name: string | null; area_m2: number; /** ENU UP (metres) of the surface */ z: number; ring: [number, number][]; look?: string }
 export interface WaterLayer { lines: WaterLine[]; areas: WaterArea[]; summary?: Record<string, unknown> }
 
 /**

@@ -973,6 +973,61 @@ def _enu_derived(frame: Frame, derived: dict) -> dict:
     return out
 
 
+def _enu_water(frame: Frame, water: dict | None, ox: float, oy: float) -> dict | None:
+    """
+    `water.measure`'s output -> ENU, at the LAST moment — the water twin of `_enu_derived`.
+
+    water.py has to stay in UTM site metres: it snaps each point to the low cell of its DTM
+    transect by translating the point back onto the raster, so converting inside it would read the
+    heights from the wrong cells. It also carries a real height per vertex (and one per body), so
+    unlike the rings this is the full `to_enu3`: without the ellipsoid UP a pond 21 km out is drawn
+    37 m above the ground under it (dc-metro-take-2, 2026-10-07, the floating water at the stance).
+    """
+    if not water:
+        return water
+    out = dict(water)
+
+    def line(ln: dict) -> dict:
+        pts = ln.get("pts") or []
+        if not pts:
+            return ln
+        a = np.asarray(pts, dtype=float)
+        return {**ln, "pts": _enu_cols(frame, a[:, :2] + (ox, oy), a[:, 2])}
+
+    out["lines"] = [line(ln) for ln in water.get("lines", [])]
+
+    def area(ar: dict) -> dict:
+        ring = ar.get("ring") or []
+        if not ring:
+            return ar
+        a = np.asarray(ring, dtype=float) + (ox, oy)
+        # One height for the whole body: the ellipsoid UP at the centroid. The drop grows far more
+        # slowly than any pond is wide (centimetres across one), so a plane stays honest here.
+        _, _, u = _enu_z(frame, float(a[:, 0].mean()), float(a[:, 1].mean()), float(ar.get("z") or 0.0))
+        return {**ar, "ring": _enu_ring(frame, a), "z": u}
+
+    out["areas"] = [area(ar) for ar in water.get("areas", [])]
+    return out
+
+
+def _enu_rock(frame: Frame, rock: dict | None, ox: float, oy: float) -> dict | None:
+    """
+    `rock.measure`'s polygons -> ENU rings, the horizontal-only twin of `_enu_derived`'s landuse.
+
+    A rock polygon carries no height of its own — the viewer seats every instance on the ground —
+    so only the ring moves, but it must move with the roads: left in UTM site metres it sits up to
+    half a kilometre off at the far end of dc-metro.
+    """
+    if not rock:
+        return rock
+    out = dict(rock)
+    out["polygons"] = [
+        {**q, "ring": _enu_ring(frame, [(x + ox, y + oy) for x, y in q["ring"]])} if q.get("ring") else q
+        for q in rock.get("polygons", [])
+    ]
+    return out
+
+
 #: Above this many footprints, the heavy spatial arrays move out of the manifest into per-tile
 #: files. The threshold is not a tuning knob so much as "is this a world that freezes a tab":
 #: crofton-triangle is 8k and fine inline; ellicott-mills-and-ilchester is 43k and a 37 MB manifest,
@@ -1663,8 +1718,9 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "pois": enu_derived["pois"],
         "flora": None if flora is None else _flora_block(flora),
         "cuts": features.get("cuts"),
-        "rock": features.get("rock"),
-        "water": features.get("water"),
+        # rock/water are measured in UTM site metres like `derived`; the manifest gets the ENU copy.
+        "rock": _enu_rock(frame, features.get("rock"), ox, oy),
+        "water": _enu_water(frame, features.get("water"), ox, oy),
     }
     # intersections: who has priority, who stops, and what the blades say. Derived from the drawn
     # network rather than transcribed from OSM, because a US suburb maps almost none of it — 854

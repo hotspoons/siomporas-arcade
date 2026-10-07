@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from corridor import export  # noqa: E402
 from corridor.geo import Frame  # noqa: E402
 
 # dc-metro-take-2's anchor, the world the bug was measured on.
@@ -75,6 +76,55 @@ class ToEnu3(unittest.TestCase):
             a, b, c = self.frame.to_enu3(float(xs[i]), float(ys[i]), float(hs[i]))
             self.assertAlmostEqual(float(e[i]), float(a), 9)
             self.assertAlmostEqual(float(u[i]), float(c), 9)
+
+
+class WaterAndRockAreEnu(unittest.TestCase):
+    """rock/water are measured in UTM site metres and converted on the way into the manifest.
+
+    They were the two layers `_enu_derived` missed (dc-metro-take-2, 2026-10-07): a pond 21 km out
+    was drawn 37 m above the ground under it — the "floating water" at the stance. Rock seats
+    itself on the ground, so only its ring moves, but it moved half a kilometre off at the far end.
+    """
+
+    def setUp(self):
+        self.frame = Frame.at(ANCHOR_LON, ANCHOR_LAT)
+        self.ox, self.oy = self.frame.origin
+        # UTM-relative site metres, what water.py and rock.py write (~12.1 km out)
+        self.sx, self.sy = 12_000.0, 1_500.0
+        self.ux, self.uy = self.ox + self.sx, self.oy + self.sy
+
+    def test_water_line_gets_enu_horizontal_and_the_ellipsoid_up(self):
+        w = {"lines": [{"id": "x", "pts": [[self.sx, self.sy, 91.5]]}], "areas": []}
+        out = export._enu_water(self.frame, w, self.ox, self.oy)
+        e, n = self.frame.to_enu(self.ux, self.uy)
+        _, _, u = self.frame.to_enu3(self.ux, self.uy, 91.5)
+        p = out["lines"][0]["pts"][0]
+        self.assertAlmostEqual(p[0], round(float(e), 2), places=2)
+        self.assertAlmostEqual(p[1], round(float(n), 2), places=2)
+        self.assertAlmostEqual(p[2], round(float(u), 2), places=2)
+        # raw z 91.5 would sit ~11.5 m proud of the terrain this far out; the converted UP drops it
+        self.assertLess(p[2], 91.5 - 10.0)
+
+    def test_water_area_height_uses_the_centroid_and_the_ring_is_enu(self):
+        w = {"lines": [], "areas": [{"id": "p", "z": 128.41,
+                                     "ring": [[self.sx, self.sy], [self.sx + 40, self.sy], [self.sx, self.sy + 40]]}]}
+        out = export._enu_water(self.frame, w, self.ox, self.oy)
+        a = out["areas"][0]
+        self.assertLess(a["z"], 128.41 - 10.0)
+        e0, n0 = self.frame.to_enu(self.ux, self.uy)
+        self.assertAlmostEqual(a["ring"][0][0], round(float(e0), 2), places=2)
+        self.assertAlmostEqual(a["ring"][0][1], round(float(n0), 2), places=2)
+
+    def test_rock_ring_is_enu(self):
+        r = {"polygons": [{"id": "r", "ring": [[self.sx, self.sy], [self.sx + 30, self.sy], [self.sx, self.sy + 30]]}]}
+        out = export._enu_rock(self.frame, r, self.ox, self.oy)
+        e0, n0 = self.frame.to_enu(self.ux, self.uy)
+        self.assertAlmostEqual(out["polygons"][0]["ring"][0][0], round(float(e0), 2), places=2)
+        self.assertAlmostEqual(out["polygons"][0]["ring"][0][1], round(float(n0), 2), places=2)
+
+    def test_missing_layers_pass_through(self):
+        self.assertIsNone(export._enu_water(self.frame, None, self.ox, self.oy))
+        self.assertIsNone(export._enu_rock(self.frame, None, self.ox, self.oy))
 
 
 if __name__ == "__main__":

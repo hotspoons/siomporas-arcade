@@ -2519,12 +2519,14 @@ if (uLodOn > 0.5) {
     // The forEach above already queued the branches taken at startup. This is the same queue
     // for a branch that arrives later, pushed straight onto the pump.
     const adoptArriving = async (br: NonNullable<Manifest['branches']>[number], budget: Budget) => {
+      await budget.tick()
       if (!takeBranch(br)) return
       branchRoad.push({ base: null, holed: null })
       const warped = await finishJunctions(budget)
       const i = branchAts.length - 1
       const b = branchAts[i]
       curves.push({ at: b.at, len: b.len })
+      await budget.tick()
       addStations(branchWho0 + i, () => b.half)
       const de = br.dead_ends
       if (de?.length) authored.set(branchWho0 + i, de)
@@ -2536,6 +2538,7 @@ if (uLodOn > 0.5) {
       const [bx0, bz0, bx1, bz1] = b.bounds
       t.invalidateRegion(bx0, bz0, bx1, bz1)
       replantNow()
+      await budget.tick()
       queueBranch(i, gradeUnits)
       for (const w of warped) {
         if (!roadBuilt.has(w) || !branchRoad[w]?.base) continue
@@ -2584,7 +2587,7 @@ if (uLodOn > 0.5) {
           done: false,
           run: async (budget) => {
             const files = await loadVectorTile(manifest.slug, manifest.vt!.dir, t.x, t.y)
-            hydrateCell(k, files)
+            await hydrateCell(k, files, budget)
             for (const br of (files.branches ?? []) as NonNullable<Manifest['branches']>) {
               indexBranchSegment(br)
               await adoptArriving(br, budget)
@@ -3616,15 +3619,18 @@ if (uLodOn > 0.5) {
   // furniture pump both fetch the same tile (`loadVectorTile` caches it).
   const roads = buildRoadIndex(manifest)
   const hydrated = new Set<string>()
-  const hydrateCell = (key: string, files: Record<string, unknown>) => {
+  const hydrateCell = async (key: string, files: Record<string, unknown>, budget?: Budget) => {
     if (!manifest.vt?.cells?.length || hydrated.has(key)) return
     hydrated.add(key)
+    await budget?.tick()
     relieveCell(files)
+    await budget?.tick()
     const sibs = (files.siblings ?? []) as NonNullable<Manifest['siblings']>
     const dws = (files.driveways ?? []) as NonNullable<Manifest['driveways']>
     const sts = (files.stubs ?? []) as NonNullable<Manifest['stubs']>
     // cut faces and outcrops arrive with the cell; `relieveCell` above already lifted them
     addRocksCell(key, files.cuts as Manifest['cuts'], files.rock as Manifest['rock'])
+    await budget?.tick()
     // channels too; `_load_tiled` wrote `water` as `{lines, areas}` and `relieveCell` lifted them
     const w = files.water as Manifest['water'] | undefined
     if (w) { if (waterStream) waterStream.add(w); else pendingWater.push(w) }
@@ -3643,6 +3649,7 @@ if (uLodOn > 0.5) {
     for (const s of sibs) { (manifest.siblings ??= []).push(s); roads.addLine(s) }
     for (const d of dws) { (manifest.driveways ??= []).push(d); roads.addLine(d.coords) }
     for (const st of sts) { (manifest.stubs ??= []).push(st); roads.addLine(st.coords) }
+    await budget?.tick()
     addDrivewaysBatch(dws, sts)
     // junction facts, so a branch that meets here learns who has priority even though it was taken
     // before this tile arrived (the meet re-runs when branches stream — see the branch pump)
@@ -3676,7 +3683,7 @@ if (uLodOn > 0.5) {
         const cy = t.y * size + size / 2
         gradeUnits.push({ key: `buildings:${t.x},${t.y}`, x: cx, z: -cy, r: size * 0.71 + 10, done: false, run: async (budget) => {
           const files = await loadVectorTile(manifest.slug, dir, t.x, t.y)
-          hydrateCell(`${t.x},${t.y}`, files)
+          await hydrateCell(`${t.x},${t.y}`, files, budget)
           const list = (files.buildings ?? []) as NonNullable<Manifest['buildings']>
           if (!list.length) return
           // keep `manifest.buildings` a running view of what is loaded, so physics/attribution and
@@ -3932,7 +3939,7 @@ if (uLodOn > 0.5) {
     const homeStreetBudget = new Budget(T.STREAM_BUDGET_MS)
     for (let cx = home.x0; cx <= home.x1; cx++) for (let cy = home.y0; cy <= home.y1; cy++) {
       const files = await loadVectorTile(manifest.slug, dir, cx, cy)
-      hydrateCell(`${cx},${cy}`, files)
+      await hydrateCell(`${cx},${cy}`, files, homeStreetBudget)
       await buildStreetCell(cx, cy, files, homeStreetBudget)
     }
     for (const c of tiledCells) {
@@ -3940,7 +3947,7 @@ if (uLodOn > 0.5) {
       if (builtStreet.has(k)) continue
       gradeUnits.push({ key: `street:${k}`, x: c.x * size + size / 2, z: -(c.y * size + size / 2), r: size * 0.75, done: false, run: async (budget) => {
         const files = await loadVectorTile(manifest.slug, dir, c.x, c.y)
-        hydrateCell(k, files)
+        await hydrateCell(k, files, budget)
         await buildStreetCell(c.x, c.y, files, budget)
       } })
     }

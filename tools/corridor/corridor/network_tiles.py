@@ -62,6 +62,33 @@ _LIDAR_MARKER = "lidar.done.json"
 _LIDAR_MARKER_VERSION = 1
 
 
+def _fill_naip_blank(rgb: np.ndarray) -> float:
+    """
+    Replace exact-(0,0,0) no-data pixels in a (3, h, w) NAIP window with the window's own valid
+    per-channel mean, and return the filled fraction.
+
+    Every NAIP read here uses `boundless=True, fill_value=0`, which stamps zeros wherever a window
+    runs past the source raster — so an edge of coverage comes out as a black slab with a dead
+    straight edge. The per-tile path and the pyramid (`pyramid.fill_blank`) both fill this; the
+    whole-region overview did not, and on dc-metro-take-2 that was full-height black bands of
+    no-data straight across the ground the camera drives over (2026-10-07). Exact zero across all
+    three channels is the fill's own signature — real NAIP essentially never is. Borrowing the
+    valid mean is not a measurement, it is a plausible tone where there is none, and the eye reads
+    it as more of the same ground instead of a hole.
+
+    A window that is ENTIRELY no-data has no valid mean to borrow and is left as it is: that is
+    NAIP absent for the whole view, a different failure than an edge running past coverage.
+    """
+    blank = (rgb == 0).all(axis=0)
+    nblank = int(blank.sum())
+    if not nblank or nblank >= blank.size:
+        return 0.0
+    for c in range(3):
+        ch = rgb[c]
+        ch[blank] = int(ch[~blank].mean())
+    return nblank / blank.size
+
+
 class LazyRaster:
     """`arr[rows, cols]` over a rasterio dataset, reading row bands on demand. Also `.shape`."""
 
@@ -692,13 +719,9 @@ def _export_tiles_serial(site_dir: Path, web: Path, frame, mask_shapes: list, vi
             # meant to be — it is a plausible tone where there is no measurement, and the eye reads
             # it as more of the same ground instead of a hole. Exact zero across all three channels
             # is the fill's own signature; real NAIP essentially never is.
-            blank = (rgb == 0).all(axis=0)
-            nblank = int(blank.sum())
-            if nblank and nblank < blank.size:
-                for c in range(3):
-                    ch = rgb[c]
-                    ch[blank] = int(ch[~blank].mean())
-                entry["naip_fill"] = round(nblank / blank.size, 3)
+            frac = _fill_naip_blank(rgb)
+            if frac:
+                entry["naip_fill"] = round(frac, 3)
             img = vivid(Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB"), 1.3, 1.1)
             r_, g_, b_ = img.split()
             img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
@@ -1287,6 +1310,12 @@ def overview(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> dict
         span = max(bbox[2] - bbox[0], bbox[3] - bbox[1])
         naip_res = max(1.0, round(span / OVERVIEW_MAX_PX, 1))
         rgb, (w, h) = read(naip_p, naip_res, count=3)
+        # This is ONE mosaic of the whole site, so a gap in NAIP coverage is a black band right
+        # across the ground rather than a single tile's edge — it must be filled the same way the
+        # per-tile and pyramid paths fill theirs (`_fill_naip_blank`).
+        frac = _fill_naip_blank(rgb)
+        if frac:
+            print(f"  naip_overview filled {frac:.1%} no-data")
         img = vivid(Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB"), 1.3, 1.1)
         r_, g_, b_ = img.split()
         img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
@@ -1337,7 +1366,11 @@ def ensure_overview(site_dir: Path) -> dict | None:
     except Exception as exc:
         print(f"  buildings failed ({exc}); masking the canopy with the roads only")
         derived = {"buildings": []}
-    ov = overview(site_dir, web, ox, oy, mask_shapes(site_dir, derived), vivid)
+    # `overview` wants the frame itself (`frame.control_lattice`, `_enu_bbox(frame, b)`), not the
+    # raw origin it happens to carry — passing `ox, oy` was a leftover from before the ENU/geodetic
+    # rework and made this repair script raise TypeError instead of repairing anything.
+    frame = Frame(site["frame"]["epsg"], (ox, oy))
+    ov = overview(site_dir, web, frame, mask_shapes(site_dir, derived), vivid)
     if not ov:
         print(f"{site_dir.name}: nothing to build")
         return None

@@ -161,5 +161,40 @@ class PyramidBakeTest(unittest.TestCase):
             self.assertEqual(pyramid.bake(Path(d), Path(d), None), {})
 
 
+class EnsureOverviewTest(unittest.TestCase):
+    def test_repair_passes_the_frame_not_the_raw_origin(self):
+        # `ensure_overview` (the `python -m corridor.overview` repair) handed `ox, oy` positionally
+        # to `overview`, which now takes a `frame` object — so the repair raised TypeError instead
+        # of rebuilding anything. Capture the call to pin the frame (2026-10-07).
+        import json
+        import tempfile
+
+        from corridor import buildings, network_tiles
+
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            (site / "web").mkdir()
+            (site / "site.json").write_text(json.dumps({"frame": {"epsg": 32618, "origin": [326156.0, 4308880.0]}}))
+            (site / "web" / "manifest.json").write_text(json.dumps({"layers": {"tiles": {"scheme": "flat-1km"}}}))
+
+            seen: dict = {}
+            orig_ov, orig_ms, orig_der = network_tiles.overview, network_tiles.mask_shapes, buildings.derive
+            network_tiles.mask_shapes = lambda *a, **k: []
+            buildings.derive = lambda *a, **k: {"buildings": []}
+
+            def fake_ov(sd, web, frame, shapes, vivid):
+                seen["frame"] = frame
+                return {"naip": {"file": "naip_overview.jpg", "res": 1.0, "size": [1, 1], "bbox": None, "geo": None, "overview": True}}
+
+            network_tiles.overview = fake_ov
+            try:
+                network_tiles.ensure_overview(site)
+            finally:
+                network_tiles.overview, network_tiles.mask_shapes, buildings.derive = orig_ov, orig_ms, orig_der
+
+            self.assertIsInstance(seen.get("frame"), network_tiles.Frame)
+            self.assertEqual(tuple(seen["frame"].origin), (326156.0, 4308880.0))
+
+
 if __name__ == "__main__":
     unittest.main()

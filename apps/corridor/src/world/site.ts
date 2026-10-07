@@ -350,9 +350,24 @@ export async function fetchJSON<T>(path: string): Promise<T> {
   return (await r.json()) as T
 }
 
+/**
+ * How many parsed vector tiles may stay cached. They are big — a dc-metro tile is up to ~860 KB
+ * of text, and parsed into JS objects it is several times that — and nothing downstream keeps the
+ * arrays: a cell's meshes are built once and retained, but the tile's own `signals`, `parking`,
+ * `barriers`, `intersections`, `cuts` and `water` are consumed and dropped. So the cache is only a
+ * builder scratch pad and can be a small LRU rather than "for the life of the page". The pump
+ * builds one cell at a time, so a few dozen covers the eye and its hysteresis with room to spare.
+ *
+ * Re-fetching an evicted tile is cheap (a conditional request) and correct: `hydrated` and
+ * `builtStreet` already make a revisit a no-op, so the refetch is the only cost.
+ */
 const _vtiles = new Map<string, Promise<Record<string, unknown>>>()
+let _vtileMax = 48
+/** the cap, for a tuning readout; a value below 1 means unbounded (the old behaviour) */
+export function setVectorTileCacheMax(n: number) { _vtileMax = n }
+export function vectorTileCacheSize(): number { return _vtiles.size }
 
-/** One vector tile, fetched once and cached for the life of the page. A missing tile is `{}`.
+/** One vector tile, fetched once and cached. A missing tile is `{}`.
  *  A tile is a partial manifest: arrays (`buildings`, `sidewalks`) and nested objects
  *  (`power`, `signals`) keyed exactly as the manifest field they replace.
  *
@@ -361,16 +376,27 @@ const _vtiles = new Map<string, Promise<Record<string, unknown>>>()
  *  life of the cache without ever asking the server, so streamed roads stayed on the old flat
  *  vertical while the manifest spine and every raster (both fetched fresh) curved onto the
  *  ellipsoid — "some streets on flat earth, some on round". The server sends `Cache-Control:
- *  no-cache`; honour it. The `_vtiles` map still dedupes within the page, so the network cost is
+ *  no-cache`; honour it. The map still dedupes while a tile is being built, so the network cost is
  *  one conditional request per tile as it streams, not one per builder that asks for it. */
 export function loadVectorTile(slug: string, dir: string, x: number, y: number): Promise<Record<string, unknown>> {
   const url = `${DATA_BASE}/sites/${slug}/web/${dir}/${x}_${y}.json`
   let p = _vtiles.get(url)
-  if (!p) {
-    p = fetch(url, { cache: 'no-cache' })
-      .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : {}))
-      .catch(() => ({}))
+  if (p) {
+    // LRU: touch on use, so the tiles the eye is working stay and the ones behind it age out
+    _vtiles.delete(url)
     _vtiles.set(url, p)
+    return p
+  }
+  p = fetch(url, { cache: 'no-cache' })
+    .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : {}))
+    .catch(() => ({}))
+  _vtiles.set(url, p)
+  if (_vtileMax >= 1) {
+    // evict oldest-first, never the tile we just asked for
+    for (const k of _vtiles.keys()) {
+      if (_vtiles.size <= _vtileMax) break
+      if (k !== url) _vtiles.delete(k)
+    }
   }
   return p
 }

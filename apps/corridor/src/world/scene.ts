@@ -14,7 +14,7 @@ import { installRoadClip, RoadCover } from '../visuals/roadcover'
 import { ImageryStream, PyramidSet, TileSet, loadTiles } from '../lod/tiles'
 import { PyramidStream } from '../lod/pyramidstream'
 import { loadBakedTexture } from '../assets/textures'
-import { DATA_BASE, decodeHeights, decodeScalar, loadImage, loadVectorTile, type Layer, type Manifest, type Structure, bilinear } from './site'
+import { DATA_BASE, decodeHeights, decodeScalar, loadImage, loadVectorTile, vectorTileCacheSize, type Layer, type Manifest, type Structure, bilinear } from './site'
 import { NearTrees, type TreeRecord } from './trees'
 import { Impostors } from '../lod/impostors'
 import { Grass } from './grass'
@@ -206,6 +206,8 @@ export interface Site {
   pyramid: (() => PyramidStream['counts']) | null
   /** the pyramid stream itself, so a probe can force an update at a chosen eye */
   pyramidStream: PyramidStream | null
+  /** how many parsed vector tiles are cached; the LRU cap bounds this on a long drive */
+  vtileCache: () => number
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
   /** the lowest elevation (m) among the terrain tiles now held; the sea plane's visibility gate */
@@ -4214,6 +4216,8 @@ if (uLodOn > 0.5) {
     tileStream: stream,
     pyramid: pyr ? () => pyr.counts : null,
     pyramidStream: pyr,
+    /** how many parsed vector tiles are cached; the LRU cap bounds this on a long drive */
+    vtileCache: () => vectorTileCacheSize(),
     heightAt,
     lowestGround,
     graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst }),

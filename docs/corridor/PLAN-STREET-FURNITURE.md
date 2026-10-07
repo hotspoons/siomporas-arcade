@@ -280,6 +280,9 @@ pass. Needs a rebake.
    rebake. **Sleepers now built (2026-10-07):** `trail.ts sleeperPlacements` stations a tie every
    `RAIL_SLEEPER_SPACING_M` (0.65 m), each oriented across the track, drawn as one `InstancedMesh`
    (`rail:sleepers`) rather than a mesh each. Pure and unit-tested. Viewer-only, no rebake.
+   Screen-checked 2026-10-07 through `vtproxy` at (3500, 1800): the loaded scene carries a
+   `rail:sleepers` mesh of 9 700 instances with its ballast and two steel ribbons (a clean close-up
+   shot was lost to the swiftshader camera framing, but the object and its count are there).
 5. **Tunnels (bridge side, see `PLAN-WORLD-SCALE.md`)** — the crossing tags reach the viewer;
    the portal/interior mesh is not written. **Still not attempted (2026-10-07):** a portal needs the
    road strip and the camera-inside decision, both in the shared `scene.ts`, and it is a screen-check

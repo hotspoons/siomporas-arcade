@@ -207,6 +207,15 @@ hint, and drop it if the two disagree by less than the width of either road (it 
 middle — a median gap, not an entrance). The crofton-triangle case is exactly this disagreement on
 both sides of the highway.
 
+**Built 2026-10-07 (bake half).** The symptom is more specific than "ambiguous": a way that ENDS at
+one of ours (a T, or a driveway) was being stubbed `STUB_M` *either side* of the junction, so across a
+divided highway the far half landed on the OTHER carriageway. `export.py _stub_span` (pure, unit-tested)
+now draws a through-way both ways but an ending-way only on its own side, and a way shorter than the
+stub whole. This is the whole "both sides of the highway" case, and it needs **no viewer change** —
+the viewer draws the coords it is given. Still open: the fully general `side`-hint classifier for a
+node genuinely ambiguous between two carriageways, and the viewer guard for it; both want the shared
+`scene.ts` (the per-cell `addDriveways`), so they wait for that file to be free.
+
 **Knobs.** `ENTRANCE_AMBIG_M`, `ENTRANCE_DROP_M`.
 
 **Test.** A node equidistant from two parallel carriageways (the highway) yields **one** connector,
@@ -263,7 +272,9 @@ pass. Needs a rebake.
    pass (`kerbJoinRings`) are done and unit-tested; what remains is a look at a screen.
 2. **Signs (1, 2)** — *school-zone, boom and exit signs built 2026-10-07.* Viewer plus the new
    `signals.signs` records; no `school_zones` array after all.
-3. **Entrances (5)** — small bake classifier change + viewer guard. Not started.
+3. **Entrances (5)** — *bake half built 2026-10-07.* `_stub_span` stops a T/driveway being stubbed
+   across the junction onto the far carriageway. The general side-hint + viewer guard wait on the
+   shared `scene.ts`.
 4. **Trails/rail (6)** — *built 2026-10-07 (first pass).* `_sidewalks` emits the ways under their own
    `kind` with `surface`/`trailblazed`; `trail.ts buildTrailsAndRail` sweeps the ribbons. Needs a
    rebake. Sleepers and tunnel portals still open.

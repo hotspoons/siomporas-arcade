@@ -268,6 +268,29 @@ def _our_lines(site_dir: Path):
     return MultiLineString(out) if out else None
 
 
+def _stub_span(meet: float, length: float, stub_m: float) -> tuple[float, float]:
+    """The stretch of a non-network way to draw around a junction with one of ours.
+
+    A way that PASSES THROUGH is stubbed `stub_m` either side of the junction. A way that ENDS at
+    ours — a T, or a driveway — is drawn only on its own side: drawing the far side manufactures
+    asphalt on the other side of the junction, and across a divided highway the far side is the
+    OTHER carriageway. That is the "driveway on both sides of the highway" Rich saw. A way shorter
+    than the stub is drawn whole in either case.
+
+    Pure, so "a T is not stubbed across the junction, a crossing is" is a unit test and not only a
+    look at a screen.
+    """
+    if length <= stub_m:
+        return 0.0, length
+    near_start = meet < stub_m
+    near_end = meet > length - stub_m
+    if near_start:
+        return 0.0, min(length, meet + stub_m)
+    if near_end:
+        return max(0.0, meet - stub_m), length
+    return max(0.0, meet - stub_m), min(length, meet + stub_m)
+
+
 def _stub_roads(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
     """The roads we do NOT model, stubbed a little way in from where they meet the ones we do.
 
@@ -316,8 +339,9 @@ def _stub_roads(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]
             if float(np.mean(ds < 6.0)) > 0.5:
                 continue
             meet = float(ss[i])
-            # our own carriageway occupies the first few metres; start clear of it
-            lo, hi = max(0.0, meet - STUB_M), min(part.length, meet + STUB_M)
+            # our own carriageway occupies the first few metres; start clear of it. A way that ENDS
+            # here is drawn only on its own side (see `_stub_span`) — no asphalt on the far side.
+            lo, hi = _stub_span(meet, part.length, STUB_M)
             keep = LineString([part.interpolate(float(v)).coords[0] for v in np.arange(lo, hi, 4.0).tolist() + [hi]])
             if keep.length < 12:
                 continue

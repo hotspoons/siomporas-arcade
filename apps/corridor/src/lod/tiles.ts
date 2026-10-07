@@ -29,8 +29,9 @@ import * as THREE from 'three'
 import type { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
 import { latticeFor } from '@apex/engine/geo/pyramid'
+import type { GridArrays } from './gridarrays'
 import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type PyrEntry, type PyrIndex, type TileIndex, bilinear } from '../world/site'
-import { reliefHeights } from '../visuals/relief'
+import { relief, reliefHeights } from '../visuals/relief'
 import { STREAM_LOCAL } from '../tuning'
 import { loadBakedTexture } from '../assets/textures'
 
@@ -397,6 +398,11 @@ export interface PyrTile extends Tile {
   z: number
   /** bytes this tile holds, so eviction can bound the real resource rather than a proxy for it */
   bytes: number
+  /**
+   * The terrain grid, precomputed off the main thread by the decode worker. Absent when the tile
+   * decoded on the main thread (no worker), in which case scene.ts falls back to `gridGeometry`.
+   */
+  grid?: GridArrays
 }
 
 export class PyramidSet {
@@ -534,6 +540,8 @@ interface DecodedRasters {
   demSize: [number, number]
   chm: Float32Array | null
   chmSize: [number, number]
+  /** terrain grid from the worker; absent on the main-thread fallback */
+  grid?: GridArrays
 }
 
 let decodeWorker: Worker | null = null
@@ -562,6 +570,7 @@ function tileWorker(): Worker | null {
         demSize: [ev.data.demW as number, ev.data.demH as number],
         chm: (ev.data.chm as Float32Array | null) ?? null,
         chmSize: [ev.data.chmW as number, ev.data.chmH as number],
+        grid: ev.data.grid as GridArrays | undefined,
       })
     }
     decodeWorker.onerror = (ev) => {
@@ -576,7 +585,15 @@ function tileWorker(): Worker | null {
   return decodeWorker
 }
 
-function decodeOffThread(demBytes: Uint8Array, zmin: number, zscale: number, chmBytes: Uint8Array | undefined): Promise<DecodedRasters> {
+function decodeOffThread(
+  demBytes: Uint8Array,
+  zmin: number,
+  zscale: number,
+  chmBytes: Uint8Array | undefined,
+  anchor: Anchor,
+  level: [number, number, number],
+  maxVerts: number,
+): Promise<DecodedRasters> {
   const worker = tileWorker()
   if (!worker) return Promise.reject(new Error('no worker'))
   const id = ++decodeSeq
@@ -594,7 +611,8 @@ function decodeOffThread(demBytes: Uint8Array, zmin: number, zscale: number, chm
       ok: (v) => { clearTimeout(timer); ok(v) },
       fail: (e) => { clearTimeout(timer); fail(e) },
     })
-    worker.postMessage({ id, dem, zmin, zscale, chm, chmScale: 0.25 }, transfer)
+    const r = relief()
+    worker.postMessage({ id, dem, zmin, zscale, chm, chmScale: 0.25, anchor: [anchor.lon, anchor.lat, anchor.h] as [number, number, number], level, maxVerts, relief: [r.k, r.z0] as [number, number] }, transfer)
   })
 }
 
@@ -635,6 +653,8 @@ function pyrTileFrom(
     chm = { layer: chmLayer, data: decoded.chm, rf: new RasterFrame({ size: decoded.chmSize, geo }, anchor) }
   }
   const bounds = enuBounds(rf)
+  const g = decoded.grid
+  const gridBytes = g ? g.pos.byteLength + g.uv.byteLength + g.idx.byteLength + g.norm.byteLength : 0
   return {
     z: e.z,
     x: e.x,
@@ -646,8 +666,10 @@ function pyrTileFrom(
     cy: (bounds[1] + bounds[3]) / 2,
     hasNaip: !!e.naip,
     // The decoded rasters, not the wire bytes: this is what eviction has to bound, and a PNG that
-    // gzips to 40 kB is 512*512*4 in memory either way.
-    bytes: wireBytes + dem.data.byteLength + (chm ? chm.data.byteLength : 0),
+    // gzips to 40 kB is 512*512*4 in memory either way. The terrain grid rides along too — several
+    // hundred kB of typed arrays per tile — so the byte budget that evicts must count it.
+    bytes: wireBytes + dem.data.byteLength + (chm ? chm.data.byteLength : 0) + gridBytes,
+    grid: decoded.grid,
   }
 }
 
@@ -668,6 +690,7 @@ export async function loadPyrTile(
   e: PyrEntry,
   anchor: Anchor,
   signal?: AbortSignal,
+  maxVerts = 14_000,
 ): Promise<PyrTile | null> {
   if (e.empty || !e.dem) return null
   const res = await fetch(`${DATA_BASE}${base}${index.dir}/${e.z}/${e.x}_${e.y}.pack`, { cache: 'no-cache', signal })
@@ -690,7 +713,7 @@ export async function loadPyrTile(
   let decoded: DecodedRasters
   if (tileWorker()) {
     try {
-      decoded = await decodeOffThread(demBytes, e.dem.zmin, e.dem.zscale, chmBytes)
+      decoded = await decodeOffThread(demBytes, e.dem.zmin, e.dem.zscale, chmBytes, anchor, [e.z, e.x, e.y], maxVerts)
       reliefHeights(decoded.dem)
     } catch (err) {
       console.warn('tile worker decode failed; decoding on the main thread', err)

@@ -53,6 +53,12 @@ export interface PyramidStreamOpts {
    * and the leaf's texture arrives with the tile.
    */
   textureFor?: (t: PyrTile) => string | null
+  /**
+   * Vertex ceiling for a terrain grid. The decode worker builds the grid now, so this is how the
+   * main thread tells it how fine to make one; it is the same `lite ? 4_000 : 14_000` that used to
+   * be passed to `strideFor` at the `geometryFor` call site.
+   */
+  maxVerts?: number
 }
 
 /** A tile that has left the wanted set stays this many metres of travel, so the boundary does not flap. */
@@ -134,6 +140,7 @@ export class PyramidStream {
       maxPending: 6,
       maxTiles: 512,
       errorPixels: 1.6,
+      maxVerts: 14_000,
       ...opts,
     }
     for (const e of opts.index.list) this.entries.set(`${e.z}/${e.x}/${e.y}`, e)
@@ -328,7 +335,7 @@ export class PyramidStream {
     if (!e || e.empty) return
     const ac = new AbortController()
     this.pending.set(k, ac)
-    loadPyrTile(this.o.base, this.o.index, e, this.o.anchor, ac.signal)
+    loadPyrTile(this.o.base, this.o.index, e, this.o.anchor, ac.signal, this.o.maxVerts)
       .then((tile) => {
         this.pending.delete(k)
         // An `empty` tile resolves null. It exists so quad closure can see the quad is complete;
@@ -470,7 +477,10 @@ export class PyramidStream {
       }
     }
     pos.needsUpdate = true
-    h.geo.computeVertexNormals()
+    // Normals only change when a vertex actually moved. With mask 0 on both sides the grid sits at
+    // its rest positions — the same ones the normals were built from (worker grid, or gridGeometry)
+    // — so recomputing is a full-grid pass for nothing. That pass ran for every arriving tile.
+    if (mask !== 0 || h.mask !== 0) h.geo.computeVertexNormals()
     h.mask = mask
     h.drop = drop
   }

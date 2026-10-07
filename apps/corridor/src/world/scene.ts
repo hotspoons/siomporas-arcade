@@ -13,6 +13,7 @@ import { makeSplatFading, type SplatMaskUniforms } from '../visuals/splatmask'
 import { installRoadClip, RoadCover } from '../visuals/roadcover'
 import { ImageryStream, PyramidSet, TileSet, loadTiles } from '../lod/tiles'
 import { PyramidStream } from '../lod/pyramidstream'
+import type { GridArrays } from '../lod/gridarrays'
 import { loadBakedTexture } from '../assets/textures'
 import { DATA_BASE, decodeHeights, decodeScalar, loadImage, loadVectorTile, vectorTileCacheSize, type Layer, type Manifest, type Structure, bilinear } from './site'
 import { NearTrees, type TreeRecord } from './trees'
@@ -392,6 +393,16 @@ function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: 
 
 /** Pick a stride so a grid stays under `maxVerts` vertices. */
 const strideFor = (layer: Layer, maxVerts: number) => Math.max(1, Math.ceil(Math.sqrt((layer.size[0] * layer.size[1]) / maxVerts)))
+
+/** Wrap a terrain grid the decode worker already built, so no vertex is touched on the main thread. */
+function geometryFromGrid(g: GridArrays): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(g.pos, 3))
+  geo.setAttribute('uv', new THREE.BufferAttribute(g.uv, 2))
+  geo.setAttribute('normal', new THREE.BufferAttribute(g.norm, 3))
+  geo.setIndex(new THREE.BufferAttribute(g.idx, 1))
+  return geo
+}
 
 function ribbon(points: THREE.Vector3[], width: number, color: number, opacity = 1) {
   const pos: number[] = []
@@ -815,7 +826,9 @@ if (uLodOn > 0.5) {
       group: grp,
       // gridGeometry already reads a tile's own RasterFrame and emits 0..1 UVs, so a quadtree tile
       // places and textures with no changes — the same property that made the flat tiles work.
-      geometryFor: (t) => gridGeometry(t.dem, strideFor(t.dem.layer, lite ? 4_000 : 14_000), () => 0),
+      // The decode worker now builds that grid, so most tiles arrive ready to wrap; the main-thread
+      // `gridGeometry` is kept as the fallback for a worker-less decode.
+      geometryFor: (t) => (t.grid ? geometryFromGrid(t.grid) : gridGeometry(t.dem, strideFor(t.dem.layer, lite ? 4_000 : 14_000), () => 0)),
       materialFor: (t) => {
         // Bare until the tile's own photo arrives. The overview's UVs are the whole site, so
         // painting it onto a quadtree tile stretches one picture across every tile.
@@ -835,6 +848,7 @@ if (uLodOn > 0.5) {
       fovY: (60 * Math.PI) / 180,
       viewportH: renderer?.domElement.height ?? 1080,
       budgetBytes: lite ? 96 * 1024 * 1024 : 256 * 1024 * 1024,
+      maxVerts: lite ? 4_000 : 14_000,
     })
     // Prime under the car, not the ENU origin. Trailworks holds the stream on the foreground
     // until the ground under the view resolves; the origin of a geodesic frame is not the spawn.

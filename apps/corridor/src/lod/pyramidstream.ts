@@ -320,7 +320,19 @@ export class PyramidStream {
     let inFlight = this.pending.size * this.typicalBytes
     let resident = 0
     for (const h of this.held.values()) resident += h.tile.bytes
-    for (const t of load) {
+    // NEAREST FIRST. `diff` returns the wanted set in the selector's walk order, which is
+    // coarse-to-fine and leaves the tile under the eye near the end. The byte budget then fills
+    // from the front, and the one tile the camera is standing on was the tile that never loaded:
+    // its parent stood there for good, and a parent samples every ~100 m, so on a slope it rose
+    // metres above the road, rail and grass laid on the 2 m surface (Rich, 2026-10-07). Order by
+    // distance so the ground under the eye is fetched first and the far coarse ring waits.
+    const order = load
+      .map((t) => {
+        const p = this.place(t)
+        return { t, d: Math.hypot(p.x - eyeX, p.z - eyeZ) }
+      })
+      .sort((a, b) => a.d - b.d)
+    for (const { t } of order) {
       const k = tileKey(t)
       if (this.pending.size >= this.o.maxPending) break
       if (resident + inFlight + this.typicalBytes > this.o.budgetBytes) break

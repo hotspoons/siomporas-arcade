@@ -233,14 +233,21 @@ shoulder of the Capital Beltway. Three defects, all in the *inference*, not the 
    road at every junction, so one road arrives as several ids. `main` saw the two carriageways as two
    equal through roads and again went all-way (Baltimore-Washington Parkway, the Beltway's local/
    express split, every divided arterial meeting a side street).
+4. **A ramp merging stopped, and its sign was set on the freeway.** With the motorway itself no
+   longer stopping, the surviving sign at the Beltway spot was the `motorway_link`'s — drawn on the
+   shoulder of I-495 beside the car, because that is where the ramp meets it. A ramp joining a
+   freeway **yields**; it does not stop, and the model's "the inferior arm stops" turned a yield into
+   a sign.
 
 The fixes: rank the spine from its `segments`; group arms by **corridor** (name, then `ident`/`ref`,
-never the `«unnamed»` placeholder) so one road is one road; and a **`motorway` carriageway is never a
-stopping arm** — whatever the inference or a stray OSM node said — with a junction left with no
-stopper marked `uncontrolled` rather than a stop. Measured on dc-metro-take-2: motorway arms that
-stop 3 → 0, trunk 18 → 2, all-way stops 3935 → 3422, stop signs 35934 → 33738. The two trunks left
-are both major roads meeting at a way boundary; a `trunk` in the US is often an at-grade arterial, so
-it is deliberately not blanket-exempt the way `motorway` is.
+never the `«unnamed»` placeholder) so one road is one road; a **`motorway` carriageway is never a
+stopping arm** — whatever the inference or a stray OSM node said; and a junction whose **every** arm
+is a freeway or a freeway ramp (`motorway`/`motorway_link`) is an interchange **merge or split**, not
+a stop-controlled crossing, so nobody stops. A junction left with no stopper is `uncontrolled` rather
+than a stop. Measured on dc-metro-take-2: motorway arms that stop 3 → 0, trunk 18 → 2, all-way stops
+3935 → 3420, stop signs 35934 → 33691. The two trunks left are both major roads meeting at a way
+boundary; a `trunk` in the US is often an at-grade arterial, so it is deliberately not blanket-exempt
+the way `motorway` is.
 
 **Exactly one phase is superior.** Testing "does this phase contain an arm of the top rank" made
 both phases superior at a crossing of two equal roads and produced a 252 s cycle — four minutes of

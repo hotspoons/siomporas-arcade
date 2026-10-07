@@ -507,9 +507,18 @@ def build(site_dir: Path, frame, max_chars: int = 17) -> dict:
         # junctions all-way stops and put 1062 stop signs on a suburb that has almost no four-way
         # stops in it — every court meeting its street would have stopped the street too.
         main = sorted({a["corridor"] for a in approaches if a["rank"] == top and a["through"]})
+        # A junction whose every arm is a freeway or a freeway ramp is an interchange MERGE or split,
+        # not a stop-controlled crossing. A ramp joining a freeway yields; it does not stop, and a
+        # stop sign set at the merge lands on the freeway shoulder — exactly the "random stop sign on
+        # a freeway" Rich drove past, which is why the sign survived the motorway guard: it was the
+        # RAMP's arm, drawn beside I-495. Only a surface road at the junction earns the usual rule.
+        freeway = all(a["highway"] in ("motorway", "motorway_link") for a in approaches)
         if signalised:
             control = "signals"
             counts["signalised"] += 1
+        elif freeway:
+            control = "uncontrolled"
+            counts["uncontrolled"] += 1
         elif len(main) == 1:
             control = "two_way_stop"
             counts["two_way_stop"] += 1

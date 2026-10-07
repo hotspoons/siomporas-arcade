@@ -83,7 +83,7 @@ class SpineClass(unittest.TestCase):
 
 
 class NoStopOnAFreeway(unittest.TestCase):
-    def test_a_motorway_link_joining_a_motorway_does_not_stop_the_motorway(self):
+    def test_a_motorway_link_joining_a_motorway_is_a_merge_not_a_stop(self):
         # primary: motorway, through the junction at s=200 of 400
         primary = {
             "id": "r1", "ident": "Capital Beltway",
@@ -100,13 +100,13 @@ class NoStopOnAFreeway(unittest.TestCase):
             built = build(Path(tmp.name), _Frame())
         self.assertEqual(len(built["list"]), 1)
         ix = built["list"][0]
-        self.assertEqual(ix["control"], "two_way_stop")
-        by_class = {a["highway"]: a["stop"] for a in ix["approaches"]}
-        self.assertFalse(by_class["motorway"], "the motorway must not stop")
-        self.assertTrue(by_class["motorway_link"], "the ramp yields")
+        # a freeway + a ramp is a merge: nobody stops, and certainly not the motorway
+        self.assertEqual(ix["control"], "uncontrolled")
+        self.assertFalse(any(a["stop"] for a in ix["approaches"]))
         # the exact old failure: an all-way stop with the motorway stopping
         self.assertNotEqual(ix["control"], "all_way_stop")
         self.assertEqual(built["counts"]["all_way_stop"], 0)
+        self.assertEqual(built["counts"]["stop_signs"], 0)
 
     def test_a_divided_freeway_crossing_is_not_an_all_way_stop(self):
         # two one-way carriageways of ONE freeway through the same node -> `main` sees two roads.

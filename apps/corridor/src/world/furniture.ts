@@ -342,8 +342,8 @@ function boomPanelFace(side: number, arm: number, w: number, h: number): { geome
  * because the post is vertex-coloured metal and the face is a painted picture, and one instanced
  * mesh cannot be both.
  */
-type SignKind = 'stop' | 'give_way' | 'school' | 'school_end'
-const SIGN_KINDS: SignKind[] = ['stop', 'give_way', 'school', 'school_end']
+type SignKind = 'stop' | 'give_way' | 'school' | 'school_end' | 'exit'
+const SIGN_KINDS: SignKind[] = ['stop', 'give_way', 'school', 'school_end', 'exit']
 
 function signPostGeometry(kind: SignKind): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
@@ -374,18 +374,20 @@ function signOutline(kind: SignKind): THREE.BufferGeometry {
   // a school sign is a DIAMOND: a square on its corner, vertex up (MUTCD S1-1's silhouette)
   else if (kind === 'school') g = new THREE.CircleGeometry(0.42 * S, 4, Math.PI / 2)
   // END SCHOOL ZONE is a wide plate, not a polygon (MUTCD S4-3 family)
-  else g = new THREE.PlaneGeometry(1.25 * S, 0.42 * S)
+  else if (kind === 'school_end') g = new THREE.PlaneGeometry(1.25 * S, 0.42 * S)
+  // an exit sign is a wide green guide sign (MUTCD E-series)
+  else g = new THREE.PlaneGeometry(2.0 * S, 0.7 * S)
   g.rotateY(Math.PI) // face −Z, the way every head here faces
   return g
 }
 
 /** The painted face, its texture drawn once and shared by every sign of that kind on the site. */
-function signFace(kind: SignKind): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
+function signFace(kind: SignKind, label?: string): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
   const geometry = signOutline(kind)
   geometry.translate(0, T.FURNITURE_SIGN_HEIGHT - 0.05, -0.04)
   // a regulatory sign is prismatic sheeting: by day a painted plate, at night the brightest thing
   // on the road because it throws your own headlights straight back at you (retro.ts)
-  const material = new THREE.MeshStandardMaterial({ map: signTexture(kind), roughness: 0.55, metalness: 0.05 })
+  const material = new THREE.MeshStandardMaterial({ map: signTexture(kind, label), roughness: 0.55, metalness: 0.05 })
   makeRetroreflective(material, retro.uniforms, 1)
   retro.add(material, 'sign')
   return { geometry, material }
@@ -398,13 +400,14 @@ const signTextures = new Map<string, THREE.CanvasTexture>()
  * is drawn on a square and the geometry clips it to the outline; the border is drawn as its own
  * inset polygon so it is white in the texture, not a rim the geometry happens to leave.
  */
-function signTexture(kind: SignKind): THREE.CanvasTexture {
-  const had = signTextures.get(kind)
+function signTexture(kind: SignKind, label?: string): THREE.CanvasTexture {
+  const cacheKey = kind + '|' + (label ?? '')
+  const had = signTextures.get(cacheKey)
   if (had) return had
-  // the plate is wide; the canvas matches its aspect so the legend is not squashed
+  // the plates are wide; the canvas matches its aspect so the legend is not squashed
   const S = 256
-  const W = kind === 'school_end' ? 320 : S
-  const H = kind === 'school_end' ? 100 : S
+  const W = kind === 'school_end' ? 320 : kind === 'exit' ? 384 : S
+  const H = kind === 'school_end' ? 100 : kind === 'exit' ? 134 : S
   const cv = document.createElement('canvas')
   cv.width = W
   cv.height = H
@@ -473,7 +476,7 @@ function signTexture(kind: SignKind): THREE.CanvasTexture {
     }
     person(S * 0.39, S * 0.66, S * 0.34)
     person(S * 0.63, S * 0.62, S * 0.42)
-  } else {
+  } else if (kind === 'school_end') {
     // S4-3: END SCHOOL ZONE, black on white
     ctx.fillStyle = '#f7f7f2'
     ctx.fillRect(0, 0, W, H)
@@ -486,11 +489,33 @@ function signTexture(kind: SignKind): THREE.CanvasTexture {
     ctx.font = `bold ${Math.round(H * 0.26)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
     ctx.fillText('END', W / 2, H * 0.26)
     ctx.fillText('SCHOOL ZONE', W / 2, H * 0.61)
+  } else {
+    // an EXIT guide sign: white on highway green. A short label is the exit number ("EXIT 19A");
+    // a long one is the destination, wrapped to two lines.
+    ctx.fillStyle = '#0f6b3a'
+    ctx.fillRect(0, 0, W, H)
+    ctx.strokeStyle = '#f7f7f2'
+    ctx.lineWidth = 8
+    ctx.strokeRect(6, 6, W - 12, H - 12)
+    ctx.fillStyle = '#f7f7f2'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const txt = (label ?? '').trim()
+    if (txt.length <= 4) {
+      ctx.font = `bold ${Math.round(H * 0.42)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
+      ctx.fillText(`EXIT ${txt}`.trim(), W / 2, H / 2 + 2)
+    } else {
+      const words = txt.split(/\s+/)
+      const mid = Math.ceil(words.length / 2)
+      ctx.font = `bold ${Math.round(H * 0.3)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
+      ctx.fillText(words.slice(0, mid).join(' '), W / 2, H * 0.33)
+      ctx.fillText(words.slice(mid).join(' '), W / 2, H * 0.7)
+    }
   }
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 4
-  signTextures.set(kind, tex)
+  signTextures.set(cacheKey, tex)
   return tex
 }
 
@@ -734,8 +759,10 @@ export async function buildFurniture(
     group.add(faces)
   }
 
-  // --- stop, give-way and school-zone signs ----------------------------------------------------
-  const bySign = new Map<SignKind, { pos: THREE.Vector3; yaw: number; src: unknown }[]>()
+  // --- stop, give-way, school-zone and exit signs ----------------------------------------------
+  // keyed by kind AND label, because two exit signs with different legends are different textures
+  // and so different instanced meshes; the stop/give-way/school ones have no label and one bucket each
+  const bySign = new Map<string, { kind: SignKind; label?: string; at: { pos: THREE.Vector3; yaw: number; src: unknown }[] }>()
   for (const s of data.signs ?? []) {
     await yieldFn?.()
     // a record kind we do not draw is skipped, not defaulted: a new bake's `school` must not be
@@ -756,15 +783,20 @@ export async function buildFurniture(
     if (!clear) counts.stillOnPavement++
     if (sign < 0) counts.signsOnTheLeft++
     p.y = groundAt(p.x, p.z) ?? s.z
-    if (!bySign.has(kind)) bySign.set(kind, [])
-    bySign.get(kind)!.push({ pos: p, yaw: s.yaw_deg, src: s })
+    const key = kind + '|' + (s.label ?? '')
+    let bucket = bySign.get(key)
+    if (!bucket) {
+      bucket = { kind, label: s.label, at: [] }
+      bySign.set(key, bucket)
+    }
+    bucket.at.push({ pos: p, yaw: s.yaw_deg, src: s })
     counts.signs++
   }
-  for (const [kind, at] of bySign) {
+  for (const { kind, label, at } of bySign.values()) {
     // two instanced meshes with the same transforms: the metal (post + back plate) and the
     // painted face. `furniture:sign:<kind>` keeps its name so the probes that count signs and
     // read `userData.src` per instance are unchanged.
-    const face = signFace(kind)
+    const face = signFace(kind, label)
     const mesh = new THREE.InstancedMesh(signPostGeometry(kind), metal, at.length)
     mesh.name = `furniture:sign:${kind}`
     const faces = new THREE.InstancedMesh(face.geometry, face.material, at.length)

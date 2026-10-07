@@ -133,8 +133,11 @@ not. A motorway_link crossing named in `crossings` gets an exit panel.
 picks a boom for a panel when a signalised junction of at least `FURNITURE_BOOM_MIN_ARMS` arms has a
 superior road of at least `FURNITURE_BOOM_MIN_RANK` within `FURNITURE_BOOM_SNAP_M`; the panel is a
 green body and a white lane-assignment face hung `FURNITURE_BOOM_DROP` under the arm, instanced per
-(arm, side) bucket beside the mast. Exit signs (the `motorway_link` half) are **not built**: a tiled
-world does not carry `crossings` in its per-cell manifest, so they need a bake field first.
+(arm, side) bucket beside the mast. Exit signs (the `motorway_link` half) are **built 2026-10-07**:
+`_signals` stands a green guide sign near the far (surface) end of every `motorway_link`/`trunk_link`
+whose `ref`/`destination` is known, facing the traffic coming down the ramp, and the viewer draws it
+keyed by its label (one instanced mesh per legend). Still missing: exit signs are post-mounted, not
+overhead gantries.
 
 ---
 
@@ -246,8 +249,8 @@ and rail is not a road at all, so neither reaches the viewer — and neither car
 
 1. ~~**Kerbs (3)** and **walks (4)**~~ — the pure cores (`kerbCorner`, `clearSpans`) and the run-join
    pass (`kerbJoinRings`) are done and unit-tested; what remains is a look at a screen.
-2. **Signs (1, 2)** — *school-zone signs and boom signs built 2026-10-07; exit signs still open.*
-   Viewer plus the school `signals.signs` records; no `school_zones` array after all.
+2. **Signs (1, 2)** — *school-zone, boom and exit signs built 2026-10-07.* Viewer plus the new
+   `signals.signs` records; no `school_zones` array after all.
 3. **Entrances (5)** — small bake classifier change + viewer guard. Not started.
 4. **Trails/rail (6)** — the largest: `network.py` must emit the ways (with `surface`/`trailblazed`)
    and `trail.ts trailPaving` is the decision, already tested; `trailMesh` and the builder are not

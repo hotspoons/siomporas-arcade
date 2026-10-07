@@ -208,7 +208,7 @@ export interface Manifest {
   signals?: {
     /** `far_side`: the bake put the pole across the junction from the traffic it controls (2026-09-26); absent on older bakes, which placed it at the stop line */
     masts: { x: number; y: number; z: number; yaw_deg: number; travel_deg: number; arm_m: number; lanes: number; junction: number; tagged: boolean; x_id?: string; phase?: number; arm?: number; far_side?: boolean }[]
-    signs: { kind: string; x: number; y: number; z: number; yaw_deg: number; travel_deg: number; x_id?: string; arm?: number; source?: string }[]
+    signs: { kind: string; x: number; y: number; z: number; yaw_deg: number; travel_deg: number; x_id?: string; arm?: number; source?: string; label?: string }[]
     /** the painted stop line for each stopping approach, across the lane at the stop position */
     bars?: { x: number; y: number; z: number; travel_deg: number; width_m: number; x_id?: string; arm?: number }[]
   } | null

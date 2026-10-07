@@ -668,6 +668,42 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
                 "travel_deg": round(_bearing(-face[0], -face[1], conv), 1),
             })
 
+    # EXIT signs: a green guide sign on a motorway/trunk ramp. The link way is drawn from the
+    # motorway out to the surface street (oneway=yes is the norm), so the sign stands near its far
+    # end, facing the traffic coming down the ramp. The legend is the exit `ref` (the US exit number)
+    # or the `destination`; a link with neither is not signed. Through `signals.signs` again, so it
+    # tiles with the rest. This is what makes a freeway interchange read as an exit, not a fork.
+    for f in features:
+        p = f["properties"]
+        if p.get("highway") not in ("motorway_link", "trunk_link") or f["geometry"]["type"] != "LineString":
+            continue
+        label = p.get("ref") or p.get("destination") or p.get("name")
+        if not label:
+            continue
+        cs = f["geometry"]["coordinates"]
+        if len(cs) < 2:
+            continue
+        # oneway=yes means the way runs WITH the traffic, so the far end is the exit; otherwise take
+        # the middle, which at least stands on the ramp
+        ow = str(p.get("oneway", "")).strip().lower()
+        a = cs[-2] if ow in ("yes", "true", "1") else cs[len(cs) // 2 - 1]
+        b = cs[-1] if ow in ("yes", "true", "1") else cs[len(cs) // 2]
+        ax, ay = frame.from_wgs(a[0], a[1])
+        bx, by = frame.from_wgs(b[0], b[1])
+        if not site_box.contains(Point(bx, by)):
+            continue
+        tx, ty = bx - ax, by - ay
+        tl = math.hypot(tx, ty) or 1.0
+        trav = (tx / tl, ty / tl)
+        sx, sy, sz = _enu_z(frame, bx, by, ground(bx, by))
+        signs.append({
+            "kind": "exit",
+            "x": sx, "y": sy, "z": sz,
+            "yaw_deg": round(_bearing(-trav[0], -trav[1], conv), 1),
+            "travel_deg": round(_bearing(*trav, conv), 1),
+            "label": str(label)[:24],
+        })
+
     if src is not None:
         src.close()
     return {"masts": masts, "signs": signs}

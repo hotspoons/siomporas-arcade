@@ -285,6 +285,18 @@ pass. Needs a rebake.
 
 Nothing here raises `MAX_M` or touches the sharded bake; every item is per-tile or resident-small.
 
+**Promoted live 2026-10-07 04:01Z** (job `corridor-reexport-dc-furniture`, `--allow-missing`; the
+earlier water-only re-export had REFUSED to promote against 21 stale tiles). Screen-checked against
+the live remote through `probes/vtproxy.mjs`: the school sign paints (yellow-green diamond,
+pedestrians), and `signals.signs` carries `school` 85 / `school_end` 80 / `exit` 650; the trail
+stream builds all three paving meshes (dirt `#8a6b4a`, gravel `#a39d92`, paved `#8d8d86`) plus rail;
+overpass naming holds at 77 gantry / 3 overpass / 1 bridge. A sidewalk-and-kerb view at a school
+shows the swept walk and kerb running beside the road — the "look at a screen" item 1 asked for (the
+`corners` counter reads 0 only because it counts manifest-level walks; the 87,739 tiled walks are
+built per cell and do not accumulate there). Still open, and correctly so: the general entrance
+side-hint and tunnel portals need the shared `scene.ts`, which another agent is still editing
+uncommitted (HEAD `6e7d0bb`).
+
 ---
 
 ## The one bug underneath all of it

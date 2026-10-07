@@ -14,13 +14,10 @@
 import * as THREE from 'three'
 import type { Manifest } from './site'
 import { Budget } from './budget'
-import { RoadIndex, planDressing, type DressingPart, type DressingSite, type Footprint } from './dressing'
+import { RoadIndex, type Footprint } from './dressing'
 import { BUILDING_DRESSING, DRESS_WINDOW_WALLS, STREAM_LOCAL } from '../tuning'
 import { buildMassing, type MassArrays, type MassInput, type MassPool } from './massing'
-import kitSpec from '../../../../tools/assetlib/specs/buildings-dressing.json'
-
-/** site x, y (north), z (up) → three.js world; the same mapping scene.ts uses, kept local to avoid an import cycle */
-const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x, z, -y)
+import { dressBuilding, type DressBuild, type Ground } from './dressingdraw'
 
 export interface BuildingStats {
   count: number
@@ -35,19 +32,12 @@ export interface BuildingStats {
  * worth moving off the main thread: the massing loop (walls, the roof carve), the dressing loop,
  * and the final `computeVertexNormals` pass over the merged arrays.
  */
-export const buildTiming = { calls: 0, footprints: 0, massMs: 0, dressMs: 0, normMs: 0, workerMass: 0, localMass: 0 }
+export const buildTiming = { calls: 0, footprints: 0, massMs: 0, dressMs: 0, normMs: 0, workerMass: 0, localMass: 0, workerDress: 0, localDress: 0 }
 
-/* the massing palette, carve and pushTri live in massing.ts now, off the main thread */
+/* the massing palette/carve and the dressing draw live in massing.ts / dressingdraw.ts now, off the main thread */
 
-interface Build {
-  pos: number[]
-  col: number[]
-  /** which palette entry coloured each vertex: 0..6 a wall, 100 + 0..3 a roof — so a style can recolour in place */
-  pal: number[]
-  /** which layer of the world's texture pool draws each vertex; -1 is the flat palette colour */
-  lay: number[]
-  idx: number[]
-}
+/** the merged dressing arrays while one cell is built — `dressingdraw.ts` owns the shape */
+type Build = DressBuild
 
 /**
  * The world's building textures (surfacesdoc.ts): the wall and roof materials a building is
@@ -77,181 +67,6 @@ export interface TexturePool {
  * the top of this exactly as it already does for whole buildings.
  * ------------------------------------------------------------------------------------------- */
 
-type Anchor = 'bottom' | 'below' | 'centre'
-interface Draw {
-  /**
-   * 'panel' is a flush pane with a frame round it, 'strip' a single quad standing off the wall (a
-   * gutter, a ridge vent — a line, not a solid), 'box' stands proud, 'slab' lies on the ground.
-   */
-  kind: 'panel' | 'strip' | 'box' | 'slab'
-  colour: [number, number, number]
-  /** frame colour, panels only */
-  trim?: [number, number, number]
-  /** how far it stands off the wall, boxes only; the spec's own depth wins where it has one */
-  depth?: number
-  /** what `site.at[2]` means for this part */
-  anchor?: Anchor
-}
-
-const DRESS: Record<string, Draw> = {
-  'window-double-hung-white': { kind: 'panel', colour: [0.10, 0.13, 0.17], trim: [0.93, 0.93, 0.91] },
-  'window-picture-large': { kind: 'panel', colour: [0.11, 0.14, 0.18], trim: [0.93, 0.93, 0.91] },
-  'window-commercial-storefront': { kind: 'panel', colour: [0.13, 0.17, 0.21], trim: [0.26, 0.26, 0.27] },
-  'door-front-panelled': { kind: 'panel', colour: [0.36, 0.20, 0.14], trim: [0.90, 0.90, 0.88] },
-  'door-garage-sectional': { kind: 'panel', colour: [0.80, 0.79, 0.76], trim: [0.88, 0.88, 0.86] },
-  // FLAT, not a box: a gutter is a horizontal line under the eaves and nothing sees its back or
-  // its ends. As boxes, 68,322 of them cost 820k triangles on crofton-triangle — 40% of the whole
-  // dressing budget for the one part that is a line.
-  'gutter-half-round-run': { kind: 'strip', colour: [0.86, 0.86, 0.83], anchor: 'below' },
-  'downpipe-round': { kind: 'box', colour: [0.86, 0.86, 0.83], depth: 0.09 },  // flush: 4 quads
-  'driveway-concrete-apron': { kind: 'slab', colour: [0.63, 0.62, 0.60] },
-  'porch-step-concrete': { kind: 'box', colour: [0.72, 0.70, 0.68] },
-  'meter-box-utility': { kind: 'panel', colour: [0.76, 0.76, 0.73] },
-  'ac-condenser-unit': { kind: 'box', colour: [0.60, 0.62, 0.61] },
-  'roof-vent-ridge': { kind: 'strip', colour: [0.30, 0.29, 0.28], anchor: 'centre' },
-  'chimney-brick-residential': { kind: 'box', colour: [0.48, 0.33, 0.28] },
-  'mailbox-wall-mounted': { kind: 'panel', colour: [0.24, 0.25, 0.28] },
-  'awning-fabric-shop': { kind: 'box', colour: [0.50, 0.16, 0.16], anchor: 'below' },
-  'fire-escape-landing': { kind: 'box', colour: [0.28, 0.28, 0.30], depth: 1, anchor: 'below' },
-}
-
-/** the kit's placement rules, as `tools/assetlib/specs/buildings-dressing.json` declares them */
-const KIT: DressingPart[] = (kitSpec as { assets: DressingPart[] }).assets
-const KIT_BY_ID = new Map(KIT.map((p) => [p.id, p]))
-
-/** What `site.at[2]` measures for a part, resolved to the bottom of the thing drawn. */
-function anchorZ(s: DressingSite, anchor: Anchor): number {
-  return anchor === 'below' ? s.at[2] - s.height : anchor === 'centre' ? s.at[2] - s.height / 2 : s.at[2]
-}
-
-/** A wall part's two axes in SITE metres: along its face, and out of it. */
-function axes(yaw: number): { ax: number; ay: number; nx: number; ny: number } {
-  const s = Math.sin(yaw)
-  const c = Math.cos(yaw)
-  // the normal is (sin, cos) by the yaw convention in dressing.ts; along the wall is that turned
-  // a quarter the other way, so a positive `w` runs the way the ring is wound
-  return { ax: -c, ay: s, nx: s, ny: c }
-}
-
-/**
- * One quad in site metres, given its four corners. Wound so the outward face is the front.
- *
- * FOUR vertices and two triangles, unlike the massing's `pushTri`, which pushes three fresh
- * vertices per triangle. The massing can afford that; the dressing cannot — it is an order of
- * magnitude more geometry, and sharing the two vertices of the shared edge is a third of the
- * memory for nothing.
- */
-function pushQuad(b: Build, p: [number, number, number][], colour: [number, number, number]) {
-  const k = b.pos.length / 3
-  for (const [x, y, z] of p) {
-    const v = toWorld(x, y, z)
-    b.pos.push(v.x, v.y, v.z)
-    b.col.push(colour[0], colour[1], colour[2])
-    b.pal.push(-1)
-    b.lay.push(-1)
-  }
-  b.idx.push(k, k + 1, k + 2, k, k + 2, k + 3)
-}
-
-/**
- * A box in site metres, centred on (cx, cy) across `w`, spanning `z0..z1`, `d0..d1` off the face.
- *
- * FOUR OR FIVE FACES, NOT SIX. The bottom of every one of these sits on the ground, on a roof or
- * against the wall, so it is never the visible face — and when the box is flush against a wall the
- * back is not either. That is a third of the geometry of the second-biggest item in the dressing
- * budget for no visible difference.
- */
-function pushBoxSite(b: Build, cx: number, cy: number, yaw: number, w: number, z0: number, z1: number, d0: number, d1: number, colour: [number, number, number], { flush = false } = {}) {
-  const { ax, ay, nx, ny } = axes(yaw)
-  const at = (u: number, v: number, z: number): [number, number, number] => [cx + ax * u + nx * v, cy + ay * u + ny * v, z]
-  const h = w / 2
-  const c: [number, number, number][][] = [
-    [at(-h, d1, z0), at(h, d1, z0), at(h, d1, z1), at(-h, d1, z1)], // front
-    [at(h, d1, z0), at(h, d0, z0), at(h, d0, z1), at(h, d1, z1)], // one end
-    [at(-h, d0, z0), at(-h, d1, z0), at(-h, d1, z1), at(-h, d0, z1)], // the other
-    [at(-h, d0, z1), at(h, d0, z1), at(h, d1, z1), at(-h, d1, z1)], // top
-  ]
-  if (!flush) c.push([at(h, d0, z0), at(-h, d0, z0), at(-h, d0, z1), at(h, d0, z1)]) // back
-  for (const q of c) pushQuad(b, q, colour)
-}
-
-/**
- * Draw one building's dressing into the merged geometry.
- *
- * `base` is the same sunk ground level the massing used, so a door stands on the same floor the
- * walls start from — computing it twice is how a porch ends up hovering on a slope.
- */
-function dressBuilding(b: Build, bd: Footprint, base: number, street: [number, number] | null, groundAt: (x: number, z: number) => number | null): number {
-  let n = 0
-  for (const s of planDressing(bd, KIT, { street, base, windowWalls: DRESS_WINDOW_WALLS })) {
-    const d = DRESS[s.part]
-    if (!d) continue
-    n += 1
-    const spec = KIT_BY_ID.get(s.part)?.attach
-    if (d.kind === 'slab') {
-      // a driveway: `width` across, `height` along the normal, lying on the ground
-      const { ax, ay, nx, ny } = axes(s.yaw)
-      const hw = s.width / 2
-      const hl = s.height / 2
-      // a 13 m apron laid at the building's floor level cuts into a sloped garden, so each
-      // corner takes its own ground height — the one part of the kit long enough for that to show
-      const corner = (u: number, v: number): [number, number, number] => {
-        const x = s.at[0] + ax * u + nx * v
-        const y = s.at[1] + ay * u + ny * v
-        const g = groundAt(x, -y)
-        return [x, y, (g === null ? s.at[2] : Math.max(g, s.at[2] - 0.6)) + 0.03]
-      }
-      pushQuad(b, [corner(-hw, -hl), corner(hw, -hl), corner(hw, hl), corner(-hw, hl)], d.colour)
-      continue
-    }
-    if (d.kind === 'panel' || d.kind === 'strip') {
-      const { ax, ay, nx, ny } = axes(s.yaw)
-      const face = (w: number, h: number, z0: number, out: number, colour: [number, number, number]) => {
-        const hw = w / 2
-        const at = (u: number, z: number): [number, number, number] => [s.at[0] + ax * u + nx * out, s.at[1] + ay * u + ny * out, z]
-        pushQuad(b, [at(-hw, z0), at(hw, z0), at(hw, z0 + h), at(-hw, z0 + h)], colour)
-      }
-      if (d.kind === 'strip') {
-        // a line under the eaves or along the ridge: one quad, standing 8 cm off so it catches a
-        // different amount of light than the wall behind it and reads as a separate thing
-        const z0 = anchorZ(s, d.anchor ?? 'bottom')
-        face(s.width, Math.max(0.1, s.height), z0, 0.08, d.colour)
-        continue
-      }
-      // THE FRAME COSTS AS MUCH AS THE PANE, so it is spent on the elevation somebody looks at.
-      // On the street side: frame 2 cm proud, pane 3 cm further out, and the reveal between the
-      // two is what makes it read as a hole rather than a sticker. Everywhere else: just the pane.
-      if (d.trim && s.front) face(s.width + 0.14, s.height + 0.14, s.at[2] - 0.07, 0.02, d.trim)
-      face(s.width, s.height, s.at[2], 0.05, d.colour)
-      continue
-    }
-    // a box: depth from the spec where it has one, `anchor` says what at[2] measures
-    const depth = spec?.depthM ?? spec?.projectionM ?? spec?.diameterM ?? d.depth ?? 0.3
-    const z0 = anchorZ(s, d.anchor ?? 'bottom')
-    // a part standing on the wall face sits just off it so it never z-fights the wall behind it
-    const standoff = s.part === 'ac-condenser-unit' ? 0.25 : -0.02
-    // flush against a wall: its back face is buried in the wall and nothing can see it
-    const flush = s.wall >= 0 && standoff <= 0
-    pushBoxSite(b, s.at[0], s.at[1], s.yaw, s.width, z0, z0 + s.height, standoff, standoff + depth, d.colour, { flush })
-  }
-  return n
-}
-
-/**
- * Build the massing.
- *
- * `groundAt` takes WORLD x, z (the strip near the road, the DEM beyond). A footprint sits on the
- * LOWEST ground under its ring, sunk 0.3 m, because a house on a slope is cut into the hill and a
- * house floating on its high corner is the thing everyone notices.
- */
-/**
- * Every building on the site, as one merged mesh.
- *
- * ASYNC because it is 3.9 s of work on crofton-triangle (measured on a real machine through the
- * dev bridge) and it used to run in one call stack, inside a single frame. The `Budget` hands the
- * frame back every few milliseconds so the page paints and the progress message moves; the total
- * work is unchanged.
- */
 /** one texture array per pool, shared by every cell of the site that builds with it */
 const poolAtlases = new Map<string, Promise<{ atlas: THREE.DataArrayTexture; mpt: number[] }>>()
 
@@ -307,17 +122,26 @@ async function texturePoolMaterial(mat: THREE.MeshStandardMaterial, pool: Textur
 }
 
 /* ------------------------------------------------------------------------------------------- *
- * MASSING WORKER
+ * BUILDING WORKER
  *
- * `buildMassing` (massing.ts) is pure; this is only the plumbing that runs it on a worker. The
- * worker returns the merged arrays as transferables and the main thread wraps them, so none of
- * the per-vertex work — or the massing's allocation — happens on the main thread. With
- * STREAM_LOCAL = 0 (or no Worker) it falls back to building on the budgeted main thread.
+ * `buildMassing` (massing.ts) and the dressing draw (dressingdraw.ts) are pure; this is only the
+ * plumbing that runs them on a worker. It returns merged arrays as transferables and the main
+ * thread wraps them, so none of the per-vertex work — or its allocation — happens on the main
+ * thread. Dressing needs one round trip, for the driveway slabs' ground samples (see the worker).
+ * With STREAM_LOCAL = 0 (or no Worker) it falls back to building on the budgeted main thread.
  * ------------------------------------------------------------------------------------------- */
+
+interface DressArrays {
+  pos: Float32Array
+  col: Float32Array
+  idx: Uint32Array
+  dressed: number
+}
 
 let massWorker: Worker | null = null
 let massSeq = 0
 const massPending = new Map<number, { ok: (v: MassArrays) => void; fail: (e: Error) => void }>()
+const dressPending = new Map<number, { ok: (v: DressArrays) => void; fail: (e: Error) => void; ground: Ground }>()
 let massWorkerBroken = false
 
 function massWorkerFor(): Worker | null {
@@ -328,30 +152,59 @@ function massWorkerFor(): Worker | null {
       massWorker = new Worker(new URL('./buildings.worker.ts', import.meta.url), { type: 'module' })
     } catch (err) {
       massWorkerBroken = true
-      console.warn('building massing worker unavailable; building on the main thread', err)
+      console.warn('building worker unavailable; building on the main thread', err)
       return null
     }
     massWorker.onmessage = (ev: MessageEvent) => {
-      const p = massPending.get(ev.data.id as number)
+      const d = ev.data as { kind?: string; id: number; error?: string }
+      if (d.kind === 'ground') {
+        // the worker planned the dressing and needs the ground under each driveway slab: sample
+        // the site-space ground once here and hand the values back
+        const p = dressPending.get(d.id)
+        if (!p) return
+        const q = (d as unknown as { q: Float64Array }).q
+        if (!q) return
+        const vals = new Float32Array(q.length / 2)
+        for (let i = 0, k = 0; i < q.length; i += 2, k++) {
+          const g = p.ground(q[i], q[i + 1])
+          vals[k] = g === null ? NaN : g
+        }
+        massWorker!.postMessage({ kind: 'ground', id: d.id, values: vals }, [vals.buffer])
+        return
+      }
+      if (d.kind === 'dress') {
+        const p = dressPending.get(d.id)
+        if (!p) return
+        dressPending.delete(d.id)
+        if (d.error) p.fail(new Error(String(d.error)))
+        else {
+          const r = d as unknown as DressArrays
+          p.ok({ pos: r.pos, col: r.col, idx: r.idx, dressed: r.dressed })
+        }
+        return
+      }
+      const p = massPending.get(d.id)
       if (!p) return
-      massPending.delete(ev.data.id as number)
-      if (ev.data.error) p.fail(new Error(String(ev.data.error)))
+      massPending.delete(d.id)
+      if (d.error) p.fail(new Error(String(d.error)))
       else p.ok({
-        pos: ev.data.pos as Float32Array,
-        col: ev.data.col as Float32Array,
-        pal: ev.data.pal as Int16Array,
-        lay: ev.data.lay as Float32Array,
-        idx: ev.data.idx as Uint32Array,
-        norm: ev.data.norm as Float32Array,
-        gabled: ev.data.gabled as number,
-        fromLidar: ev.data.fromLidar as number,
+        pos: (d as unknown as { pos: Float32Array }).pos,
+        col: (d as unknown as { col: Float32Array }).col,
+        pal: (d as unknown as { pal: Int16Array }).pal,
+        lay: (d as unknown as { lay: Float32Array }).lay,
+        idx: (d as unknown as { idx: Uint32Array }).idx,
+        norm: (d as unknown as { norm: Float32Array }).norm,
+        gabled: (d as unknown as { gabled: number }).gabled,
+        fromLidar: (d as unknown as { fromLidar: number }).fromLidar,
       })
     }
     massWorker.onerror = (ev) => {
       massWorkerBroken = true
-      console.warn('building massing worker failed; building on the main thread', ev.message)
-      for (const p of massPending.values()) p.fail(new Error(ev.message || 'massing worker'))
+      console.warn('building worker failed; building on the main thread', ev.message)
+      for (const p of massPending.values()) p.fail(new Error(ev.message || 'building worker'))
+      for (const p of dressPending.values()) p.fail(new Error(ev.message || 'building worker'))
       massPending.clear()
+      dressPending.clear()
       massWorker?.terminate()
       massWorker = null
     }
@@ -361,7 +214,7 @@ function massWorkerFor(): Worker | null {
 
 function massOffThread(list: MassInput[], pool: MassPool | null): Promise<MassArrays> {
   const worker = massWorkerFor()
-  if (!worker) return Promise.reject(new Error('no massing worker'))
+  if (!worker) return Promise.reject(new Error('no building worker'))
   const id = ++massSeq
   return new Promise((ok, fail) => {
     const timer = setTimeout(() => {
@@ -373,7 +226,26 @@ function massOffThread(list: MassInput[], pool: MassPool | null): Promise<MassAr
       ok: (v) => { clearTimeout(timer); ok(v) },
       fail: (e) => { clearTimeout(timer); fail(e) },
     })
-    worker.postMessage({ id, list, pool })
+    worker.postMessage({ kind: 'mass', id, list, pool })
+  })
+}
+
+function dressOffThread(list: { bd: Footprint; base: number; street: [number, number] | null }[], windowWalls: number, ground: Ground): Promise<DressArrays> {
+  const worker = massWorkerFor()
+  if (!worker) return Promise.reject(new Error('no building worker'))
+  const id = ++massSeq
+  return new Promise((ok, fail) => {
+    const timer = setTimeout(() => {
+      if (!dressPending.has(id)) return
+      dressPending.delete(id)
+      fail(new Error('building dressing timed out'))
+    }, 30000)
+    dressPending.set(id, {
+      ok: (v) => { clearTimeout(timer); ok(v) },
+      fail: (e) => { clearTimeout(timer); fail(e) },
+      ground,
+    })
+    worker.postMessage({ kind: 'dress', id, buildings: list, windowWalls })
   })
 }
 
@@ -392,6 +264,27 @@ async function massArrays(list: MassInput[], pool: MassPool | null, budget: Budg
   return buildMassing(list, pool, () => budget.tick())
 }
 
+/** The dressing arrays: the worker when there is one, else `dressBuilding` on the budget. */
+async function dressArrays(list: { bd: Footprint; base: number; street: [number, number] | null }[], windowWalls: number, ground: Ground, budget: Budget): Promise<DressArrays> {
+  if (massWorkerFor()) {
+    try {
+      const r = await dressOffThread(list, windowWalls, ground)
+      buildTiming.workerDress++
+      return r
+    } catch (err) {
+      console.warn('building dressing worker failed; building on the main thread', err)
+    }
+  }
+  buildTiming.localDress++
+  const dg: Build = { pos: [], col: [], pal: [], lay: [], idx: [] }
+  let dressed = 0
+  for (const d of list) {
+    await budget.tick()
+    dressed += dressBuilding(dg, d.bd, d.base, d.street, ground, windowWalls)
+  }
+  return { pos: Float32Array.from(dg.pos), col: Float32Array.from(dg.col), idx: Uint32Array.from(dg.idx), dressed }
+}
+
 export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean; pool?: TexturePool | null; budget?: Budget } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
   const group = new THREE.Group()
   group.name = 'buildings'
@@ -399,7 +292,6 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
   // the dressing is its own geometry, not more triangles in the massing: a style's `recolour`
   // sweeps every massing vertex through the wall and roof palettes, and a window swept to a
   // siding colour is a hole that fills itself in
-  const dg: Build = { pos: [], col: [], pal: [], lay: [], idx: [] }
   const roads = opts.roads ?? buildRoadIndex(manifest)
   const dress = opts.dress !== false && BUILDING_DRESSING > 0
   let fromLidar = 0
@@ -414,7 +306,7 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
   // is a pure function of these numbers, so it runs in the worker and only the merged arrays
   // come back.
   const sites: MassInput[] = []
-  const dressList: { bd: Footprint; base: number; cx: number; cy: number }[] = []
+  const dressList: { bd: Footprint; base: number; street: [number, number] | null }[] = []
   const tGround0 = performance.now()
   for (const bd of list) {
     await budget.tick()
@@ -435,7 +327,9 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     if (dress) {
       let cx = 0, cy = 0
       for (const p of ring) { cx += p[0]; cy += p[1] }
-      dressList.push({ bd: bd as Footprint, base, cx: cx / ring.length, cy: cy / ring.length })
+      // the street facing, from the road index — the only other main-thread input the dressing
+      // needs besides the ground, so it is resolved here and sent with the building
+      dressList.push({ bd: bd as Footprint, base, street: roads?.nearest(cx / ring.length, cy / ring.length) ?? null })
     }
   }
   buildTiming.massMs += performance.now() - tGround0
@@ -445,15 +339,18 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     : null
   const mass = await massArrays(sites, pool, budget)
 
-  // PASS 2 — the dressing. Its one main-thread input beyond the massing's is the street facing,
-  // which comes from the road index, so it stays here for now (moving it means precomputing the
-  // driveway slabs' corner ground samples — a follow-up).
+  // PASS 2 — the dressing. The worker plans and draws it; only the driveway slabs need the
+  // ground, so the worker asks for those corners and this is where they are sampled.
+  let dressPos: Float32Array | null = null
+  let dressCol: Float32Array | null = null
+  let dressIdx: Uint32Array | null = null
   const tDress0 = performance.now()
   if (dress) {
-    for (const d of dressList) {
-      await budget.tick()
-      dressed += dressBuilding(dg, d.bd, d.base, roads?.nearest(d.cx, d.cy) ?? null, groundAt)
-    }
+    const r = await dressArrays(dressList, DRESS_WINDOW_WALLS, (x, y) => groundAt(x, -y), budget)
+    dressed = r.dressed
+    dressPos = r.pos
+    dressCol = r.col
+    dressIdx = r.idx
   }
   buildTiming.dressMs += performance.now() - tDress0
 
@@ -491,11 +388,13 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
       colAttr.needsUpdate = true
     }
   }
-  if (dg.idx.length) {
+  if (dressIdx && dressIdx.length && dressPos && dressCol) {
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(dg.pos, 3))
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(dg.col, 3))
-    geo.setIndex(dg.idx)
+    geo.setAttribute('position', new THREE.BufferAttribute(dressPos, 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(dressCol, 3))
+    geo.setIndex(new THREE.BufferAttribute(dressIdx, 1))
+    // the dressing shares vertices between a box's faces, so unlike the massing its normals are
+    // smooth: computeVertexNormals runs here rather than in the worker (tens of ms a cell)
     geo.computeVertexNormals()
     // FrontSide, unlike the massing: every part here is a closed box or a pane with a wall behind
     // it, and double-siding them doubles the overdraw on the densest geometry in the scene

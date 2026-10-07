@@ -25,6 +25,7 @@ import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, setCropLight, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, WEATHER, accumUniforms, type Weather, type WeatherLook } from '../visuals/weather'
 import { buildStrip, refreshNormals, sinkUnderStrips } from './strip'
+import { chunkStations } from './branchchunks'
 import { deckRibbon, isDeck } from './overpass'
 import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
@@ -2445,28 +2446,47 @@ if (uLodOn > 0.5) {
       g.add(new THREE.Mesh(mergeGeometries(parts, false), branchBridgeMat))
     }
     const branchUnits: GradeUnit[] = []
-    const roadBuilt = new Set<number>()
-    // the whole road of each built branch, and the copy with the fixtures cut out of it, if any
-    const branchRoad: { base: THREE.Object3D | null; holed: THREE.Object3D | null }[] = branchAts.map(() => ({ base: null, holed: null }))
-    const holeBranch = (i: number) => {
-      const r = branchRoad[i]
-      if (!r.base) return
-      if (r.holed) {
-        forget(r.holed)
-        roadParts = roadParts.filter((o) => o !== r.holed)
-        r.holed = null
+    // ONE MESH PER CHUNK, NOT ONE PER BRANCH. A branch can be a motorway ring 60 km long — the two
+    // Capital Beltway carriageways are 63.0 and 61.9 km — and building a whole one in a single pump
+    // unit means the pump cannot build anything else, and nothing appears, until all 60 km are done.
+    // At speed the road you have just driven onto therefore waits behind a carriageway you are
+    // nowhere near ("the inner loop baked but the outer loop didn't resolve for a minute", Rich,
+    // 2026-10-07). Each chunk's pump unit now builds only its own slice, on the SAME 6 m station grid
+    // as a whole-branch build, so the pieces abut exactly and the lane-dash phase is continuous.
+    interface BranchRoad { base: (THREE.Object3D | null)[]; holed: (THREE.Object3D | null)[] }
+    const branchRoad: BranchRoad[] = branchAts.map(() => ({ base: [], holed: [] }))
+    // which chunks have been built, so a junction warp rebuilds just those
+    const chunkBuilt = new Set<string>()
+    const bridgeDone = new Set<number>()
+    /** chunk k's stations, on the global 6 m grid with ABSOLUTE `s` (roadMesh reads `s mod 12`) */
+    const segStations = (b: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }, k: number) => {
+      const [ia, ib] = chunkStations(b.len, k, CHUNK)
+      const st: { pos: THREE.Vector3; dir: THREE.Vector3; s: number }[] = []
+      for (let q = ia; q <= ib; q++) {
+        const s = q * 6
+        const p = b.at(s)
+        st.push({ pos: p.pos, dir: p.dir.clone().setY(0).normalize(), s })
       }
+      return st
+    }
+    const holeBranchChunk = (i: number, k: number) => {
+      const r = branchRoad[i]
+      const base = r.base[k]
+      if (!base) return
+      if (r.holed[k]) { forget(r.holed[k]!); r.holed[k] = null }
+      const b = branchAts[i]
       const skip = roadSkip
       let touched = false
-      if (skip) for (let s = 0; s <= branchAts[i].len && !touched; s += 6) touched = skip(i + 1, s)
-      if (!touched) { r.base.visible = true; return }
-      const rm = branchAts[i].road((s) => duplicatesWider(i, s) || skip!(i + 1, s))
+      if (skip) { const [ia, ib] = chunkStations(b.len, k, CHUNK); for (let q = ia; q <= ib && !touched; q++) touched = skip(i + 1, q * 6) }
+      if (!touched) { base.visible = true; return }
+      const rm = roadMesh(segStations(b, k), () => b.lanes, () => 'asphalt_aged', roadSets, 0.02, () => b.twoWay, paintOff, () => isKerbed(b.highway), (s) => duplicatesWider(i, s) || skip!(i + 1, s))
       if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
       road.add(rm)
       roadParts.push(rm)
-      r.holed = rm
-      r.base.visible = false
+      r.holed[k] = rm
+      base.visible = false
     }
+    const holeBranch = (i: number) => { for (let k = 0; k < branchRoad[i].base.length; k++) holeBranchChunk(i, k) }
     holeBranches = () => { for (let i = 0; i < branchAts.length; i++) holeBranch(i) }
     /**
      * Is this branch station merely a second ribbon over a wider carriageway?
@@ -2483,17 +2503,21 @@ if (uLodOn > 0.5) {
       const h = Math.hypot(r.dir.x, r.dir.z) || 1
       return dupAt(branchWho0 + i, q.x, q.y, q.z, branchAts[i].half, r.dir.x / h, r.dir.z / h)
     }
-    const buildBranchRoad = async (i: number, budget: Budget) => {
-      if (roadBuilt.has(i)) return
-      roadBuilt.add(i)
+    const buildBranchChunk = async (i: number, k: number, budget: Budget) => {
+      const key = `${i}:${k}`
+      if (chunkBuilt.has(key)) return
       const b = branchAts[i]
-      const rm = await roadMeshPaced(stations(b.at, b.len, 6), () => b.lanes, () => 'asphalt_aged', roadSets, 0.02, () => b.twoWay, paintOff, () => isKerbed(b.highway), (s) => duplicatesWider(i, s), budget)
+      const st = segStations(b, k)
+      if (st.length < 2) return
+      chunkBuilt.add(key)
+      const rm = await roadMeshPaced(st, () => b.lanes, () => 'asphalt_aged', roadSets, 0.02, () => b.twoWay, paintOff, () => isKerbed(b.highway), (s) => duplicatesWider(i, s), budget)
       if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
       road.add(rm)
       roadParts.push(rm)
-      branchRoad[i].base = rm
-      addBranchBridge(i, branchWho0 + i, stationsByWho[branchWho0 + i])
-      holeBranch(i)
+      branchRoad[i].base[k] = rm
+      // the bridge concrete is one mesh per branch, not per chunk — build it once, on the first chunk
+      if (!bridgeDone.has(i)) { bridgeDone.add(i); addBranchBridge(i, branchWho0 + i, stationsByWho[branchWho0 + i]) }
+      holeBranchChunk(i, k)
     }
     branchAts.forEach((b, i) => {
       // A station is left out only where another CARRIAGEWAY's strip covers it. The rule used to
@@ -2521,7 +2545,7 @@ if (uLodOn > 0.5) {
           for (let s = s0; s <= s1; s += 20) { const q = b.at(s).pos; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z }
         }
         branchUnits.push({ key: `branch:${i}:${k}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: async (budget) => {
-          await buildBranchRoad(i, budget)
+          await buildBranchChunk(i, k, budget)
           await adoptStrip(await buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s), null, null, null, budget), budget)
         } })
       }
@@ -2547,7 +2571,7 @@ if (uLodOn > 0.5) {
           for (let s = s0; s <= s1; s += 20) { const q = b.at(s).pos; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z }
         }
         into.push({ key: `branch:${i}:${k}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: async (budget) => {
-          await buildBranchRoad(i, budget)
+          await buildBranchChunk(i, k, budget)
           await adoptStrip(await buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s), null, null, null, budget), budget)
         } })
       }
@@ -2557,7 +2581,7 @@ if (uLodOn > 0.5) {
     const adoptArriving = async (br: NonNullable<Manifest['branches']>[number], budget: Budget) => {
       await budget.tick()
       if (!takeBranch(br)) return
-      branchRoad.push({ base: null, holed: null })
+      branchRoad.push({ base: [], holed: [] })
       const warped = await finishJunctions(budget)
       const i = branchAts.length - 1
       const b = branchAts[i]
@@ -2577,16 +2601,19 @@ if (uLodOn > 0.5) {
       await budget.tick()
       queueBranch(i, gradeUnits)
       for (const w of warped) {
-        if (!roadBuilt.has(w) || !branchRoad[w]?.base) continue
-        forget(branchRoad[w].base!)
-        roadParts = roadParts.filter((o) => o !== branchRoad[w].base && o !== branchRoad[w].holed)
-        if (branchRoad[w].holed) forget(branchRoad[w].holed!)
-        road.remove(branchRoad[w].base!)
-        if (branchRoad[w].holed) road.remove(branchRoad[w].holed!)
-        branchRoad[w].base = null
-        branchRoad[w].holed = null
-        roadBuilt.delete(w)
-        await buildBranchRoad(w, budget)
+        const r = branchRoad[w]
+        if (!r) continue
+        const builtKs: number[] = []
+        for (let k = 0; k < r.base.length; k++) if (r.base[k]) builtKs.push(k)
+        if (!builtKs.length) continue
+        for (const o of r.base) if (o) forget(o)
+        for (const o of r.holed) if (o) forget(o)
+        r.base = []
+        r.holed = []
+        // the curve moved, so the concrete over this branch is stale too — let the first rebuilt
+        // chunk put it back (addBranchBridge replaces the old group rather than doubling it)
+        bridgeDone.delete(w)
+        for (const k of builtKs) { chunkBuilt.delete(`${w}:${k}`); await buildBranchChunk(w, k, budget) }
       }
     }
     for (const br of laterBranches) {
@@ -2801,7 +2828,9 @@ if (uLodOn > 0.5) {
       gradeStats.strips = 0
       for (const u of spineUnits) u.done = false
       for (const u of branchUnits) u.done = false
-      roadBuilt.clear()
+      for (const r of branchRoad) { for (const o of r.base) if (o) forget(o); for (const o of r.holed) if (o) forget(o); r.base = []; r.holed = [] }
+      chunkBuilt.clear()
+      bridgeDone.clear()
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip

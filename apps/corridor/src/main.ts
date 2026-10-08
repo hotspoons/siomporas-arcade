@@ -44,7 +44,7 @@ import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
 import { dentObject, flushDents, repairObject } from './game/vehicle/dents'
-import { GameRun, type ModelHost, type ModelPose, type ProgramHost } from './game/session/program'
+import { GameRun, type ModelHost, type ModelPose, type ProgramHost, type TrafficHitInfo, type WeaponTuning } from './game/session/program'
 import { loadGameModule } from './game/session/programload'
 import { PROFILES, profile as driveProfile, type DriveProfile } from '@apex/engine/physics/profiles'
 import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './world/placements'
@@ -1706,6 +1706,12 @@ async function buildTraffic(want: TrafficSpec): Promise<void> {
   if (!site) return
   traffic = new TrafficLayer(site, actors, physics)
   scene.add(traffic.group)
+  // every hit on a car goes to whatever program is listening, in the program's frame (site metres)
+  traffic.onHit((ev) => {
+    if (!trafficHitFns.size) return
+    const info: TrafficHitInfo = { entity: ev.e, effect: ev.effect, force: ev.force, weapon: ev.weapon, at: { x: ev.at.x, y: -ev.at.z, z: ev.at.y } }
+    for (const fn of trafficHitFns) fn(info)
+  })
   try {
     const n = await traffic.load(site.manifest.slug, want)
     status(`traffic: ${n} cars`)
@@ -1768,7 +1774,8 @@ function fireGun(dt: number): void {
       groundAt: (x, z) => site?.groundAt(x, z) ?? null,
       // a round that lands on a car knocks it loose and shoves it; one on a soft prop breaks it
       onHit: ({ at, dir }) => {
-        if (!traffic?.shoot(at, dir, T.GUN_IMPULSE)) physics?.explode(at, { radius: 0.8, impulse: 0.5, breakAt: 1 })
+        const w = weaponsNow()
+        if (!traffic?.shoot(at, dir, w.gunImpulse, 0.35, w.gunDamage)) physics?.explode(at, { radius: 0.8, impulse: 0.5, breakAt: 1 })
       },
     })
     scene.add(gun.group)
@@ -1784,11 +1791,31 @@ let offPlayerImpact: (() => void) | null = null
  * impulse — then the physics world throws everything dynamic and breaks what breaks. The number
  * is how many bodies moved. The program's `api.physics.explode` and a landing missile both end here.
  */
-function boom(at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number }): number {
-  if (!physics) return 0
-  const cars = traffic?.blast(at, opts.radius, opts.impulse, opts.lift) ?? 0
-  return cars + physics.explode(at, opts)
+function boom(at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number; damage?: number; weapon?: string }): number {
+  // the traffic first, and with no physics too: a car on rails can still swerve
+  const cars = traffic?.blast(at, opts.radius, opts.impulse, opts.lift, { damage: opts.damage, weapon: opts.weapon }) ?? 0
+  return cars + (physics ? physics.explode(at, opts) : 0)
 }
+
+/**
+ * THE PLAYER'S WEAPONS AS THE LEVEL WANTS THEM. The tuning panel's GUN_ / MISSILE_ knobs are the
+ * defaults; a program's `api.physics.weapons({...})` lays its own over them until it stops.
+ */
+let weaponOverride: WeaponTuning = {}
+function weaponsNow(): Required<WeaponTuning> {
+  return {
+    gunImpulse: T.GUN_IMPULSE,
+    gunDamage: T.GUN_DAMAGE,
+    missileImpulse: T.MISSILE_IMPULSE,
+    missileRadius: T.MISSILE_RADIUS,
+    missileLift: T.MISSILE_LIFT,
+    missileDamage: T.MISSILE_DAMAGE,
+    ...weaponOverride,
+  }
+}
+
+/** a program's hit listeners; they outlive a traffic rebuild, which re-subscribes them (`buildTraffic`) */
+const trafficHitFns = new Set<(e: TrafficHitInfo) => void>()
 
 /**
  * Build the missile layer once. Called when the car is armed, not when the first missile fires, so
@@ -1811,7 +1838,10 @@ function ensureMissiles(): MissileLayer | null {
         return toi === null ? null : from.clone().addScaledVector(d, toi)
       },
       groundAt: (x, z) => site?.groundAt(x, z) ?? null,
-      onHit: (at) => { boom(at, { radius: T.MISSILE_RADIUS, impulse: T.MISSILE_IMPULSE, lift: T.MISSILE_LIFT, breakAt: 1 }) },
+      onHit: (at) => {
+        const w = weaponsNow()
+        boom(at, { radius: w.missileRadius, impulse: w.missileImpulse, lift: w.missileLift, breakAt: 1, damage: w.missileDamage, weapon: 'missile' })
+      },
     })
     // the round: the Fixtures tab's choice, else the built-in finned missile
     missiles.model = () => weaponModels?.missile?.clone(true) ?? builtinMissile()
@@ -2161,7 +2191,14 @@ function programHost(): ProgramHost {
       setProfile: (id, overrides) => {
         if (drive.car instanceof RapierCar) drive.car.setProfile(driveProfile(id, overrides))
       },
-      explode: (at, opts) => boom(at, { radius: opts.radius, impulse: opts.impulse, lift: opts.lift, breakAt: opts.breakAt }),
+      // THE PROGRAM SPEAKS SITE METRES (x east, y north, z up); `boom` is the world frame (y up,
+      // z south). Passed through as it was, a program's bomb went off with its height and its
+      // northing swapped.
+      explode: (at, opts) => boom({ x: at.x, y: at.z, z: -at.y }, { radius: opts.radius, impulse: opts.impulse, lift: opts.lift, breakAt: opts.breakAt, damage: opts.damage, weapon: 'blast' }),
+      weapons: (set) => {
+        weaponOverride = set === null ? {} : { ...weaponOverride, ...set }
+        return weaponsNow()
+      },
       car: () => (drive.car ? { speed: drive.car.speed, slide: drive.car.slide ?? 0, airborne: false, damage: 0 } as never : null),
     },
     layers: {
@@ -2188,6 +2225,28 @@ function programHost(): ProgramHost {
         return true
       },
       trafficAt: (x, y) => traffic?.zones.densityAt(x, y) ?? 0,
+      trafficCars: (near, radius, max) => {
+        const me = near ?? (() => { const p = drive.on && drive.car ? drive.car.pos : camera.position; return { x: p.x, y: -p.z } })()
+        return (traffic?.carsNear(me.x, -me.y, radius, max) ?? []).map((c) => ({
+          entity: c.e, x: c.x, y: -c.z, z: c.y,
+          // the site's yaw is anticlockwise from east; a compass bearing is clockwise from north
+          heading_deg: (((90 - (c.yaw * 180) / Math.PI) % 360) + 360) % 360,
+          speed: c.speed, loose: c.loose,
+        }))
+      },
+      trafficHit: (entity, h) => {
+        if (!traffic) return null
+        const p = drive.on && drive.car ? drive.car.pos : camera.position
+        const from = h.from ? { x: h.from.x, y: h.from.z ?? p.y, z: -h.from.y } : { x: p.x, y: p.y, z: p.z }
+        return traffic.hitEntity(entity, {
+          force: h.force, lift: h.lift, damage: h.damage, weapon: 'program',
+          ...(h.dir ? { dir: { x: h.dir.x, y: h.dir.z, z: -h.dir.y } } : { from }),
+        })
+      },
+      onTrafficHit: (fn) => {
+        trafficHitFns.add(fn)
+        return () => trafficHitFns.delete(fn)
+      },
       stuntIds: () => stuntWorld?.fixtures.map((f) => f.id) ?? [],
       showStunt: () => false,
       stuntVisible: (id) => (stuntWorld?.fixtures.some((f) => f.id === id) ? true : null),
@@ -4225,6 +4284,11 @@ registerBridgeContext({
   boom: (at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number }) => boom(at, opts),
   /** fire a missile from the player's car, as Ctrl does */
   fire: () => fireMissile(),
+  /** hold the gun's trigger for one frame of `dt` seconds, as Space does — a probe's way to fire it */
+  shoot: (dt = 1 / 60) => fireGun(dt),
+  get gun() {
+    return gun
+  },
   /**
    * JPEG of the frame on screen. The bridge used to cut every string at 4000 characters, which
    * made this useless; data-URL images now come back whole, and `scripts/bridge.mjs` writes them

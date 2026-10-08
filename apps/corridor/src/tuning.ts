@@ -448,6 +448,24 @@ export let TRAFFIC_WRECKS_MAX = 40
  * eye is released (the car is whole when you next see it); past MAX the farthest go first.
  */
 export let TRAFFIC_DENTS_KEEP_M = 600
+/**
+ * HOW A HIT IS GRADED (trafficlayer `hitCar`). Rich, 2026-10-08: "$20 for making a car swerve to
+ * $200 for blowing it into the sky". Under KNOCK_MS (m/s of hit) a driven car swerves across its
+ * lane and drives on; over it the car is knocked loose and thrown; a throw that leaves it climbing
+ * faster than LAUNCH_MS is a launch. A gun round adds GUN_IMPULSE to a car's heat, which decays
+ * over HEAT_S — one round is a swerve, a burst is a knock. DAMAGE_MS is the hit that makes the
+ * deepest dent when the caller does not say.
+ */
+export let TRAFFIC_KNOCK_MS = 24
+export let TRAFFIC_LAUNCH_MS = 9
+export let TRAFFIC_HEAT_S = 0.6
+export let TRAFFIC_DAMAGE_MS = 30
+/** the swerve: lateral m/s per m/s of hit, its cap, how far it may go, and the spring back to the lane */
+export let TRAFFIC_SWERVE_GAIN = 0.55
+export let TRAFFIC_SWERVE_VMAX = 6
+export let TRAFFIC_SWERVE_MAX_M = 2.6
+export let TRAFFIC_SWERVE_K = 5
+export let TRAFFIC_SWERVE_DAMP = 0.55
 export let TRAFFIC_DENTS_MAX = 60
 /** a traffic car hit harder than this (N·s) stops being driven and becomes a loose body */
 export let TRAFFIC_WAKE_NS = 8000
@@ -458,6 +476,8 @@ export let MISSILE_RADIUS = 11
 export let MISSILE_IMPULSE = 30
 /** how much of the throw points up: 1 sends a car over the one beside it */
 export let MISSILE_LIFT = 1.1
+/** the dent at the centre of a missile's blast, 0…1, falling off with distance */
+export let MISSILE_DAMAGE = 0.9
 // --- the machine gun (weaponfx.ts) --------------------------------------------------------------
 /** rounds per second, both guns together */
 export let GUN_RATE = 14
@@ -465,6 +485,8 @@ export let GUN_RATE = 14
 export let GUN_RANGE = 180
 /** m/s the car a round lands on is given, along the shot */
 export let GUN_IMPULSE = 7
+/** the dent one gun round makes, 0…1 (a scrape); a burst lands several */
+export let GUN_DAMAGE = 0.12
 /** spread, as a fraction of the aim: 0.015 is a hand-span at 50 m */
 export let GUN_SPREAD = 0.015
 
@@ -2520,9 +2542,11 @@ export const TUNE_TABS: TuneTab[] = [
           tune('MISSILE_RADIUS', () => MISSILE_RADIUS, (v) => (MISSILE_RADIUS = v), [2, 30], 0.5, 'blast radius, m'),
           tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 80], 1, 'm/s a car at the centre of the blast is given'),
           tune('MISSILE_LIFT', () => MISSILE_LIFT, (v) => (MISSILE_LIFT = v), [0, 3], 0.05, 'how much of the throw points up'),
+          tune('MISSILE_DAMAGE', () => MISSILE_DAMAGE, (v) => (MISSILE_DAMAGE = v), [0, 1], 0.05, 'the dent at the centre of a missile blast'),
           tune('GUN_RATE', () => GUN_RATE, (v) => (GUN_RATE = v), [2, 40], 1, 'rounds per second'),
           tune('GUN_RANGE', () => GUN_RANGE, (v) => (GUN_RANGE = v), [30, 400], 10, 'm'),
           tune('GUN_IMPULSE', () => GUN_IMPULSE, (v) => (GUN_IMPULSE = v), [0.5, 30], 0.5, 'm/s a car is given per round'),
+          tune('GUN_DAMAGE', () => GUN_DAMAGE, (v) => (GUN_DAMAGE = v), [0, 1], 0.01, 'the dent one gun round makes'),
           tune('GUN_SPREAD', () => GUN_SPREAD, (v) => (GUN_SPREAD = v), [0, 0.1], 0.005),
           tune('TRAFFIC_DRAW_M', () => TRAFFIC_DRAW_M, (v) => (TRAFFIC_DRAW_M = v), [100, 3000], 50, 'traffic further than this is simulated, not drawn'),
           tune('TRAFFIC_PHYS_M', () => TRAFFIC_PHYS_M, (v) => (TRAFFIC_PHYS_M = v), [50, 1000], 10, 'traffic further than this has no body in the solver'),
@@ -2538,6 +2562,11 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TRAFFIC_WRECKS_MAX', () => TRAFFIC_WRECKS_MAX, (v) => (TRAFFIC_WRECKS_MAX = v), [1, 400], 1, 'loose wrecks at once; the oldest is recycled into traffic'),
           tune('TRAFFIC_DENTS_MAX', () => TRAFFIC_DENTS_MAX, (v) => (TRAFFIC_DENTS_MAX = v), [0, 400], 1, 'dented cars at once (each holds its own copy of the mesh); the farthest are straightened'),
           tune('TRAFFIC_DENTS_KEEP_M', () => TRAFFIC_DENTS_KEEP_M, (v) => (TRAFFIC_DENTS_KEEP_M = v), [50, 3000], 50, 'a dent farther than this from the eye is released'),
+          tune('TRAFFIC_KNOCK_MS', () => TRAFFIC_KNOCK_MS, (v) => (TRAFFIC_KNOCK_MS = v), [1, 120], 1, 'a hit under this (m/s) makes a car swerve; over it, knocked loose'),
+          tune('TRAFFIC_LAUNCH_MS', () => TRAFFIC_LAUNCH_MS, (v) => (TRAFFIC_LAUNCH_MS = v), [1, 60], 0.5, 'a loose car climbing faster than this (m/s) was launched'),
+          tune('TRAFFIC_HEAT_S', () => TRAFFIC_HEAT_S, (v) => (TRAFFIC_HEAT_S = v), [0.05, 5], 0.05, 'how long gunfire on one car keeps adding up (s)'),
+          tune('TRAFFIC_SWERVE_GAIN', () => TRAFFIC_SWERVE_GAIN, (v) => (TRAFFIC_SWERVE_GAIN = v), [0, 2], 0.05, 'sideways m/s per m/s of a swerving hit'),
+          tune('TRAFFIC_SWERVE_MAX_M', () => TRAFFIC_SWERVE_MAX_M, (v) => (TRAFFIC_SWERVE_MAX_M = v), [0, 6], 0.1, 'how far a swerve may carry a car out of its lane (m)'),
         ],
       },
       {

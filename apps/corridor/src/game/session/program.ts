@@ -252,10 +252,79 @@ export interface CarState {
  * What the app's physics can be asked for. Every member optional on purpose — a host may have a
  * world and no destruction, and a program should degrade rather than explode.
  */
+/** A blast. Site metres; `impulse` m/s at the centre falling to nothing at `radius` */
+export interface ExplodeOpts {
+  radius: number
+  impulse: number
+  /** how much of the throw goes up */
+  lift?: number
+  lineOfSight?: boolean
+  breakAt?: number
+  /** the dent at the centre, 0…1, falling off like the impulse. Absent: scaled from the force */
+  damage?: number
+}
+
+/** The player's weapons. m/s for shoves, 0…1 for dents. */
+export interface WeaponTuning {
+  /** each gun round's shove; a car soaks rounds up, so a burst knocks where one round swerves */
+  gunImpulse?: number
+  /** the dent one gun round makes */
+  gunDamage?: number
+  missileImpulse?: number
+  missileRadius?: number
+  missileLift?: number
+  /** the dent at the centre of a missile's blast */
+  missileDamage?: number
+}
+
+/** What a hit did to a car, mildest first. */
+export type HitEffect = 'swerve' | 'loose' | 'launched'
+
+/** One simulated car. Site metres. */
+export interface TrafficCar {
+  entity: number
+  x: number
+  y: number
+  z: number
+  /** compass bearing, degrees, 0 = north */
+  heading_deg: number
+  /** m/s along the road; 0 for a loose car */
+  speed: number
+  /** knocked loose: the solver has it, not the road */
+  loose: boolean
+}
+
+/** How to hit a car. Site metres. */
+export interface TrafficHit {
+  /** m/s: what grades it — a swerve, a knock, a launch */
+  force: number
+  /** where it comes from; default the player */
+  from?: { x: number; y: number; z?: number }
+  /** or the way it travels, instead of `from` */
+  dir?: Vec3
+  /** how much of the throw goes up; default 0.55 */
+  lift?: number
+  /** the dent, 0…1; absent: scaled from the force */
+  damage?: number
+}
+
+/** A hit on a car, as a program hears it. */
+export interface TrafficHitInfo {
+  entity: number
+  effect: HitEffect
+  force: number
+  /** 'gun', 'missile', 'blast', 'program' */
+  weapon: string
+  /** where the car was, site metres */
+  at: Vec3
+}
+
 export interface PhysicsHost {
   setProfile?: (id: string, overrides?: Record<string, number>) => void
   blendProfile?: (id: string, t: number, opts?: { over?: number }) => void
-  explode?: (at: Vec3, opts: { radius: number; impulse: number; lift?: number; lineOfSight?: boolean; breakAt?: number }) => number
+  explode?: (at: Vec3, opts: ExplodeOpts) => number
+  /** the player's weapons: set what is given and answer everything in force; null puts the defaults back */
+  weapons?: (set: WeaponTuning | null) => Required<WeaponTuning>
   impulse?: (entity: number, v: Vec3) => void
   break?: (what: number | string) => number
   ray?: (from: Vec3, dir: Vec3, maxDistance: number) => { entity: number; point: Vec3; normal: Vec3 } | null
@@ -296,6 +365,12 @@ export interface WorldLayersHost {
   setTraffic?: (id: string, density: number, opts?: { over?: number }) => boolean
   /** how busy it is at a point, whatever zone that is — 0 outside every one */
   trafficAt?: (x: number, y: number) => number
+  /** the simulated cars near a point (null: the player), nearest first */
+  trafficCars?: (near: { x: number; y: number } | null, radius: number, max: number) => TrafficCar[]
+  /** hit one car. What it did, or null when there is no such car in sight */
+  trafficHit?: (entity: number, hit: TrafficHit) => HitEffect | null
+  /** every hit on a car, by anything; returns the unsubscribe */
+  onTrafficHit?: (fn: (e: TrafficHitInfo) => void) => () => void
 
   /** the ids of the stunt fixtures standing on the road */
   stuntIds?: () => string[]
@@ -470,6 +545,23 @@ export interface GameApi {
     set(id: string, density: number, opts?: { over?: number }): boolean
     /** how busy it is at a point — 0 outside every zone, which is what a world with none is */
     at(x: number, y: number): number
+    /**
+     * THE CARS THEMSELVES, nearest first: entity, where, which way, how fast, and whether one is
+     * already loose. `near` defaults to the player; `radius` to 300 m; `max` to 50.
+     */
+    cars(opts?: { near?: { x: number; y: number }; radius?: number; max?: number }): TrafficCar[]
+    /**
+     * Hit one car. Graded by `force` (m/s): under the knock threshold a driven car SWERVES across its
+     * lane and drives on; over it the car is knocked LOOSE and thrown; a throw that leaves it
+     * climbing fast is a LAUNCH. Answers which, or null when there is no such car in sight.
+     */
+    hit(entity: number, hit: TrafficHit): HitEffect | null
+    /**
+     * Every hit on a car — the player's gun and missiles, an `explode`, a `hit` — with what it did.
+     * The physical effect has already happened; this is for what a level does about it (pay out,
+     * score, say something). A burst of gunfire is a hit per round: watch `effect` change.
+     */
+    onHit(fn: (e: TrafficHitInfo) => void): void
   }
   /**
    * THE RACES THIS WORLD WAS AUTHORED WITH.
@@ -507,8 +599,18 @@ export interface GameApi {
     blend(id: string, t: number, opts?: { over?: number }): void
     /** one entity's own handling, for something that is not the player */
     entityProfile(entity: number, id: string, overrides?: Record<string, number>): void
-    /** a bomb, in site metres. Returns how many things it moved */
-    explode(at: Vec3, opts: { radius: number; impulse: number; lift?: number; lineOfSight?: boolean; breakAt?: number }): number
+    /**
+     * A bomb, in site metres. Returns how many things it moved. Traffic in reach is graded like
+     * any hit (see `traffic.hit`): the edge of a blast makes cars swerve, the middle throws them,
+     * and `damage` (0…1 at the centre) dents them.
+     */
+    explode(at: Vec3, opts: ExplodeOpts): number
+    /**
+     * THE PLAYER'S WEAPONS, as a level wants them: the gun's per-round shove and the missile's
+     * blast, and how much each dents. Pass only what changes; the answer is everything in force.
+     * The defaults come back when the program stops.
+     */
+    weapons(set?: WeaponTuning): Required<WeaponTuning>
     /** shove one entity */
     impulse(entity: number, v: Vec3): void
     /** break a named breakable, or an entity. Returns how many pieces */
@@ -656,6 +758,9 @@ export class GameRun {
   private enters = new Map<string, (() => void)[]>()
   private leaves = new Map<string, (() => void)[]>()
   private endFns: ((o: Outcome) => void)[] = []
+  /** what to undo when the program stops: hit listeners, weapon overrides */
+  private cleanups: (() => void)[] = []
+  private readonly resetWeapons = (): void => { this.host.physics?.weapons?.(null) }
 
   private t = 0
   private travelled = 0
@@ -722,6 +827,18 @@ export class GameRun {
           ? H.layers.setTraffic(id, Math.max(0, Math.min(1, d)), o)
           : false),
         at: (x, y) => (H.layers?.trafficAt && finite(x) && finite(y) ? H.layers.trafficAt(x, y) : 0),
+        cars: (o) => {
+          if (!H.layers?.trafficCars) return []
+          const near = o?.near && finite(o.near.x) && finite(o.near.y) ? o.near : null
+          return H.layers.trafficCars(near, finite(o?.radius) ? Math.max(0, o!.radius!) : 300, finite(o?.max) ? Math.max(0, Math.floor(o!.max!)) : 50)
+        },
+        hit: (e, h) => (H.layers?.trafficHit && finite(e) && h && finite(h.force) && (!h.dir || vec(h.dir))
+          ? H.layers.trafficHit(e, h)
+          : null),
+        onHit: (fn) => {
+          const off = H.layers?.onTrafficHit?.((e) => this.guard(() => fn(e)))
+          if (off) this.cleanups.push(off)
+        },
       },
       races: {
         ids: () => H.layers?.raceIds?.() ?? [],
@@ -745,6 +862,13 @@ export class GameRun {
         explode: (at, opts) => (H.physics?.explode && vec(at) && finite(opts?.radius) && finite(opts?.impulse)
           ? H.physics.explode(at, opts)
           : 0),
+        weapons: (set) => {
+          const clean: WeaponTuning = {}
+          for (const [k, v] of Object.entries(set ?? {})) if (finite(v)) (clean as Record<string, number>)[k] = v as number
+          if (!H.physics?.weapons) return { gunImpulse: 0, gunDamage: 0, missileImpulse: 0, missileRadius: 0, missileLift: 0, missileDamage: 0 }
+          if (Object.keys(clean).length && !this.cleanups.includes(this.resetWeapons)) this.cleanups.push(this.resetWeapons)
+          return H.physics.weapons(clean)
+        },
         impulse: (e, v) => { if (H.physics?.impulse && vec(v)) H.physics.impulse(e, v) },
         break: (what) => H.physics?.break?.(what) ?? 0,
         ray: (from, dir, max) => (H.physics?.ray && vec(from) && vec(dir) && finite(max) ? H.physics.ray(from, dir, max) : null),
@@ -1040,6 +1164,7 @@ export class GameRun {
   stop(): void {
     if (!this.outcome) this.finish('abandoned')
     this.guard(() => this.def.teardown?.(this.api))
+    for (const fn of this.cleanups.splice(0)) this.guard(fn)
     this.objectiveItems = []
     this.selectedObjective = null
     this.host.objectives?.show?.([], null)

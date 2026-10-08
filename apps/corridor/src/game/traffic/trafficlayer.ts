@@ -84,6 +84,44 @@ interface Shown {
   obey: number
   /** night beams, parented to the mesh. Hidden in daylight. */
   lamps: THREE.Group
+  /** a swerve in progress: metres right of the lane line, and how fast that is changing */
+  swerve: number
+  swerveV: number
+  /** gunfire soaked up lately, m/s, decaying: a burst escalates a swerve into a knock */
+  heat: number
+  heatAt: number
+}
+
+/** What a hit did to a car, mildest first. */
+export type HitEffect = 'swerve' | 'loose' | 'launched'
+
+/** One hit on one car, as the layer reports it. `at` and `dir` are the world (three) frame. */
+export interface TrafficHitEvent {
+  /** the car's entity */
+  e: number
+  effect: HitEffect
+  /** how hard, m/s: what graded it */
+  force: number
+  /** who did it: 'gun', 'missile', 'program', … */
+  weapon: string
+  /** where the car is */
+  at: { x: number; y: number; z: number }
+}
+
+/** How to hit a car. World (three) frame; `dir` is the way the hit travels. */
+export interface HitOpts {
+  /** m/s. Below TRAFFIC_KNOCK_MS a driven car swerves and drives on; above, it is knocked loose */
+  force: number
+  dir: { x: number; y: number; z: number }
+  /** how much of the throw goes up, added to `dir.y` before normalising */
+  lift?: number
+  /** 0…1, the dent. Absent: scaled from the force */
+  damage?: number
+  weapon?: string
+  /** m/s given to a car that is already loose, when that should differ from `force` (a gun round) */
+  kick?: number
+  /** tumble per m/s of kick */
+  spin?: number
 }
 
 /** a chain the planner can use, plus what the follower needs that the planner does not */
@@ -261,6 +299,8 @@ export class TrafficLayer {
    * shared models; `sweepDents` keeps it near the player and under `TRAFFIC_DENTS_MAX`.
    */
   private dentedCars = new Set<Shown>()
+  /** who wants to hear about hits: the program, the HUD */
+  private hitFns = new Set<(ev: TrafficHitEvent) => void>()
   private sinceDentSweep = 0
   /** wrecks straightened out and sent back into traffic; a probe reads it */
   recycled = 0
@@ -469,7 +509,7 @@ export class TrafficLayer {
       this.group.add(mesh)
       const half = { x: (m.doc.spec.length ?? 4.4) / 2, y: (m.doc.spec.height ?? 1.4) / 2, z: (m.doc.spec.width ?? 1.8) / 2 }
       const body = this.physics ? this.physics.spawnKinematic(half) : null
-      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey, lamps: trafficLamps(mesh, m.doc) }
+      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey, lamps: trafficLamps(mesh, m.doc), swerve: 0, swerveV: 0, heat: 0, heatAt: 0 }
       if (body) this.byCollider.set(body.colliderHandle, shown)
       this.shown.push(shown)
     }
@@ -533,6 +573,7 @@ export class TrafficLayer {
     Vehicle.speed[e] = 0
     s.hidden = true
     s.mesh.visible = false
+    s.swerve = s.swerveV = s.heat = 0
   }
 
   /**
@@ -547,46 +588,181 @@ export class TrafficLayer {
    * along the shot, with some lift so it lifts and tumbles rather than skids. False when nothing
    * was near enough.
    */
-  shoot(at: { x: number; y: number; z: number }, dir: { x: number; y: number; z: number }, impulse: number, lift = 0.35): boolean {
+  /** The car whose body is nearest a world point, within `within` metres, or null. */
+  private carNear(at: { x: number; y: number; z: number }, within = 3.2): Shown | null {
     let best: Shown | null = null
-    let bd = 3.2
+    let bd = within
     for (const s of this.shown) {
-      if (!s.body) continue
+      if (s.hidden) continue
       const p = s.mesh.position
       const d = Math.hypot(p.x - at.x, p.y + 0.7 - at.y, p.z - at.z)
       if (d < bd) { bd = d; best = s }
     }
-    if (!best) return false
-    if (!best.wrecked) this.wake(best, 'impact', impulse * best.massKg)
-    const body = best.body
-    if (!best.wrecked || !body) return false
-    const dy = dir.y + lift
-    const l = Math.hypot(dir.x, dy, dir.z) || 1
-    body.kick((dir.x / l) * impulse, (dy / l) * impulse, (dir.z / l) * impulse, Math.min(4, impulse * 0.5))
+    return best
+  }
+
+  /** the entity of the car nearest a world point, or null — what a shot that landed hit */
+  entityNear(at: { x: number; y: number; z: number }, within = 3.2): number | null {
+    return this.carNear(at, within)?.e ?? null
+  }
+
+  /**
+   * A round landed at `at`. The car it hit SOAKS IT UP: each round adds `impulse` to the car's heat,
+   * which decays over TRAFFIC_HEAT_S, and the heat is what grades the hit — a single round makes a
+   * car swerve, a burst knocks it loose. A car already loose takes each round as a shove of
+   * `impulse`, as it always did. False when no car was near enough.
+   */
+  shoot(at: { x: number; y: number; z: number }, dir: { x: number; y: number; z: number }, impulse: number, lift = 0.35, damage?: number): boolean {
+    const s = this.carNear(at)
+    if (!s) return false
+    const now = performance.now() / 1000
+    s.heat = s.heat * Math.exp(-(now - s.heatAt) / Math.max(0.05, T.TRAFFIC_HEAT_S)) + impulse
+    s.heatAt = now
+    this.hitCar(s, { force: s.heat, kick: impulse, dir, lift, damage, weapon: 'gun', spin: 0.5 })
     return true
   }
 
-  blast(at: { x: number; y: number; z: number }, radius: number, impulse: number, lift = 0.55): number {
+  /**
+   * A blast: every car within `radius` is hit with `impulse` m/s at the centre, falling off to
+   * nothing at the edge, thrown away from the centre and swung up by `lift`. Graded like any hit —
+   * the edge of a blast makes cars swerve, the middle throws them. `damage` is the dent at the
+   * centre, 0…1, falling off the same way; absent, it is scaled from the force. Returns how many
+   * cars it touched.
+   */
+  blast(at: { x: number; y: number; z: number }, radius: number, impulse: number, lift = 0.55, opts: { damage?: number; weapon?: string } = {}): number {
     let n = 0
     for (const s of this.shown) {
-      if (!s.body) continue
+      if (s.hidden) continue
       const p = s.mesh.position
       let dx = p.x - at.x, dy = p.y + 0.7 - at.y, dz = p.z - at.z
       const d = Math.hypot(dx, dy, dz)
       const falloff = Math.max(0, 1 - d / radius)
       if (falloff <= 0) continue
-      if (!s.wrecked) this.wake(s)
-      if (!s.wrecked) continue // no ground under it: it stays on rails
       if (d < 1e-3) { dx = 0; dy = 1; dz = 0 } else { dx /= d; dy /= d; dz /= d }
-      dy += lift
-      const l = Math.hypot(dx, dy, dz) || 1
-      const v = impulse * falloff
       // the tumble scales with the throw: a nudge that spun a car at full tilt swung its corners
       // into the cars beside it and woke half the jam
-      s.body.kick((dx / l) * v, (dy / l) * v, (dz / l) * v, Math.min(4, v * 0.35))
-      n++
+      const hit = this.hitCar(s, { force: impulse * falloff, dir: { x: dx, y: dy, z: dz }, lift, damage: opts.damage === undefined ? undefined : opts.damage * falloff, weapon: opts.weapon ?? 'blast', spin: 0.35 })
+      if (hit) n++
     }
     return n
+  }
+
+  /**
+   * Hit one car by entity, as a program does: along `dir`, or away from `from` (world frame). Null
+   * when there is no such car, or it is out of sight.
+   */
+  hitEntity(e: number, o: Omit<HitOpts, 'dir'> & { dir?: HitOpts['dir']; from?: { x: number; y: number; z: number } }): HitEffect | null {
+    const s = this.shown.find((x) => x.e === e)
+    if (!s) return null
+    let dir = o.dir
+    if (!dir) {
+      const p = s.mesh.position
+      const f = o.from ?? { x: p.x, y: p.y + 0.7, z: p.z + 1 }
+      const dx = p.x - f.x, dy = p.y + 0.7 - f.y, dz = p.z - f.z
+      const l = Math.hypot(dx, dy, dz) || 1
+      dir = { x: dx / l, y: dy / l, z: dz / l }
+    }
+    return this.hitCar(s, { ...o, dir })
+  }
+
+  /** The cars within `radius` of a world (x, z), nearest first, at most `max`. World frame; yaw is the site's. */
+  carsNear(x: number, z: number, radius: number, max: number): { e: number; x: number; y: number; z: number; yaw: number; speed: number; loose: boolean }[] {
+    const r2 = radius * radius
+    const out: { d2: number; s: Shown }[] = []
+    for (const s of this.shown) {
+      if (s.hidden) continue
+      const p = s.mesh.position
+      const d2 = (p.x - x) ** 2 + (p.z - z) ** 2
+      if (d2 <= r2) out.push({ d2, s })
+    }
+    out.sort((a, b) => a.d2 - b.d2)
+    return out.slice(0, max).map(({ s }) => ({ e: s.e, x: s.mesh.position.x, y: s.mesh.position.y, z: s.mesh.position.z, yaw: Transform.yaw[s.e], speed: s.wrecked ? 0 : Vehicle.speed[s.e], loose: s.wrecked }))
+  }
+
+  /**
+   * THE ONE PLACE A CAR IS HIT. Rich, 2026-10-08: a gun round should make a car swerve and a
+   * missile should blow it into the sky — "$20 for making a car swerve to $200 for blowing it into
+   * the sky" — and a program pays out by which. So a hit is graded, not a switch:
+   *
+   *   - under TRAFFIC_KNOCK_MS a driven car SWERVES: it is shoved across its lane, brakes, wobbles
+   *     back and drives on. No physics needed, so it works on a world with physics off;
+   *   - over it the car is KNOCKED LOOSE (`wake`) and thrown — LAUNCHED when the throw leaves it
+   *     climbing faster than TRAFFIC_LAUNCH_MS.
+   *
+   * Every hit dents (a swerve is a scrape) and every hit is reported to `onHit`.
+   */
+  private hitCar(s: Shown, o: HitOpts): HitEffect | null {
+    if (s.hidden || !(o.force > 0)) return null
+    const dmg = o.damage ?? Math.min(1, o.force / Math.max(1, T.TRAFFIC_DAMAGE_MS))
+    if (dmg > 0) this.dentFrom(s, o.dir, dmg)
+    let effect: HitEffect = 'swerve'
+    if (!s.wrecked && o.force >= T.TRAFFIC_KNOCK_MS && s.body) this.wake(s, 'impact', o.force * s.massKg)
+    if (s.wrecked && s.body) {
+      const v = o.kick ?? o.force
+      const ly = o.dir.y + (o.lift ?? 0.55)
+      const l = Math.hypot(o.dir.x, ly, o.dir.z) || 1
+      s.body.kick((o.dir.x / l) * v, (ly / l) * v, (o.dir.z / l) * v, Math.min(4, v * (o.spin ?? 0.35)))
+      effect = s.body.state().vy >= T.TRAFFIC_LAUNCH_MS ? 'launched' : 'loose'
+    } else {
+      // driven, under the knock or with no ground to be loose on: a swerve
+      this.swerveCar(s, o.dir, o.force)
+    }
+    if (this.hitFns.size) {
+      const p = s.mesh.position
+      const ev: TrafficHitEvent = { e: s.e, effect, force: o.force, weapon: o.weapon ?? 'program', at: { x: p.x, y: p.y, z: p.z } }
+      for (const fn of this.hitFns) fn(ev)
+    }
+    return effect
+  }
+
+  /** be told about every hit; returns the unsubscribe */
+  onHit(fn: (ev: TrafficHitEvent) => void): () => void {
+    this.hitFns.add(fn)
+    return () => this.hitFns.delete(fn)
+  }
+
+  /**
+   * Shove a driven car across its lane. The sideways speed is the hit's component across the car
+   * (a shot from behind still picks a side), the car brakes in proportion, and `stepSwerve` springs
+   * it back to the lane line — one wobble and it drives on.
+   */
+  private swerveCar(s: Shown, dir: { x: number; y: number; z: number }, force: number): void {
+    const yaw = Transform.yaw[s.e]
+    // right of travel in the site frame is (sin, -cos); the world frame's z is -north
+    let lat = dir.x * Math.sin(yaw) + dir.z * Math.cos(yaw)
+    if (Math.abs(lat) < 0.2) lat = (s.e & 1 ? 1 : -1) * 0.5
+    s.swerveV += Math.sign(lat) * Math.min(T.TRAFFIC_SWERVE_VMAX, force * T.TRAFFIC_SWERVE_GAIN * Math.min(1, Math.abs(lat) * 2))
+    Vehicle.speed[s.e] *= Math.max(0.35, 1 - force / Math.max(1, 2 * T.TRAFFIC_KNOCK_MS))
+  }
+
+  /** advance one car's swerve by `dt`: a damped spring back to the lane line. Returns the offset, m */
+  private stepSwerve(s: Shown, dt: number): number {
+    if (s.swerve === 0 && s.swerveV === 0) return 0
+    const k = T.TRAFFIC_SWERVE_K
+    const c = 2 * Math.sqrt(k) * T.TRAFFIC_SWERVE_DAMP
+    s.swerveV += (-k * s.swerve - c * s.swerveV) * dt
+    s.swerve += s.swerveV * dt
+    const max = T.TRAFFIC_SWERVE_MAX_M
+    if (s.swerve > max) { s.swerve = max; s.swerveV = Math.min(0, s.swerveV) }
+    if (s.swerve < -max) { s.swerve = -max; s.swerveV = Math.max(0, s.swerveV) }
+    if (Math.abs(s.swerve) < 1e-3 && Math.abs(s.swerveV) < 1e-3) s.swerve = s.swerveV = 0
+    return s.swerve
+  }
+
+  /** Dent a car where a hit travelling along `dir` would land on it. `damage` 0…1 */
+  private dentFrom(s: Shown, dir: { x: number; y: number; z: number }, damage: number): void {
+    const l = Math.hypot(dir.x, dir.y, dir.z) || 1
+    const p = s.mesh.position
+    // the panel facing the hit: a metre back along the way it came, at door height
+    const im = {
+      a: null, b: null,
+      x: p.x - (dir.x / l) * 1.0, y: p.y + 0.7 - (dir.y / l) * 0.3, z: p.z - (dir.z / l) * 1.0,
+      // the normal points out of the panel, back at the shooter; a dent goes in, along the hit
+      nx: -dir.x / l, ny: -dir.y / l, nz: -dir.z / l,
+      impulse: 800 + Math.max(0, Math.min(1, damage)) * 19_000,
+      peak: 0,
+    } as unknown as Impact
+    if (dentObject(s.mesh, im, false)) this.dentedCars.add(s)
   }
 
   /**
@@ -601,7 +777,7 @@ export class TrafficLayer {
    * on it) keeps the car hidden until there is one. Turning round would be better and needs the
    * network, which `site.chains()` does not hand over.
    */
-  private followRoad = (world: ActorWorld['world'], _dt: number) => {
+  private followRoad = (world: ActorWorld['world'], dt: number) => {
     void world
     this.parked = 0
     for (const s of this.shown) {
@@ -634,9 +810,11 @@ export class TrafficLayer {
       const dy = dir ? -d.y : d.y
       // right of travel is (dy, -dx) in a y-north frame
       const off = laneOffset(OnRoad.lane[e], road.twoWay ? lanesPerDirection(road.lanes) : Math.max(1, Math.round(road.lanes)), road.twoWay)
-      Transform.x[e] = p.x + dy * off
-      Transform.y[e] = p.y - dx * off
-      Transform.yaw[e] = Math.atan2(dy, dx)
+      // a swerve rides on top of the lane: across it, and the nose turned into the slide
+      const sw = this.stepSwerve(s, dt)
+      Transform.x[e] = p.x + dy * (off + sw)
+      Transform.y[e] = p.y - dx * (off + sw)
+      Transform.yaw[e] = Math.atan2(dy, dx) - (sw === 0 ? 0 : Math.atan2(s.swerveV, Math.max(4, Vehicle.speed[e])))
     }
   }
 

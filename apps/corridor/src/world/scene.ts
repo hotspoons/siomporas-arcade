@@ -1848,6 +1848,8 @@ if (uLodOn > 0.5) {
    */
   let reindexTrees: () => void = () => {}
   let replantNow: () => void = () => {}
+  /** a branch arrived under the planted trees: the frame replants once, on its next look (adoptArriving) */
+  let replantDue = false
   const clearedAt = (x: number, y: number): boolean => {
     for (const poly of clearPolys) if (inside(poly, x, y)) return true
     return false
@@ -2637,7 +2639,11 @@ if (uLodOn > 0.5) {
       // left standing in the lane for the mask to hide.
       const [bx0, bz0, bx1, bz1] = b.bounds
       t.invalidateRegion(bx0, bz0, bx1, bz1)
-      replantNow()
+      // ONE REPLANT PER FRAME, FROM THE FRAME. A replant here, per branch, ran unbudgeted inside
+      // the cell's unit — a cell of six branches was six walks over 60k records between two
+      // yields, and `graded().worstMs` read 237 on a branch cell (2026-10-08). The frame does it
+      // once, on its next `replantIfMoved`, for every branch the cell adopted.
+      replantDue = true
       await budget.tick()
       queueBranch(i, gradeUnits)
       for (const w of warped) {
@@ -3186,7 +3192,10 @@ if (uLodOn > 0.5) {
     replantNow = () => replantTrees(lastEye)
     const replantIfMoved = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
       lastEye.copy(eye)
-      if (T.TREE_REPLANT_M > 0 && T.TREE_PLANT_RADIUS_M > 0) {
+      if (replantDue) {
+        replantDue = false
+        replantTrees(eye, fwd, pitch)
+      } else if (T.TREE_REPLANT_M > 0 && T.TREE_PLANT_RADIUS_M > 0) {
         const c = t.stats().centre
         if (Math.hypot(eye.x - c[0], -eye.z - c[1]) >= T.TREE_REPLANT_M) replantTrees(eye, fwd, pitch)
       }

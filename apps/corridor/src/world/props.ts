@@ -600,7 +600,7 @@ export function treesFromCanopy(
      */
     seedM?: number
   } = {},
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number } } {
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number; pump: { cells: number; measured: number; placed: number; measureMaxMs: number; ms: number } } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
@@ -676,6 +676,8 @@ export function treesFromCanopy(
   } | null = null
   /** a tree cell that did not fit in the budget; tried again before the cursor moves on */
   let hold: { i: number; j: number; x0: number; y0: number } | null = null
+  /** what the last `pump` did: cells walked, cells measured, trees placed, the slowest measure, ms */
+  const pumpStats = { cells: 0, measured: 0, placed: 0, measureMaxMs: 0, ms: 0 }
   const tally = () => {
     liveCount = 0
     spareCount = 0
@@ -866,6 +868,9 @@ export function treesFromCanopy(
     const changed: number[] = []
     let n = 0
     let placed = 0
+    let measured = 0
+    let measureMax = 0
+    const pumpT0 = performance.now()
     while ((hold || scan) && placed < 480) {
       // every fourth cell, not every thirty-second: a cell asks the canopy, the road field, the
       // species raster and the ground, ~150 µs together, and thirty-two of them pushed a 0.75 ms
@@ -880,7 +885,11 @@ export function treesFromCanopy(
       const dx = c.x0 - scx, dy = c.y0 - scy
       const d2 = dx * dx + dy * dy
       if (d2 > context2) continue
+      const m0 = performance.now()
       const rec = measure(c.i, c.j, cellM, c.x0, c.y0, true)
+      const mMs = performance.now() - m0
+      measured++
+      if (mMs > measureMax) measureMax = mMs
       if (!rec) continue
       if (free.length === 0 && records.length >= capacity) {
         // the rim waits for a slot freed by a tree that left the ring
@@ -901,6 +910,11 @@ export function treesFromCanopy(
       changed.push(i)
       placed++
     }
+    pumpStats.cells = n
+    pumpStats.measured = measured
+    pumpStats.placed = placed
+    pumpStats.measureMaxMs = measureMax
+    pumpStats.ms = performance.now() - pumpT0
     if (!scan && !hold && settled) {
       settled = [centre[0], centre[1]]
       const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
@@ -1083,7 +1097,7 @@ export function treesFromCanopy(
     scan = null
     hold = null
   }
-  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0) }) }
+  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0), pump: { ...pumpStats } }) }
 }
 
 /**

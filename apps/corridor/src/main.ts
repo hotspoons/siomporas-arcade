@@ -2127,21 +2127,44 @@ const programModels = new Map<string, { holder: THREE.Group; entry: CatalogEntry
 /**
  * A model that fades near the camera gets materials of its own — the catalog's are shared by every
  * copy — made transparent once, so the per-frame fade is an opacity write and never a recompile.
+ *
+ * POOLED, NEVER DISPOSED. Disposing a wad's materials when it landed released their shader
+ * programs (nothing else held that key), and the next wad compiled them again: four programs,
+ * 29 ms, on the frame after every few hits (2026-10-08). A landed wad's materials go back to the
+ * pool, keyed on the catalog material they were cloned from, and the next spawn takes them.
  */
+const fadeMaterialPool = new Map<string, THREE.Material[]>()
 function ownFadeMaterials(holder: THREE.Object3D): THREE.Material[] {
   const out: THREE.Material[] = []
   holder.traverse((o) => {
     const mesh = o as THREE.Mesh
     if (!mesh.isMesh) return
     const one = (m: THREE.Material) => {
-      const c = m.clone()
-      c.transparent = true
+      const pool = fadeMaterialPool.get(m.uuid)
+      let c = pool?.pop()
+      if (!c) {
+        c = m.clone()
+        c.transparent = true
+        c.userData.fadeSource = m.uuid
+      }
       out.push(c)
       return c
     }
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(one) : one(mesh.material)
   })
   return out
+}
+/** a landed model's fade materials, back to the pool for the next one */
+function returnFadeMaterials(mats: THREE.Material[]): void {
+  for (const m of mats) {
+    const src = m.userData.fadeSource as string | undefined
+    if (!src) { m.dispose(); continue }
+    m.opacity = 1
+    m.depthWrite = true
+    const pool = fadeMaterialPool.get(src)
+    if (pool) pool.push(m)
+    else fadeMaterialPool.set(src, [m])
+  }
 }
 
 /** what the hero car's detail was last set to, so it is only re-applied on a change */
@@ -2244,7 +2267,7 @@ const modelsHost: ModelHost = {
     const m = programModels.get(id)
     if (!m) return false
     programModelGroup.remove(m.holder)
-    for (const mat of m.fade ?? []) mat.dispose()
+    returnFadeMaterials(m.fade ?? [])
     programModels.delete(id)
     return true
   },
@@ -2257,7 +2280,7 @@ const modelsHost: ModelHost = {
 function clearProgramModels(): void {
   for (const m of programModels.values()) {
     programModelGroup.remove(m.holder)
-    for (const mat of m.fade ?? []) mat.dispose()
+    returnFadeMaterials(m.fade ?? [])
   }
   programModels.clear()
 }

@@ -289,7 +289,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
    * the frames that went over (2026-10-08). The trunk beside the car stands this frame; the one
    * sixty metres out can wait a few.
    */
-  const TREES_PER_FRAME = 24
+  const TREES_PER_FRAME = 10
 
   function refreshTrees(x: number, z: number) {
     const radius = T.PHYS_PROP_RADIUS_M

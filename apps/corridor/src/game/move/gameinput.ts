@@ -161,9 +161,19 @@ export class GameInput {
     this.gamepad.detach(target)
   }
 
+  /**
+   * The pad's menu directions — the D-pad buttons and the left stick's four halves — that have been
+   * seen AT REST since the menu opened. A direction moves the menu only once it is in here: a stick
+   * held when the menu opened, an axis that has never come home (an uninitialised or misread one),
+   * or a hat stuck on a direction can never scroll it. Rich, 2026-10-08: "make sure menu scrolls are
+   * 100% on purpose and not an artifact."
+   */
+  private padArmed = new Set<string>()
+
   /** the menu just opened: whatever is held now is not a menu key until it is let go */
   menuOpened(): void {
     this.stale = new Set(this.keyboard.down)
+    this.padArmed.clear()
   }
 
   /** the action a key code is bound to, if any — what the keydown switch asks */
@@ -225,8 +235,15 @@ export class GameInput {
      */
     const kb = this.keyboard
     for (const c of this.stale) if (!kb.isDown(c)) this.stale.delete(c)
-    const tap = (code: string, pad: string) => kb.wasPressed(code) || (padOn && gp.pressed(pad))
-    const held = (code: string, pad: string, axis: string) => (kb.isDown(code) && !this.stale.has(code)) || (padOn && (gp.value(axis) > 0.5 || gp.down(pad)))
+    // arm each pad direction the moment it is seen at rest; a direction never seen at rest stays dead
+    if (padOn) {
+      for (const b of ['b12', 'b13', 'b14', 'b15']) if (!gp.down(b)) this.padArmed.add(b)
+      for (const a of ['a0+', 'a0-', 'a1+', 'a1-']) if (gp.value(a) < 0.25) this.padArmed.add(a)
+    } else this.padArmed.clear()
+    const armed = (k: string) => this.padArmed.has(k)
+    const tap = (code: string, pad: string) => kb.wasPressed(code) || (padOn && armed(pad) && gp.pressed(pad))
+    const held = (code: string, pad: string, axis: string) =>
+      (kb.isDown(code) && !this.stale.has(code)) || (padOn && ((armed(axis) && gp.value(axis) > 0.5) || (armed(pad) && gp.down(pad))))
     const tapY = (tap('ArrowDown', 'b13') || tap('KeyS', 'b13') ? 1 : 0) - (tap('ArrowUp', 'b12') || tap('KeyW', 'b12') ? 1 : 0)
     const tapX = (tap('ArrowRight', 'b15') || tap('KeyD', 'b15') ? 1 : 0) - (tap('ArrowLeft', 'b14') || tap('KeyA', 'b14') ? 1 : 0)
     const holdY = (held('ArrowDown', 'b13', 'a1+') || held('KeyS', 'b13', 'a1+') ? 1 : 0) - (held('ArrowUp', 'b12', 'a1-') || held('KeyW', 'b12', 'a1-') ? 1 : 0)

@@ -142,3 +142,33 @@ describe('presses are edges', () => {
     expect(seen).toEqual(['b0'])
   })
 })
+
+describe('an axis that is not a hand on the pad', () => {
+  it('reads the hat only on its seven steps: the 0 every axis reports before the first report is centred, not south', () => {
+    for (let k = 0; k < 8; k++) expect(hatDirection(-1 + (2 * k) / 7)).toBe(k)
+    expect(hatDirection(0)).toBe(-1)
+    expect(hatDirection(0.07)).toBe(-1)
+    expect(hatDirection(3.28571)).toBe(-1)
+  })
+
+  it('does not hold the D-pad down on a Mac HID pad that has not reported yet (every axis 0)', () => {
+    const g = new GamepadSource()
+    padsAre([pad({ mapping: '', buttons: 15, axes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] })])
+    for (let i = 0; i < 5; i++) {
+      g.poll()
+      for (const b of ['b12', 'b13', 'b14', 'b15']) expect(g.down(b)).toBe(false)
+    }
+  })
+
+  it('reads a hat sitting in a stick slot as nothing at rest, even after the D-pad has swept it', () => {
+    const g = new GamepadSource()
+    // a pad read as identity whose axis 1 is really a hat: 3.29 at rest, then north and south
+    for (const v of [3.28571, -1, 3.28571, 1 / 7, 3.28571]) {
+      padsAre([pad({ axes: [0, v, 0, 0] })])
+      g.poll()
+    }
+    expect(g.value('a1+')).toBe(0)
+    expect(g.value('a1-')).toBe(0)
+  })
+})
+

@@ -38,11 +38,25 @@ export function layoutFor(pad: { mapping: string; buttons: { length: number }; a
   return IDENTITY
 }
 
-/** Where a hat axis points: 0 north … 7 north-west, or -1 for centred. */
+/**
+ * Where a hat axis points: 0 north … 7 north-west, or -1 for centred.
+ *
+ * A HAT SPEAKS IN SEVENTHS: −1, −5/7 … 5/7, 1 for the eight directions, ~3.29 centred. Anything
+ * between two steps is not a direction. The one that mattered is 0: Chrome reports every axis as 0
+ * until the pad's first report, and 0 sits halfway between south-east and south, so it rounded to
+ * SOUTH — the D-pad read "down, held" from the moment the pad connected until it was first
+ * touched, and the pause menu scrolled itself (Rich, 2026-10-08, "depending on the controller").
+ */
 export function hatDirection(v: number): number {
   if (!Number.isFinite(v) || v < -1.01 || v > 1.01) return -1
-  return Math.round((v + 1) * 3.5) % 8
+  const step = (v + 1) * 3.5
+  const k = Math.round(step)
+  if (Math.abs(step - k) > 0.2) return -1
+  return k % 8
 }
+
+/** A raw axis a stick can be: finite and within ±1 (a little slack for an overshooting pot). */
+const stickRaw = (v: number) => Number.isFinite(v) && Math.abs(v) <= 1.05
 
 /**
  * Raw travel an axis must show before it is trusted (see `GamepadSource.calibrate`). A pad that has
@@ -154,7 +168,10 @@ export class GamepadSource {
     }
     for (let i = 0; i < 4; i++) {
       const r = L.axes[i]
-      const raw = r >= 0 && r < pad.axes.length ? pad.axes[r] : 0
+      // A VALUE NO STICK CAN HAVE is no input: a hat read in a stick's place rests at 3.29, and
+      // once a D-pad press had "swept" it, that rest read as the stick held all the way over
+      const r0 = r >= 0 && r < pad.axes.length ? pad.axes[r] : 0
+      const raw = stickRaw(r0) ? r0 : 0
       this.axes[i] = this.calibrate(i, raw)
       // A PUSH IS ONE EDGE, like a button: an axis held past the threshold — or resting there,
       // the way a trigger read raw does — must not be re-reported every frame, or a rebind takes

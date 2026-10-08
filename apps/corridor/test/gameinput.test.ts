@@ -185,6 +185,30 @@ describe('GameInput', () => {
     expect(firings[2] - firings[1]).toBeLessThanOrEqual(9) // then ~0.12 s
   })
 
+  it('never moves the menu with a pad direction that was held when it opened, until it comes home', () => {
+    const inp = new GameInput(structuredClone(DEFAULT_KEYS), structuredClone(DEFAULT_PAD))
+    // the stick swept so it is trusted, then held down while the menu opens; the D-pad held down too
+    for (const y of [0, 1, -1, 0]) { padsAre([fakePad({}, { 1: y })]); inp.poll(1 / 60) }
+    padsAre([fakePad({ 13: 1 }, { 1: 1 })])
+    inp.poll(1 / 60)
+    inp.menuOpened()
+    for (let i = 0; i < 120; i++) { inp.poll(1 / 60); expect(inp.ui.menuDown).toBe(false) }
+    // let go of both, push the stick again: that is on purpose, and it moves at once
+    padsAre([fakePad({}, { 1: 0 })])
+    inp.poll(1 / 60)
+    expect(inp.ui.menuDown).toBe(false)
+    padsAre([fakePad({}, { 1: 1 })])
+    inp.poll(1 / 60)
+    expect(inp.ui.menuDown).toBe(true)
+  })
+
+  it('never moves the menu with a D-pad that has never been seen at rest', () => {
+    const inp = new GameInput(structuredClone(DEFAULT_KEYS), structuredClone(DEFAULT_PAD))
+    // down "held" from the first poll — the uninitialised-hat case, whatever the layout made of it
+    padsAre([fakePad({ 13: 1 })])
+    for (let i = 0; i < 120; i++) { inp.poll(1 / 60); expect(inp.ui.menuDown).toBe(false) }
+  })
+
   it('swallows the frames after a rebind so the key that finished it is not also played', () => {
     const inp = new GameInput(structuredClone(DEFAULT_KEYS), structuredClone(DEFAULT_PAD))
     padsAre([fakePad({ 9: 1 })])

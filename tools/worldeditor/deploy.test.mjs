@@ -321,10 +321,11 @@ test('a game deploy leaves the bake sources home; sources ships them; the raw OS
 
 test('the plan names the monoliths: the biggest things the game loads whole, never the tiles', async () => {
   const { store } = await volume()
-  await writeFile(path.join(store.sites, 'alpha', 'web', 'chm_2m.png'), Buffer.alloc(3 * 2 ** 20))
+  await writeFile(path.join(store.sites, 'alpha', 'web', 'manifest.json'), JSON.stringify({ layers: { chm: { file: 'chm_8m.png' } } }))
+  await writeFile(path.join(store.sites, 'alpha', 'web', 'chm_8m.png'), Buffer.alloc(3 * 2 ** 20))
   await writeFile(path.join(store.sites, 'alpha', 'web', 'tiles', '0', '1_1.pack'), Buffer.alloc(2 * 2 ** 20))
   const p = await plan({ store, worlds: ['alpha'], transpile })
-  assert.deepEqual(p.largest.map((o) => o.key), ['sites/alpha/web/chm_2m.png'])
+  assert.deepEqual(p.largest.map((o) => o.key), ['sites/alpha/web/chm_8m.png'])
 })
 
 test('every site file the game client fetches by name is in the game set — a deploy cannot leave one behind', async () => {
@@ -368,5 +369,20 @@ test('one failed upload stops the whole deploy — the other workers do not carr
   // the three others may each have had one upload in flight; nothing new starts after the failure
   assert.ok(after <= 3, `${after} uploads started after the failure`)
   assert.ok(puts < p.objects.length, 'the deploy stopped well short of the end')
+})
+
+test('a loose file in web/ that the web manifest does not name stays home (dc-metro: chm_2m.png, 133 MiB)', async () => {
+  const { store } = await volume()
+  const web = path.join(store.sites, 'alpha', 'web')
+  await writeFile(path.join(web, 'manifest.json'), JSON.stringify({ layers: { chm: { file: 'chm_8m.png' }, dem: { file: 'dem_8m.png' } }, tiles: { dir: 'tiles' } }))
+  for (const f of ['chm_8m.png', 'dem_8m.png', 'chm_2m.png']) await writeFile(path.join(web, f), Buffer.alloc(16))
+  const keys = (p) => p.objects.map((o) => o.key).filter((k) => k.startsWith('sites/alpha/web/'))
+  const game = await plan({ store, worlds: ['alpha'], transpile })
+  assert.ok(keys(game).includes('sites/alpha/web/chm_8m.png') && keys(game).includes('sites/alpha/web/dem_8m.png'))
+  assert.ok(keys(game).includes('sites/alpha/web/manifest.json'))
+  assert.ok(keys(game).includes('sites/alpha/web/tiles/0/0_0.pack'), 'the tile folders always go')
+  assert.ok(!keys(game).includes('sites/alpha/web/chm_2m.png'), 'the unnamed leftover stays home')
+  const all = await plan({ store, worlds: ['alpha'], transpile, sources: true })
+  assert.ok(keys(all).includes('sites/alpha/web/chm_2m.png'), 'sources ships it')
 })
 

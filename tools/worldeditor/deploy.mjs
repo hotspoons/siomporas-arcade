@@ -180,13 +180,18 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
     docs.push(manifest)
     const files = await walk(dir)
     const have = new Set(files)
+    // what the web export's own manifest names: a loose file in web/ it does not name is a bake
+    // leftover (dc-metro's web/chm_2m.png, 133 MiB, read by nothing — the 2 m canopy is in the tiles)
+    const webManifest = await readFile(path.join(dir, 'web', 'manifest.json'), 'utf8').catch(() => null)
+    const namedInWeb = (name) => webManifest === null || name === 'manifest.json' || new RegExp(`["/]${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`).test(webManifest)
     let skipped = 0
     let skippedBytes = 0
     for (const rel of files) {
       const top = !rel.includes('/')
       if (top ? !SITE_TOP.has(path.extname(rel)) : !rel.startsWith('web/')) continue
       // a bake source the game never opens stays home unless asked for (`sources`)
-      if (top && !sources && !GAME_TOP.has(rel) && !(GAME_FALLBACK[rel] && !have.has(GAME_FALLBACK[rel]))) {
+      const looseWeb = /^web\/[^/]+$/.test(rel)
+      if (!sources && ((top && !GAME_TOP.has(rel) && !(GAME_FALLBACK[rel] && !have.has(GAME_FALLBACK[rel]))) || (looseWeb && !namedInWeb(rel.slice(4))))) {
         skipped++
         skippedBytes += (await stat(path.join(dir, rel))).size
         continue

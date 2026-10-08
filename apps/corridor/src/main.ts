@@ -2087,18 +2087,37 @@ const fadeAt = new THREE.Vector3()
 
 /**
  * Fade every program model that asked for it (`ModelPose.nearFade`) by its distance from the camera:
- * opaque beyond `nearFade`, down to a ghost at a fifth of it. Depth writes stop once it is see-through,
+ * opaque beyond `nearFade`, down to REWARD_FADE_FLOOR at REWARD_FADE_INNER of it; the F6
+ * REWARD_* knobs override the distance and scale every such model. Depth writes stop once it is see-through,
  * so what is behind it — the road, the car — draws through.
  */
 function fadeProgramModels(): void {
   if (!programModels.size) return
   camera.getWorldPosition(fadeEye)
+  const floor = Math.max(0, Math.min(1, T.REWARD_FADE_FLOOR))
+  const inner = Math.max(0, Math.min(0.95, T.REWARD_FADE_INNER))
+  /*
+   * THE CAR IS WHERE THE CASH STOPS, NOT THE LENS. Rewards fly at the player's car, and the chase
+   * camera sits ~8-10 m behind it, so a fade keyed to the camera alone never reached its floor: the
+   * cash ended its flight at ~40% opacity right in front of the view, and no floor setting touched
+   * it (Rich, 2026-10-08: "the tuning knobs still don't make the cash any more transparent"). So the
+   * floor starts REWARD_FADE_PAST_CAR metres beyond the car — anything at the car or between you and
+   * it is a ghost — and the fade runs from there out to the fade distance.
+   */
+  const carCam = drive.on && drive.car ? fadeEye.distanceTo(drive.car.pos) : 0
   for (const m of programModels.values()) {
-    const near = m.pose.nearFade ?? 0
-    if (!m.fade || !(near > 0)) continue
+    const asked = m.pose.nearFade ?? 0
+    if (!m.fade || !(asked > 0)) continue
+    // the panel's distance wins over the level's when it is set (REWARD_FADE_M)
+    let near = T.REWARD_FADE_M > 0 ? T.REWARD_FADE_M : asked
+    const innerM = Math.max(near * inner, carCam > 0 ? carCam + T.REWARD_FADE_PAST_CAR : 0)
+    // a fade distance inside the car's own leaves nothing to fade over: keep a ramp beyond it
+    if (near < innerM + 6) near = innerM + 6
+    // REWARD_SIZE on top of the level's own scale, applied here so the knob is live mid-flight
+    m.holder.scale.setScalar((m.pose.scale || 1) * T.REWARD_SIZE)
     m.holder.getWorldPosition(fadeAt)
-    const k = THREE.MathUtils.smoothstep(fadeEye.distanceTo(fadeAt), near * 0.2, near)
-    const opacity = 0.06 + 0.94 * k
+    const k = THREE.MathUtils.smoothstep(fadeEye.distanceTo(fadeAt), innerM, near)
+    const opacity = floor + (1 - floor) * k
     for (const mat of m.fade) {
       mat.opacity = opacity
       mat.depthWrite = opacity > 0.98
@@ -2640,6 +2659,9 @@ function setDrive(on: boolean) {
     site.layers.markers.visible = !on && ui.layers().markers
   }
 }
+
+/** P was pressed from the driver's seat: the next P goes back to the car rather than to the photo again */
+let photoFromCar = false
 
 function toPhoto() {
   if (!site) return
@@ -3657,7 +3679,12 @@ addEventListener('keydown', (e) => {
   if (action && hotkey(action, e.shiftKey)) { e.preventDefault(); return }
   // the developer's own keys, not rebindable
   switch (e.code) {
-    case 'KeyP': toPhoto(); break
+    // P leaves the car for the photo view — and, since the game kept the glitch (Rich, 2026-10-08,
+    // "I kind of love that"), P again puts you back in the car, where you left it
+    case 'KeyP':
+      if (!drive.on && photoFromCar && drive.car) { photoFromCar = false; setDrive(true) }
+      else { photoFromCar = drive.on && !!drive.car; toPhoto() }
+      break
     case 'KeyH': toTop(); break
     case 'KeyC': if (!drive.on) void copyStance(); break
     case 'KeyX': void copyStance(); break

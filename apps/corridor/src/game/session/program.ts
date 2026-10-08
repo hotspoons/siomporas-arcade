@@ -165,7 +165,7 @@ export interface ModelPose {
   scale?: number
   /**
    * Metres from the camera inside which the model fades out, so a thing flying at the player never
-   * blocks the view: opaque beyond this, nearly clear at a fifth of it. Absent or 0: never fades.
+   * blocks the view: opaque beyond this, 5% at a fifth of it and closer. Absent or 0: never fades.
    * Rich, 2026-10-08: the money flying at the car "causes some visibility problems".
    */
   nearFade?: number

@@ -21,9 +21,16 @@ const COLOUR = 0xffd54f
 const HOVER_M = 6
 /** the arrow's vertical bob, metres, before the distance scale */
 const BOB_M = 0.4
-/** the distance scale is clamped to this, so it cannot become a billboard or a speck */
+/** never smaller than its own size up close */
 const SCALE_MIN = 1
-const SCALE_MAX = 6
+/**
+ * HOW BIG IT LOOKS, not how big it is. The arrow (head and shaft, ARROW_M at scale 1) is sized to
+ * stand ARROW_PX tall on screen whatever the distance. It used to scale with distance and stop at
+ * ×6 — 25 m — which from the wide fly view, kilometres off, was a few pixels: the edge tick showed
+ * the car was out of frame, and with it in frame there was nothing to see (Rich, 2026-10-08).
+ */
+const ARROW_M = 4.3
+const ARROW_PX = 72
 /** the tick canvas, in device-independent pixels, and how far it is held off the screen edge */
 const TICK_PX = 96
 const EDGE_MARGIN = 64
@@ -101,7 +108,9 @@ export class AvatarBeacon {
       this.root.hidden = true
       this.object.visible = true
       const dist = camera.position.distanceTo(target)
-      const s = Math.min(SCALE_MAX, Math.max(SCALE_MIN, dist / 80))
+      // metres one screen pixel spans at the target's distance
+      const perPx = (2 * dist * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, window.innerHeight * camera.zoom)
+      const s = Math.max(SCALE_MIN, (ARROW_PX * perPx) / ARROW_M)
       const tip = target.y + HOVER_M * s + Math.sin(this.phase * 2.1) * BOB_M * s
       this.arrow.position.set(target.x, tip, target.z)
       this.arrow.scale.setScalar(s)

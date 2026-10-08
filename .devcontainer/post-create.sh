@@ -42,6 +42,25 @@ EOF
     fi
 fi
 
+# helm: the world editor and the asset service on gh200-1 are Helm releases (tools/*/chart, values in
+# deploy/gh200-1/), and a rollout is `helm upgrade` — without it, re-pinning an image means asking
+# someone with a laptop. The release tarball from get.helm.sh, checked against its published sha256.
+if ! command -v helm >/dev/null 2>&1; then
+    case "$(uname -m)" in aarch64|arm64) HELM_ARCH=arm64 ;; *) HELM_ARCH=amd64 ;; esac
+    (set -e
+     HELM_VERSION="$(curl -fsSL https://get.helm.sh/helm-latest-version)"
+     HELM_TGZ="helm-$HELM_VERSION-linux-$HELM_ARCH.tar.gz"
+     cd "$(mktemp -d)"
+     curl -fsSLO "https://get.helm.sh/$HELM_TGZ"
+     echo "$(curl -fsSL "https://get.helm.sh/$HELM_TGZ.sha256sum" | awk '{print $1}')  $HELM_TGZ" | sha256sum -c -
+     tar -xzf "$HELM_TGZ"
+     sudo mv "linux-$HELM_ARCH/helm" /usr/local/bin/helm) \
+        || echo "WARN: helm install failed — deploy/gh200-1 rollouts will not work"
+fi
+if command -v helm >/dev/null 2>&1; then
+    helm completion bash | sudo tee /etc/bash_completion.d/helm >/dev/null
+fi
+
 # ll: the stock Debian .bashrc ships it commented out, and ~/.bashrc lives in the container layer,
 # so every rebuild loses it again. The guard anchors at line start — `#alias ll=` is already in
 # there and would otherwise make this look done.

@@ -39,7 +39,12 @@ sampling profiler's resolution on Chrome is too coarse for a 20 ms hitch.
 |---|---|---|---|---|---|---|
 | baseline | 27 m/s | 16.6 ms | 32.3 | 43.2 | 53.4 | 34 |
 | after this loop | 27 m/s | 9.1 ms | 11.7 | 13.3 | 26.7 | 0–2 |
-| after this loop | 65–75 m/s | 9.4 ms | 11.5 | 13.0 | 20.8 | 0 |
+| after this loop | 65–75 m/s | 8.6 ms | 11.5 | 13.0 | 15 | 0 |
+
+The last 20 s window at speed, as the panel reads it: 59.6 fps, frame time p95 18.3 / p99 18.6 ms,
+GPU p50 8.6 / p95 12.4 ms, 370 draw calls, heap 1.7 GB (was 3.1 GB before the dent and LOD fixes).
+The one 67 ms frame in it was the rig putting the car back on the road after a crash (`place`
+builds the heightfield tile under the wheels whole, by design).
 
 GPU: ~6 ms p50, ~8 ms p95 at Low. The frame is now vsync-bound at the median and the tail is
 within a frame; two or three frames in fifteen seconds still go past 14 ms (the list below).

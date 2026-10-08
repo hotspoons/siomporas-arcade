@@ -67,6 +67,11 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface NearPerf {
   roadCover: number
   trees: number
+  /** the parts of `trees`: the planter (replant + crescent pump), the near set's reseat, the far cards, the shadow casters */
+  treesPlant: number
+  treesNear: number
+  treesFar: number
+  treesShadow: number
   grass: number
   /** crops, precipitation, impostor uploads */
   other: number
@@ -1674,7 +1679,7 @@ if (uLodOn > 0.5) {
   let trees: THREE.Group | undefined
   let treeCount = 0
   let updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void = () => {}
-  const nearPerf: NearPerf = { roadCover: 0, trees: 0, grass: 0, other: 0, water: 0, stream: 0, pyr: 0, lod: 0, grade: 0, veg: 0, total: 0 }
+  const nearPerf: NearPerf = { roadCover: 0, trees: 0, treesPlant: 0, treesNear: 0, treesFar: 0, treesShadow: 0, grass: 0, other: 0, water: 0, stream: 0, pyr: 0, lod: 0, grade: 0, veg: 0, total: 0 }
   let retune: () => void = () => {}
   let applySurfaces: (doc: SurfacesDoc) => void = () => {}
   let setSeason: (season: Season) => void = () => {}
@@ -2952,7 +2957,7 @@ if (uLodOn > 0.5) {
     const near = await detail('growing: tree variants', () => new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300, flora).grow()) // capacity here is the allocation ceiling; the live cap is the knob
     nearRef = near
     treeRecords = t.records
-    treePlantingRef = () => ({ ...t.stats(), replants: replantStats.replants, lastMs: replantStats.lastMs })
+    treePlantingRef = () => ({ ...t.stats(), replants: replantStats.replants, lastMs: replantStats.lastMs, parts: { ...replantStats.parts } })
     trees.add(near.group)
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
     // the same sampler the trees were planted from: grass rejection and the strip's forest floor
@@ -3121,18 +3126,52 @@ if (uLodOn > 0.5) {
      * indexes the records — the near set's grid, the collision grid, the impostor slots — is
      * rebuilt from the same array, which is mutated in place.
      */
-    const replantStats = { replants: 0, lastMs: 0, count: 0, centre: [0, 0] as [number, number] }
+    const replantStats = { replants: 0, lastMs: 0, count: 0, centre: [0, 0] as [number, number], parts: { plant: 0, grid: 0, reindex: 0, reseat: 0, near: 0, far: 0 } }
     const replantTrees = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
       const t0 = performance.now()
+      const parts = replantStats.parts
       treeCount = t.plant(eye.x, -eye.z)
-      indexTreeGrid()
-      near.reindex()
+      const t1 = performance.now()
+      /*
+       * THE TREES THAT LEFT, NOT THE WHOLE INDEX. A plant that moved the centre frees the records
+       * outside the new ring and queues the crescent; the trees that stay keep their slots. The
+       * collision grid and the near set's grid used to be rebuilt from every record here — 3.0
+       * and 3.3 ms over the Beltway's tens of thousands, on one frame every 350 m — when all
+       * that changed is the freed slots, and the pump adds the new ones as it measures them.
+       */
+      const note = t.patch()
+      if (note.rebuilt || note.removed.length * 2 !== note.removedAt.length) {
+        indexTreeGrid()
+        near.reindex()
+      } else {
+        for (let k = 0; k < note.removed.length; k++) {
+          const x = note.removedAt[k * 2], z = note.removedAt[k * 2 + 1]
+          const key = `${Math.floor(x / tgCell)},${Math.floor(z / tgCell)}`
+          const arr = treeGrid.get(key)
+          if (arr) {
+            for (let a = arr.length - 1; a >= 0; a--) if (arr[a][0] === x && arr[a][1] === z) { arr[a] = arr[arr.length - 1]; arr.pop() }
+            if (!arr.length) treeGrid.delete(key)
+          }
+          near.forget(note.removed[k], x, z)
+        }
+      }
+      const t2 = performance.now()
+      const t3 = t2
       reseat()
+      const t4 = performance.now()
       near.update(eye, true, fwd, pitch)
+      const t5 = performance.now()
       // the coarse lollipops are only in the scene when there is no renderer (no impostors);
       // writing 120k instance matrices for a mesh nobody draws is the replant's whole cost
       if (t.crowns.parent && t.crowns.visible) t.refresh(near.near)
       refreshFar(near.near, eye, fwd, pitch)
+      const t6 = performance.now()
+      parts.plant = t1 - t0
+      parts.grid = t2 - t1
+      parts.reindex = t3 - t2
+      parts.reseat = t4 - t3
+      parts.near = t5 - t4
+      parts.far = t6 - t5
       replantStats.replants++
       replantStats.lastMs = Math.round(performance.now() - t0)
       replantStats.count = treeCount
@@ -3389,10 +3428,17 @@ if (uLodOn > 0.5) {
         const n0 = performance.now()
         replantIfMoved(eye, fwd, pitch)
         lollipops()
+        const na = performance.now()
         const reseated = near.update(eye, false, fwd, pitch)
+        const nb = performance.now()
         if (reseated) refreshFar(near.near, eye, fwd, pitch)
+        const nc = performance.now()
         shadowRef?.update(near, t.records, eye, reseated, fwd)
         const n1 = performance.now()
+        nearPerf.treesPlant = na - n0
+        nearPerf.treesNear = nb - na
+        nearPerf.treesFar = nc - nb
+        nearPerf.treesShadow = n1 - nc
         grass.update(eye, fwd, pitch)
         grass.tick(time)
         const n2 = performance.now()

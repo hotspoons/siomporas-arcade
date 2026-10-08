@@ -3931,6 +3931,17 @@ const UP_LOCAL = new THREE.Vector3(0, 1, 0)
  * frame and one short one is nothing. `governor` is what a probe reads.
  */
 const governor = { cpuMs: 0, scale: 1, over: 0 }
+/**
+ * What the last frame's CPU went on, by section of `frame()`, ms. A dozen clock reads a frame,
+ * so it is always on; `apex.framePerf` reads it, and `site.nearPerf` splits `world` further.
+ */
+const framePerf: Record<string, number> = { weapons: 0, traffic: 0, game: 0, waypoint: 0, physics: 0, dents: 0, sky: 0, world: 0, map: 0, shading: 0, render: 0 }
+let fpLast = 0
+const fpMark = (k: string) => {
+  const n = performance.now()
+  framePerf[k] = n - fpLast
+  fpLast = n
+}
 function governFrame(cpuMs: number): void {
   governor.cpuMs = cpuMs
   if (T.STREAM_GOVERNOR <= 0) {
@@ -3967,6 +3978,7 @@ function frame() {
   // the frame's own clock, for the performance panel: `real` is the gap between frames, and the
   // work we do inside this function is measured separately so the two can be compared
   const cpu0 = performance.now()
+  fpLast = cpu0
   // the adaptive near-tree budget's clock: `dt` is the frame gap, capped, and the loop ignores a
   // zero or non-finite delta (a tab that was hidden) so a stall cannot slam the trim
   TREE_BUDGET.frame(dt * 1000)
@@ -3985,6 +3997,7 @@ function frame() {
   if (rig.on && !paused && drive.on) rig.tickFire(dt)
   if (!paused && !menu.open && drive.on && (input.held('gun') || radHold.gun)) fireGun(dt)
   if (gun && !paused) gun.tick(dt)
+  fpMark('weapons')
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
   if (traffic && !paused) {
     // the density knob, fed every frame; the layer applies it on a throttle, not per frame
@@ -3997,12 +4010,14 @@ function frame() {
     } else traffic.player = null
     traffic.tick(real, camera.position)
   }
+  fpMark('traffic')
   if (game && !paused) {
     game.tick(real)
     showGame()
     if (game.error) { toast(`program: ${game.error}`, 'warn', 8000); game = null }
   }
   updateObjective()
+  fpMark('game')
   // the waypoint arrow, from wherever the player is and whichever way they face
   if (site && drive.on && drive.car) {
     const at = { x: drive.car.pos.x, y: -drive.car.pos.z }
@@ -4017,9 +4032,12 @@ function frame() {
   } else if (waypointHud.current) {
     waypointHud.set(null)
   }
+  fpMark('waypoint')
   if (physics && !paused) physics.update(drive.car?.pos ?? camera.position, real)
+  fpMark('physics')
   // the dents the steps just made, to the GPU — a couple of meshes a frame, the rest wait a frame
   flushDents()
+  fpMark('dents')
   // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
   // runs whenever the sun has moved enough to see — a degree of elevation is about four minutes of
   // a real day, and far less than that at a high TIME_RATE.
@@ -4051,6 +4069,7 @@ function frame() {
     envDue = false
     skyEnvironment()
   }
+  fpMark('sky')
   if (site && drive.on && drive.car) {
     const car = drive.car
     // keys and the pad are read fresh each frame; the phone pads have already set throttle/brake/steer
@@ -4347,6 +4366,7 @@ function frame() {
       if (Math.round(T.TRAFFIC_LIGHTS_MODE) === 2) traffic?.feedFlood(flood, camera.position, Math.max(0, Math.round(T.TRAFFIC_LIGHTS)))
     }
     flood.end()
+    fpMark('world')
     // wet tarmac mirrors the lamps that are on: a vertical streak from each one down to the camera
     const wetMarks: WetMark[] = []
     if ((site?.weather.wetness ?? 0) > 0.02) {
@@ -4369,6 +4389,7 @@ function frame() {
     if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })
     else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })
   }
+  fpMark('map')
   tickShading()
   followShadow()
   skyDome.tick(performance.now() / 1000)
@@ -4389,6 +4410,7 @@ function frame() {
     heroDetail.ratio = T.LOD_HERO_RATIO
     setDetail(drive.car.mesh, T.LOD_HERO_RATIO)
   }
+  fpMark('shading')
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0
   if (perfHud.open) {
     // Time each pass as it is submitted. `poll` first collects whatever the GPU finished since last
@@ -4413,6 +4435,7 @@ function frame() {
    * including submitting it. What it does NOT include is the GPU actually finishing — the gap
    * between `cpuMs` and the frame time is where that shows up.
    */
+  fpMark('render')
   const cpuMs = performance.now() - cpu0
   governFrame(cpuMs)
   if (perfHud.open) {
@@ -4596,6 +4619,10 @@ registerBridgeContext({
   /** the frame governor: the frame's last CPU ms, the builders' budget scale, frames over target */
   get governor() {
     return governor
+  },
+  /** the last frame's CPU by section of `frame()`, ms */
+  get framePerf() {
+    return framePerf
   },
   perf: (frames = 30) =>
     new Promise<unknown>((resolve) => {

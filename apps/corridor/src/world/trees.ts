@@ -311,6 +311,27 @@ export class NearTrees {
    * between jumps the new trees are added here so a reused index does not keep the variant it
    * had for the tree that left.
    */
+  /**
+   * One slot the planter just freed, at the position its tree stood (the record itself is NaN by
+   * now). The inverse of `remember`: out of the grid cell it was in, out of the near set, its
+   * variant forgotten. With this a replant drops the trees that left instead of rebuilding the
+   * whole index — 3.3 ms over the DC Beltway's records, every 350 m (2026-10-08).
+   */
+  forget(i: number, x: number, z: number) {
+    const k = `${Math.floor(x / this.cell)},${Math.floor(z / this.cell)}`
+    const arr = this.grid.get(k)
+    if (arr) {
+      const at = arr.indexOf(i)
+      if (at >= 0) {
+        arr[at] = arr[arr.length - 1]
+        arr.pop()
+      }
+      if (!arr.length) this.grid.delete(k)
+    }
+    this.near.delete(i)
+    if (i < this.chosen.length) this.chosen[i] = -1
+  }
+
   remember(i: number) {
     const t = this.trees[i]
     if (!t || !Number.isFinite(t.x)) return

@@ -10,8 +10,12 @@
  * Measured on the cash GLB: 116,680 → 5,704 triangles (ratio 0.05, Permissive), error 0.6%.
  *
  * In:  { id, positions: Float32Array (xyz), indices: Uint32Array | null, ratio, error }
- * Out: { id, indices: Uint32Array, error }  — an index list over the SAME vertices, so the caller can
- *      share the original's vertex buffers and only the index buffer is new.
+ * Out: { id, indices: Uint32Array, remap: Uint32Array, unique: number, error } — the new index list,
+ *      already renumbered onto a COMPACT vertex set, and the table that maps each old vertex to its
+ *      new slot (a value >= unique means the vertex is not used). The caller rebuilds the attributes
+ *      from the table. Without this the 5% copy of a car still carried every one of its 101,532
+ *      vertices for 4,052 triangles, and everything per-vertex downstream — a dent's clone, its
+ *      normals, its upload — paid for all of them (2026-10-08).
  */
 import { MeshoptSimplifier } from 'meshoptimizer'
 
@@ -26,7 +30,11 @@ self.onmessage = async (e: MessageEvent) => {
     // it stalled at 55,494 of 116,680 triangles whatever the error budget. Permissive may cross them:
     // 5,704 triangles at 0.6% error. At the size these are drawn, a seam that smears is invisible.
     const [out, err] = MeshoptSimplifier.simplify(src, positions, 3, target, error, ['Permissive'])
-    ;(self as unknown as Worker).postMessage({ id, indices: out, error: err }, [out.buffer])
+    // compactMesh RENUMBERS `out` IN PLACE and hands back the old→new table for the attributes.
+    // Applying the table to `out` a second time mapped most of it to the unused marker (0xffffffff):
+    // 774 NaN normals per car and a normal recompute six times slower than it should be (2026-10-08).
+    const [remap, unique] = MeshoptSimplifier.compactMesh(out)
+    ;(self as unknown as Worker).postMessage({ id, indices: out, remap, unique, error: err }, [out.buffer, remap.buffer])
   } catch (err) {
     ;(self as unknown as Worker).postMessage({ id, failed: String((err as Error)?.message ?? err) })
   }

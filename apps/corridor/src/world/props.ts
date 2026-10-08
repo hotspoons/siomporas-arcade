@@ -567,6 +567,8 @@ export interface TreePatch {
   changed: number[]
   /** slots that were freed */
   removed: number[]
+  /** where each freed slot's tree stood, world x and z in pairs — the indexes that keyed on its position drop it from there */
+  removedAt: number[]
   /** slots that left the spare ring and should be drawn */
   shown: number[]
   /** slots that fell into the spare ring and should hide */
@@ -643,7 +645,7 @@ export function treesFromCanopy(
   let spareCount = 0
   let lastChanged = 0
   let lastEvicted = 0
-  let patchNote: TreePatch = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+  let patchNote: TreePatch = { rebuilt: true, changed: [], removed: [], removedAt: [], shown: [], hidden: [] }
   /** cells planted (or known empty) out to this centre. The next plant only queues the crescent past it. */
   let settled: [number, number] | null = null
   let settledR = 0
@@ -739,6 +741,7 @@ export function treesFromCanopy(
     const draw2 = drawR * drawR
     const context2 = contextR * contextR
     const removed: number[] = []
+    const removedAt: number[] = []
     const shown: number[] = []
     const hidden: number[] = []
     const ox = settled![0], oy = settled![1]
@@ -753,6 +756,7 @@ export function treesFromCanopy(
         if (r.spare) spareCount--
         liveCount--
         liveKeys.delete(`${r.ci},${r.cj}`)
+        removedAt.push(r.x, r.z)
         r.x = NaN
         free.push(i)
         removed.push(i)
@@ -783,7 +787,7 @@ export function treesFromCanopy(
       row: 0, y0: 0, dy2: 0, spans: [], span: 0, i: 0,
     }
     hold = null
-    patchNote = { rebuilt: false, changed: [], removed, shown, hidden }
+    patchNote = { rebuilt: false, changed: [], removed, removedAt, shown, hidden }
     lastChanged = 0
     lastEvicted = removed.length
     return liveCount
@@ -904,7 +908,7 @@ export function treesFromCanopy(
       capped = false
     }
     if (!changed.length) return false
-    patchNote = { rebuilt: false, changed, removed: [], shown: [], hidden: [] }
+    patchNote = { rebuilt: false, changed, removed: [], removedAt: [], shown: [], hidden: [] }
     lastChanged = changed.length
     lastEvicted = 0
     return true
@@ -960,7 +964,7 @@ export function treesFromCanopy(
       records.length = 0
       free.length = 0
       for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: false })
-      patchNote = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+      patchNote = { rebuilt: true, changed: [], removed: [], removedAt: [], shown: [], hidden: [] }
       lastChanged = records.length
       lastEvicted = 0
       tally()
@@ -970,7 +974,7 @@ export function treesFromCanopy(
     records.length = 0
     free.length = 0
     for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: cand[k].spare })
-    patchNote = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+    patchNote = { rebuilt: true, changed: [], removed: [], removedAt: [], shown: [], hidden: [] }
     lastChanged = records.length
     lastEvicted = 0
     tally()

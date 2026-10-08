@@ -311,9 +311,8 @@ export class Grass {
   private lastPitch = Infinity
   private dirty = true
   private frame = 0
-  /** the last frame a tile was generated on, and what a card-only / blade tile last cost (ms, eased) */
-  private lastMadeFrame = 0
-  private tileMs = [0.3, 2]
+  /** the tile being generated, a cell per step (see `generateSteps`) */
+  private gen: { key: string; blades: boolean; it: Generator<void, Tile, void>; ms: number } | null = null
   private eye = new THREE.Vector3()
   private fwd = new THREE.Vector3(1, 0, 0)
   /** the visible tile set for this eye/heading, nearest first; rebuilt only when the view moved */
@@ -1058,26 +1057,38 @@ export class Grass {
     // the frame governor's share of the budget (streamscale.ts): the full knob while the frame
     // has room, a fraction of it while the frame is over
     const deadline = t0 + scaledMs(T.GRASS_MS_PER_FRAME)
-    // a tile costs what the last one of its kind cost, and one that will not fit is not started:
-    // the deadline used to be checked only AFTER a tile, so a 0.6 ms budget still ran a 7 ms blade
-    // tile every frame. The ring must still move, though — with nothing made for a few frames one
-    // tile goes regardless.
-    const starving = this.frame - this.lastMadeFrame > 6
-    while (this.pending.length && tiles > 0) {
-      const p = this.pending[0]
-      const have = this.tiles.get(p.key)
-      if (have && !(p.withBlades && !have.hasBlades)) { this.pending.shift(); continue }
-      const kind = p.withBlades ? 1 : 0
-      if (!(made === 0 && starving) && performance.now() + this.tileMs[kind] * 0.6 > deadline) break
-      this.pending.shift()
-      const g0 = performance.now()
-      this.tiles.set(p.key, this.generate(p.tx, p.tz, p.withBlades))
-      this.tileMs[kind] += (performance.now() - g0 - this.tileMs[kind]) * 0.3
+    // A TILE IS GENERATED A CELL AT A TIME. The deadline used to be checked only after a whole
+    // tile, so a 0.6 ms share still ran a 5-7 ms verge tile on the frame — the commonest spike left
+    // under the test rig (2026-10-08). `generateSteps` yields after each cell; the frame takes cells
+    // until its share is spent, and the tile lands when its last cell is in.
+    while (tiles > 0) {
+      if (!this.gen) {
+        // the next tile that is really missing
+        let p = this.pending[0]
+        while (p) {
+          const have = this.tiles.get(p.key)
+          if (have && !(p.withBlades && !have.hasBlades)) { this.pending.shift(); p = this.pending[0]; continue }
+          break
+        }
+        if (!p) break
+        this.pending.shift()
+        this.gen = { key: p.key, blades: p.withBlades, it: this.generateSteps(p.tx, p.tz, p.withBlades), ms: 0 }
+      }
+      const g = this.gen
+      let done = false
+      for (;;) {
+        const s0 = performance.now()
+        const r = g.it.next()
+        g.ms += performance.now() - s0
+        if (r.done) { this.tiles.set(g.key, r.value); done = true; break }
+        if (performance.now() >= deadline) break
+      }
+      if (!done) break
+      this.gen = null
       made++
-      tiles -= p.withBlades ? 1 : 0.15
+      tiles -= g.blades ? 1 : 0.15
       if (performance.now() >= deadline) break
     }
-    if (made) this.lastMadeFrame = this.frame
     const t1 = performance.now()
     if (made) this.dirty = true
     // assemble: every 4th frame while a burst is still filling, at once when it is complete
@@ -1223,8 +1234,13 @@ export class Grass {
     for (const k of this.tiles.keys()) if (!keep.has(k)) this.tiles.delete(k)
   }
 
-  /** One 8 m tile at full density. Deterministic in (tx, tz): the same tile always seeds alike. */
-  private generate(tx: number, tz: number, withBlades: boolean): Tile {
+  /**
+   * One 8 m tile at full density, a cell per step: `update` takes cells until the frame's share of
+   * the budget is spent, so no single tile can own a frame. Deterministic in
+   * (tx, tz) — everything the tile is seeded from is a hash of its own coordinates — so a tile is
+   * the same whether it took one step or eight.
+   */
+  private *generateSteps(tx: number, tz: number, withBlades: boolean): Generator<void, Tile, void> {
     /*
      * A CORRIDOR TILE AWAY FROM EVERY ROAD IS EMPTY, AND ONE QUERY SAYS SO.
      *
@@ -1484,6 +1500,10 @@ export class Grass {
           crank[nc] = hash(cx * 131 + cz * 137 + b * 139)
           nc++
         }
+        // a cell at a time, not a column: a verge cell asks the ground, the road field and the
+        // zoning for each of its clumps, and a column of them was 2 ms — past any share the frame
+        // had left (2026-10-08)
+        yield
       }
     }
     return { hasBlades: withBlades, blades: sortByRank(blades, rank, n, BLADE_F), n, cards: sortByRank(cards, crank, nc, CARD_F), nc, mown: mownCells * 2 > cells, thin, born: this.now }

@@ -223,6 +223,11 @@ export function laneOffset(lane: number, perDir: number, twoWay: boolean): numbe
   return (lane + 0.5 - perDir / 2) * T.LANE_WIDTH
 }
 
+/** how many cars a blast dents: the nearest ones; the rest are thrown undented */
+const BLAST_DENTS = 4
+/** a dent shallower than this share of the weapon's damage is not worth a geometry clone */
+const BLAST_DENT_MIN = 0.1
+
 export class TrafficLayer {
   readonly group = new THREE.Group()
   readonly zones = new Zones()
@@ -634,17 +639,30 @@ export class TrafficLayer {
    */
   blast(at: { x: number; y: number; z: number }, radius: number, impulse: number, lift = 0.55, opts: { damage?: number; weapon?: string } = {}): number {
     let n = 0
+    const r2 = radius * radius
+    const hits: { s: Shown; falloff: number; dx: number; dy: number; dz: number }[] = []
     for (const s of this.shown) {
       if (s.hidden) continue
       const p = s.mesh.position
       let dx = p.x - at.x, dy = p.y + 0.7 - at.y, dz = p.z - at.z
+      if (dx * dx + dz * dz > r2) continue
       const d = Math.hypot(dx, dy, dz)
       const falloff = Math.max(0, 1 - d / radius)
       if (falloff <= 0) continue
       if (d < 1e-3) { dx = 0; dy = 1; dz = 0 } else { dx /= d; dy /= d; dz /= d }
+      hits.push({ s, falloff, dx, dy, dz })
+    }
+    // THE DENTS ARE THE COST OF A BLAST, not the throw: each one clones a car's geometry, bends
+    // it and re-uploads it. A 19 m missile reaches ten cars in the jam, and a car at the rim took a
+    // dent nobody could see — 3–5 ms of cloning per landing, and as much again uploading it
+    // (2026-10-08). So the nearest few are dented and the rest are only thrown.
+    hits.sort((a, b) => b.falloff - a.falloff)
+    for (let i = 0; i < hits.length; i++) {
+      const { s, falloff, dx, dy, dz } = hits[i]
+      const dmg = opts.damage === undefined ? undefined : i < BLAST_DENTS && opts.damage * falloff >= BLAST_DENT_MIN ? opts.damage * falloff : 0
       // the tumble scales with the throw: a nudge that spun a car at full tilt swung its corners
       // into the cars beside it and woke half the jam
-      const hit = this.hitCar(s, { force: impulse * falloff, dir: { x: dx, y: dy, z: dz }, lift, damage: opts.damage === undefined ? undefined : opts.damage * falloff, weapon: opts.weapon ?? 'blast', spin: 0.35 })
+      const hit = this.hitCar(s, { force: impulse * falloff, dir: { x: dx, y: dy, z: dz }, lift, damage: dmg, weapon: opts.weapon ?? 'blast', spin: 0.35 })
       if (hit) n++
     }
     return n

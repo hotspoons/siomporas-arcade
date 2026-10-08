@@ -534,32 +534,37 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   // ---------------------------------------------------------------------------------------------
   const foam = foamMaterial(uniforms)
   interface Bucket {
+    /** the look's name: the material key and the mesh name */
     key: string
+    cell: string
     look: WaterLook
     own: boolean
     lineSources: THREE.BufferGeometry[]
     areaSources: THREE.BufferGeometry[]
-    matLines?: THREE.MeshStandardMaterial
-    matAreas?: THREE.MeshStandardMaterial
     lineMesh?: THREE.Mesh
     areaMesh?: THREE.Mesh
     dirty: boolean
   }
-  // ONE MERGED MESH PER (LOOK, LINES|AREAS), not per waterway or per cell. Crofton has 416 streams
+  // ONE MERGED MESH PER (LOOK, 1 KM CELL, LINES|AREAS), not per waterway. Crofton has 416 streams
   // and 199 ponds, dc-metro five times that: drawn separately that is thousands of draw calls for a
   // few thousand triangles. Bodies naming the same `look` merge; nothing picks an individual stream.
+  // PER CELL, because one bucket per look for the whole world meant a cell arriving with one more
+  // stream re-merged every stream seen on the drive: 16 ms on the frame, growing with the miles
+  // (2026-10-08). The materials stay one per look (`lookMats`): a cell adds a mesh, not a program.
   const buckets = new Map<string, Bucket>()
-  const bucketFor = (name: string | undefined): Bucket => {
+  const lookMats = new Map<string, { lines?: THREE.MeshStandardMaterial; areas?: THREE.MeshStandardMaterial }>()
+  const bucketFor = (name: string | undefined, cell: string): Bucket => {
     const key = name && WATER_LOOK_NAMES.includes(name) ? name : defaultLookName
-    let b = buckets.get(key)
+    const mapKey = `${key}|${cell}`
+    let b = buckets.get(mapKey)
     if (!b) {
-      b = { key, look: lookOf(key), own: key !== defaultLookName, lineSources: [], areaSources: [], dirty: false }
-      buckets.set(key, b)
+      b = { key, cell, look: lookOf(key), own: key !== defaultLookName, lineSources: [], areaSources: [], dirty: false }
+      buckets.set(mapKey, b)
     }
     return b
   }
-  const foamSources: THREE.BufferGeometry[] = []
-  let foamMesh: THREE.Mesh | undefined
+  /** the falls' foam, per cell for the same reason */
+  const foamCells = new Map<string, { sources: THREE.BufferGeometry[]; mesh?: THREE.Mesh; dirty: boolean }>()
   let pending = false
   let lastAdd = 0
 
@@ -613,9 +618,14 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   let nLines = 0, nFalls = 0, nAreas = 0, length = 0
   const add = (layer: WaterLayer | null | undefined) => {
     if (!layer) return
+    // the cell this layer came from, by its first coordinate (site metres): one layer, one cell
+    const first = layer.lines?.find((l) => l.pts.length)?.pts[0] ?? layer.areas?.find((a) => a.ring.length)?.ring[0]
+    const cell = first ? `${Math.floor(first[0] / 1000)},${Math.floor(first[1] / 1000)}` : '0,0'
+    let foamCell = foamCells.get(cell)
+    if (!foamCell) { foamCell = { sources: [], dirty: false }; foamCells.set(cell, foamCell) }
     for (const ln of layer.lines ?? []) {
       if (ln.culvert || ln.pts.length < 2) continue
-      const b = bucketFor(ln.look)
+      const b = bucketFor(ln.look, cell)
       const pts = ln.pts.map(([x, y, z]) => {
         const wz = -y
         const g = groundAt(x, wz)
@@ -633,14 +643,15 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       for (const f of ln.falls ?? []) {
         const seg = pts.slice(f.i0, f.i1 + 1).map((p) => p.clone().setY(p.y + 0.06))
         if (seg.length < 2) continue
-        foamSources.push(ribbon(seg, () => w * (f.kind === 'falls' ? 1.15 : 0.9), 'aFoam', () => 0.3))
+        foamCell.sources.push(ribbon(seg, () => w * (f.kind === 'falls' ? 1.15 : 0.9), 'aFoam', () => 0.3))
+        foamCell.dirty = true
         nFalls++
       }
     }
     const areaWind = waterWind()
     for (const ar of layer.areas ?? []) {
       if (ar.ring.length < 3) continue
-      const b = bucketFor(ar.look)
+      const b = bucketFor(ar.look, cell)
       const sh = new THREE.Shape(ar.ring.map(([x, y]) => new THREE.Vector2(x, y)))
       const geo = new THREE.ShapeGeometry(sh)
       // shape (x, y_site) → world (x, level, −y_site): rotate −90° about X puts local +Y on world −Z
@@ -652,7 +663,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       writeWaterAttr(geo, () => [depth, areaWind.x, areaWind.y])
       b.areaSources.push(geo)
       b.dirty = true
-      placeProbe(ar, geo, b.key)
+      placeProbe(ar, geo, `${b.key}|${b.cell}`)
       nAreas++
     }
     if (probeChanged) { registerBodies(); probeChanged = false }
@@ -687,27 +698,33 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     for (const b of buckets.values()) {
       if (!b.dirty) continue
       b.dirty = false
+      let lm = lookMats.get(b.key)
+      if (!lm) { lm = {}; lookMats.set(b.key, lm) }
       if (b.lineSources.length) {
-        if (!b.matLines) {
-          b.matLines = makeMat(b.look, b.key, b.own)
-          b.matLines.name = `water:streams:${b.key}`
-          streamMats.push(b.matLines)
+        if (!lm.lines) {
+          lm.lines = makeMat(b.look, b.key, b.own)
+          lm.lines.name = `water:streams:${b.key}`
+          streamMats.push(lm.lines)
           // a style chosen before this body arrived dresses it now (makeMat just tracked it)
-          if (lastStyle) { waveMats[waveMats.length - 1].styleColoured = true; dress(b.matLines, lastStyle.stream, Math.min(0.98, T.WATER_OPACITY + lastStyle.opacityBias)) }
+          if (lastStyle) { waveMats[waveMats.length - 1].styleColoured = true; dress(lm.lines, lastStyle.stream, Math.min(0.98, T.WATER_OPACITY + lastStyle.opacityBias)) }
         }
-        b.lineMesh = rebuild(b.lineSources, b.matLines, b.lineMesh, b.matLines.name)
+        b.lineMesh = rebuild(b.lineSources, lm.lines, b.lineMesh, lm.lines.name)
       }
       if (b.areaSources.length) {
-        if (!b.matAreas) {
-          b.matAreas = makeMat(b.look, b.key, b.own, 1.05)
-          b.matAreas.name = `water:areas:${b.key}`
-          stillMats.push(b.matAreas)
-          if (lastStyle) { waveMats[waveMats.length - 1].styleColoured = true; dress(b.matAreas, lastStyle.still, Math.min(1, T.WATER_OPACITY + 0.05 + lastStyle.opacityBias)) }
+        if (!lm.areas) {
+          lm.areas = makeMat(b.look, b.key, b.own, 1.05)
+          lm.areas.name = `water:areas:${b.key}`
+          stillMats.push(lm.areas)
+          if (lastStyle) { waveMats[waveMats.length - 1].styleColoured = true; dress(lm.areas, lastStyle.still, Math.min(1, T.WATER_OPACITY + 0.05 + lastStyle.opacityBias)) }
         }
-        b.areaMesh = rebuild(b.areaSources, b.matAreas, b.areaMesh, b.matAreas.name)
+        b.areaMesh = rebuild(b.areaSources, lm.areas, b.areaMesh, lm.areas.name)
       }
     }
-    if (foamSources.length) foamMesh = rebuild(foamSources, foam, foamMesh, 'water:foam')
+    for (const f of foamCells.values()) {
+      if (!f.dirty || !f.sources.length) continue
+      f.dirty = false
+      f.mesh = rebuild(f.sources, foam, f.mesh, 'water:foam')
+    }
   }
 
   // the whole water for an untiled world (or the home disc a tiled one shipped), built at once
@@ -726,7 +743,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     get areas() { return nAreas },
     get falls() { return nFalls },
     get length_m() { return Math.round(length) },
-    get looks() { return [...buckets.keys()] },
+    get looks() { return [...new Set([...buckets.values()].map((b) => b.key))] },
     setColours,
     setLook,
     add,

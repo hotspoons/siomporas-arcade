@@ -4189,6 +4189,11 @@ if (uLodOn > 0.5) {
     // the eye has moved a way, or tiles have had time to land — so that is when it runs
     const lodPass = { here: -99 as number | null, x: NaN, z: NaN, frame: 0 }
     let lodFrame = 0
+    // the pass itself is spread over frames: the road and house lists grow with every cell the
+    // drive adopts, and over the Beltway the whole walk had reached 3.5–4 ms by the time it fired
+    // every 40 m at speed (2026-10-08) — a dropped frame each time. A cursor walks ~200 a frame.
+    const lodCursor = { roads: 0, houses: 0, active: false, here: null as number | null, zAt: null as ((x: number, north: number) => number | null) | null }
+    const LOD_PER_FRAME = 200
     updateNear = (eye, time, fwd, pitch) => {
       const m0 = performance.now()
       roadCover?.refresh(road, eye)
@@ -4230,17 +4235,27 @@ if (uLodOn > 0.5) {
         built.group.visible = layerOn(built.group)
         lodFrame++
         const due = here !== lodPass.here || !(Math.hypot(eye.x - lodPass.x, eye.z - lodPass.z) < 40) || lodFrame - lodPass.frame >= 20
-        if (due) {
-        lodPass.here = here
-        lodPass.x = eye.x
-        lodPass.z = eye.z
-        lodPass.frame = lodFrame
-        if (T.PYR_ROAD_Z <= 0 || here == null) {
-          for (const c of road.children) c.visible = true
-        } else {
-          for (const c of road.children) {
-            const n = c.children.length
-            if (c.userData.lodN !== n) { c.userData.lodN = n; c.userData.lodCover = undefined }
+        if (due && !lodCursor.active) {
+          lodPass.here = here
+          lodPass.x = eye.x
+          lodPass.z = eye.z
+          lodPass.frame = lodFrame
+          lodCursor.active = true
+          lodCursor.roads = 0
+          lodCursor.houses = 0
+          lodCursor.here = here
+          lodCursor.zAt = zAt
+        }
+        if (lodCursor.active) {
+          const hereP = lodCursor.here
+          const zAtP = lodCursor.zAt!
+          let n = LOD_PER_FRAME
+          const roads = road.children
+          for (; lodCursor.roads < roads.length && n > 0; lodCursor.roads++, n--) {
+            const c = roads[lodCursor.roads]
+            if (T.PYR_ROAD_Z <= 0 || hereP == null) { c.visible = true; continue }
+            const nc = c.children.length
+            if (c.userData.lodN !== nc) { c.userData.lodN = nc; c.userData.lodCover = undefined }
             let cover = c.userData.lodCover as { x: number; north: number; wide: boolean } | undefined
             if (!cover) {
               const bounds = new THREE.Box3().setFromObject(c)
@@ -4250,21 +4265,20 @@ if (uLodOn > 0.5) {
               cover = { x: center.x, north: -center.z, wide: Math.hypot(size.x, size.z) > 700 }
               c.userData.lodCover = cover
             }
-            const z = cover.wide ? here : zAt(cover.x, cover.north)
+            const z = cover.wide ? hereP : zAtP(cover.x, cover.north)
             c.visible = z == null || z >= T.PYR_ROAD_Z
           }
-        }
-        if (T.PYR_HOUSE_Z <= 0) {
-          for (const c of built.group.children) c.visible = true
-        } else {
-          for (const c of built.group.children) {
+          const houses = built.group.children
+          for (; lodCursor.houses < houses.length && n > 0; lodCursor.houses++, n--) {
+            const c = houses[lodCursor.houses]
+            if (T.PYR_HOUSE_Z <= 0) { c.visible = true; continue }
             const x = c.userData.enuX as number | undefined
             const y = c.userData.enuY as number | undefined
             if (x === undefined || y === undefined) { c.visible = true; continue }
-            const z = zAt(x, y)
+            const z = zAtP(x, y)
             c.visible = z == null || z >= T.PYR_HOUSE_Z
           }
-        }
+          if (lodCursor.roads >= roads.length && lodCursor.houses >= houses.length) lodCursor.active = false
         }
       }
       // The overview mesh is the ground before a tile covers the camera. Once one does, drawing

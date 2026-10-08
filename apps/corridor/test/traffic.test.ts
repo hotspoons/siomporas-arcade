@@ -12,7 +12,7 @@ import { Driver, JamGap, SpeedLimit, driveSystem, idm, makeDriver, rng } from '.
 import { DUMB, GREEN, RED, SignalGroup, SignalHead, SignalPrograms, buildSignals, sameAxis, signalSystem, type SignalProgram } from '../src/game/traffic/signals-ecs'
 
 /** a straight road with one signal on it, and `n` cars queued back from the stop line */
-function road(n: number, opts: { obeyRate?: number; seed?: number } = {}) {
+function road(n: number, opts: { obeyRate?: number; seed?: number; inRange?: (x: number, y: number) => boolean } = {}) {
   const aw = new ActorWorld()
   const w = aw.world
   const programs = new SignalPrograms()
@@ -31,7 +31,7 @@ function road(n: number, opts: { obeyRate?: number; seed?: number } = {}) {
     Vehicle.speed[e] = 15
     cars.push(e)
   }
-  aw.add('signals', signalSystem(programs)).add('drive', driveSystem({ heads }))
+  aw.add('signals', signalSystem(programs)).add('drive', driveSystem({ heads, inRange: opts.inRange }))
   return { aw, w, programs, groups, heads, cars }
 }
 
@@ -149,6 +149,40 @@ describe('most people obey, some do not', () => {
       if (Driver.running[w.cars[0]] !== was) { flips++; was = Driver.running[w.cars[0]] }
     }
     expect(flips).toBeLessThanOrEqual(1) // decided once, then held
+  })
+})
+
+describe('the simulation footprint', () => {
+  it('steps the cars it keeps and holds the rest exactly where they were', () => {
+    // Two cars in one lane, front one at s=100, back one at s=91. `inRange` keeps only the front
+    // one: the layer's speed-aware cone does exactly this to the cars beyond the draw distance. The
+    // back car must be HELD — not slowed, not removed — so that when the eye comes back to it, it
+    // is exactly where the road left it and nobody saw it freeze.
+    const w = road(2, { inRange: (_x, y) => y >= 95 })
+    const [front, back] = w.cars
+    const backS = OnRoad.s[back]
+    const backV = Vehicle.speed[back]
+    for (let i = 0; i < 600; i++) {
+      w.aw.tick(STEP_S)
+      project(w)
+    }
+    expect(OnRoad.s[back]).toBe(backS) // held in place, byte for byte
+    expect(Vehicle.speed[back]).toBe(backV)
+    expect(OnRoad.s[front]).toBeGreaterThan(backS + 5) // and the kept car actually drove
+  })
+
+  it('an excluded car is not a leader for a kept one', () => {
+    // the back car is kept and the FRONT car is excluded: with the leader gone from the group the
+    // kept car has open road and accelerates, rather than braking for a car across the boundary.
+    const w = road(2, { inRange: (_x, y) => y < 95 })
+    const [front, back] = w.cars
+    const frontS = OnRoad.s[front]
+    for (let i = 0; i < 600; i++) {
+      w.aw.tick(STEP_S)
+      project(w)
+    }
+    expect(OnRoad.s[front]).toBe(frontS) // excluded: held
+    expect(OnRoad.s[back]).toBeGreaterThan(95) // kept: free to drive
   })
 })
 

@@ -124,6 +124,15 @@ export interface TrafficOpts {
   obstacle?: (x: number, y: number, yaw: number, speed: number) => { gap: number; dv: number } | null
   /** when it says so, nobody sees anybody: no leader, no light, no player. A game mode, and a joke */
   blind?: () => boolean
+  /**
+   * WHICH CARS ARE WORTH SIMULATING THIS STEP. A car outside this returns false and is skipped
+   * entirely: no leader search, no acceleration, no advance along the road. It is not a wreck and
+   * not removed — it simply HOLDS ITS PLACE until the driver comes near it again, which is
+   * invisible because "outside" is measured beyond the draw distance. The caller is the traffic
+   * layer's speed-aware cone (`TRAFFIC_SIM_*`); leaving it undefined simulates every car, which is
+   * what a test or a headless probe wants.
+   */
+  inRange?: (x: number, y: number) => boolean
 }
 
 /**
@@ -144,9 +153,15 @@ export function driveSystem(opts: TrafficOpts) {
     // NEIGHBOURS BY LANE POSITION, not by distance in the plane. Two cars twenty metres apart on
     // opposite carriageways are not following each other, and a plain nearest-neighbour search
     // makes them brake for each other, which looks exactly like a phantom jam.
+    //
+    // CARS OUTSIDE THE SIM CONE ARE NOT IN THE GROUP AT ALL. They are neither driven nor followed,
+    // so a `byChain` list holds only the cars that are being simulated this step — which is also
+    // the list a leader is found in, so nobody brakes for a car across the draw boundary.
+    const inRange = opts.inRange
     const byChain = new Map<number, number[]>()
     for (let i = 0; i < cars.length; i++) {
       const e = cars[i]
+      if (inRange && !inRange(Transform.x[e], Transform.y[e])) continue
       const c = OnRoad.chain[e]
       const list = byChain.get(c)
       if (list) list.push(e)

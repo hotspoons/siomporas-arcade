@@ -387,6 +387,54 @@ export let TRAFFIC_DRAW_M = 700
 export let TRAFFIC_RESPAWN_M = 260
 /** m from the player within which a traffic car has a body in the solver; further, it is a mesh */
 export let TRAFFIC_PHYS_M = 220
+
+/**
+ * THE SIMULATION FOOTPRINT — the same speed-aware morphing cone the grass uses (GRASS_CONE_*), for
+ * traffic, with its own dials.
+ *
+ * A thousand-car jam does not need a thousand cars following their leader every step: at 50 Hz that
+ * is real CPU spent on cars the driver will never see. So the longitudinal sim runs on a CONE around
+ * the eye, not the whole map, and the cone MORPHS with speed exactly as the grass footprint does:
+ * a full circle at rest, tightening toward TRAFFIC_SIM_CONE_DEG as the eye reaches
+ * TRAFFIC_SIM_CONE_SPEED, then further to TRAFFIC_SIM_CONE_DEG_VMAX as it reaches
+ * TRAFFIC_SIM_TIGHTEN_SPEED. Past the half-angle (plus TRAFFIC_SIM_FEATHER) cars are not stepped:
+ * they hold their place on the road, which is invisible because they are also beyond
+ * TRAFFIC_DRAW_M. The wake behind a fast car is the cheap half to drop.
+ *
+ * THE SECOND POINT IS THE HERO, NOT THE TRAFFIC. A car doing 300 mph covers 134 m every second; if
+ * the simulated front only reached a fixed 1.2 km, the hero would leave the live traffic behind and
+ * spend the run catching frozen cars. So the REACH grows with speed too (TRAFFIC_SIM_REACH), and the
+ * closing cone pays for it — a narrower wedge covers the same road with less area. That is what
+ * "support traffic that does not race the hero car at 300 mph" means: the front you simulate must
+ * outrun the front you drive.
+ *
+ * TRAFFIC_SIM_NEAR is a floor under the cone: a circle that is always simulated, whatever the
+ * heading, so nothing inside the draw distance is ever frozen. Keep it >= TRAFFIC_DRAW_M.
+ */
+/** the always-simulated circle around the eye, whatever the heading (m). Keep >= TRAFFIC_DRAW_M */
+export let TRAFFIC_SIM_NEAR = 700
+/** how far ahead the cone reaches at rest, before the speed bias (m) */
+export let TRAFFIC_SIM_RADIUS = 1200
+/** half-angle of the cone ahead of the direction of travel, once moving (degrees) */
+export let TRAFFIC_SIM_CONE_DEG = 70
+/** half-angle at rest: 180 is the all-round circle, so a stopped hero still has a live jam around */
+export let TRAFFIC_SIM_STILL_DEG = 180
+/** and the half-angle it tightens to at TRAFFIC_SIM_TIGHTEN_SPEED — the forward bias */
+export let TRAFFIC_SIM_CONE_DEG_VMAX = 45
+/** eye speed (m/s) at which the cone has fully opened from the circle to TRAFFIC_SIM_CONE_DEG */
+export let TRAFFIC_SIM_CONE_SPEED = 8
+/** eye speed (m/s) at which the cone has tightened all the way to TRAFFIC_SIM_CONE_DEG_VMAX */
+export let TRAFFIC_SIM_TIGHTEN_SPEED = 160
+/** the ramp into TRAFFIC_SIM_CONE_SPEED (m/s), so the shape does not snap */
+export let TRAFFIC_SIM_FADE = 4
+/** degrees past the half-angle that are still simulated, so the edge does not pop */
+export let TRAFFIC_SIM_FEATHER = 12
+/** how much further the cone reaches ahead at full speed: 5 is 5x TRAFFIC_SIM_RADIUS */
+export let TRAFFIC_SIM_REACH = 5
+/** eye speed (m/s) at which the reach bias is fully in — high, so only an extreme hero pays (m/s) */
+export let TRAFFIC_SIM_REACH_SPEED = 90
+/** the ramp into TRAFFIC_SIM_REACH_SPEED (m/s) */
+export let TRAFFIC_SIM_REACH_FADE = 40
 /**
  * Loose wrecks at once. Past this the OLDEST is straightened out, put back on rails and respawned
  * out of sight — Rich wanted the pile-up to go on for ever in a blind-drivers game, and a wreck is
@@ -2478,6 +2526,14 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GUN_SPREAD', () => GUN_SPREAD, (v) => (GUN_SPREAD = v), [0, 0.1], 0.005),
           tune('TRAFFIC_DRAW_M', () => TRAFFIC_DRAW_M, (v) => (TRAFFIC_DRAW_M = v), [100, 3000], 50, 'traffic further than this is simulated, not drawn'),
           tune('TRAFFIC_PHYS_M', () => TRAFFIC_PHYS_M, (v) => (TRAFFIC_PHYS_M = v), [50, 1000], 10, 'traffic further than this has no body in the solver'),
+          tune('TRAFFIC_SIM_NEAR', () => TRAFFIC_SIM_NEAR, (v) => (TRAFFIC_SIM_NEAR = v), [100, 2000], 50, 'the always-simulated circle around the eye (keep >= TRAFFIC_DRAW_M)'),
+          tune('TRAFFIC_SIM_RADIUS', () => TRAFFIC_SIM_RADIUS, (v) => (TRAFFIC_SIM_RADIUS = v), [200, 5000], 50, 'how far the traffic sim cone reaches ahead at rest'),
+          tune('TRAFFIC_SIM_CONE_DEG', () => TRAFFIC_SIM_CONE_DEG, (v) => (TRAFFIC_SIM_CONE_DEG = v), [20, 180], 5, 'half-angle the sim cone opens to once moving'),
+          tune('TRAFFIC_SIM_CONE_DEG_VMAX', () => TRAFFIC_SIM_CONE_DEG_VMAX, (v) => (TRAFFIC_SIM_CONE_DEG_VMAX = v), [10, 180], 5, 'half-angle it tightens to at TRAFFIC_SIM_TIGHTEN_SPEED'),
+          tune('TRAFFIC_SIM_CONE_SPEED', () => TRAFFIC_SIM_CONE_SPEED, (v) => (TRAFFIC_SIM_CONE_SPEED = v), [1, 40], 1, 'eye speed (m/s) at which the cone is fully open'),
+          tune('TRAFFIC_SIM_TIGHTEN_SPEED', () => TRAFFIC_SIM_TIGHTEN_SPEED, (v) => (TRAFFIC_SIM_TIGHTEN_SPEED = v), [20, 200], 5, 'eye speed (m/s) at which the cone is fully tight'),
+          tune('TRAFFIC_SIM_REACH', () => TRAFFIC_SIM_REACH, (v) => (TRAFFIC_SIM_REACH = v), [1, 12], 0.5, 'how much further the sim reaches ahead at full speed (x TRAFFIC_SIM_RADIUS)'),
+          tune('TRAFFIC_SIM_REACH_SPEED', () => TRAFFIC_SIM_REACH_SPEED, (v) => (TRAFFIC_SIM_REACH_SPEED = v), [5, 200], 5, 'eye speed (m/s) at which the reach bias is fully in'),
           tune('TRAFFIC_RESPAWN_M', () => TRAFFIC_RESPAWN_M, (v) => (TRAFFIC_RESPAWN_M = v), [50, 1000], 10, 'a car that ran off its road comes back at least this far away'),
           tune('TRAFFIC_WRECKS_MAX', () => TRAFFIC_WRECKS_MAX, (v) => (TRAFFIC_WRECKS_MAX = v), [1, 400], 1, 'loose wrecks at once; the oldest is recycled into traffic'),
           tune('TRAFFIC_DENTS_MAX', () => TRAFFIC_DENTS_MAX, (v) => (TRAFFIC_DENTS_MAX = v), [0, 400], 1, 'dented cars at once (each holds its own copy of the mesh); the farthest are straightened'),

@@ -222,6 +222,31 @@ export class TrafficLayer {
   player: { x: number; y: number; vx: number; vy: number; length: number } | null = null
   /** where the camera is, in the site frame — what a respawn keeps away from when nobody is driving */
   private eyeSite = { x: 0, y: 0 }
+  /**
+   * THE SIMULATION FOOTPRINT — the speed-aware cone `driveSystem` and `followRoad` cull against,
+   * rebuilt once a frame from the eye's motion. See `TRAFFIC_SIM_*` for the shape. Cars outside it
+   * are not stepped; they hold their place on the road until the eye comes back to them.
+   */
+  private simX = 0
+  private simY = 0
+  /** unit heading of the cone, in the site frame (x east, y north) */
+  private simFx = 1
+  private simFy = 0
+  /** squared radii: the always-on near circle, and the cone's reach */
+  private simNear2 = 0
+  private simReach2 = 0
+  /** cosine of (half-angle + feather); -1 means the all-round circle */
+  private simConeCos = -1
+  /** the eye last frame, for the speed and heading the shape morphs from */
+  private prevEyeX = Number.NaN
+  private prevEyeY = Number.NaN
+  /** live footprint state, for the perf panel and a probe */
+  simSpeedFrac = 0
+  simTightenFrac = 0
+  simConeDeg = 180
+  simReachM = 0
+  /** how many cars were inside the footprint on the last step — the sim's real cost, a probe reads it */
+  simCars = 0
   /** cars that ran off a road and were put back somewhere out of sight; a probe reads it */
   respawned = 0
   /** the closest to the player any respawn has been, m: the proof that none came from thin air */
@@ -341,6 +366,7 @@ export class TrafficLayer {
     this.drive = driveSystem({
       heads: [],
       blind: () => this.blind,
+      inRange: (x, y) => this.inSim(x, y),
       obstacle: (x, y, yaw, speed) => {
         const p = this.player
         if (!p) return null
@@ -581,6 +607,9 @@ export class TrafficLayer {
     for (const s of this.shown) {
       if (s.wrecked) continue
       const e = s.e
+      // outside the sim cone: hold the place on the road, step nothing. It is beyond the draw
+      // distance, so the freeze is invisible, and the step comes back when the eye does.
+      if (!this.inSim(Transform.x[e], Transform.y[e])) continue
       const road = this.roads[OnRoad.chain[e]]
       if (!road) continue
       let at = OnRoad.s[e]
@@ -689,6 +718,66 @@ export class TrafficLayer {
   }
 
   /**
+   * Rebuild the simulation footprint from the eye's motion: the same morphing cone the grass uses
+   * (GRASS_CONE_*), with the traffic's own `TRAFFIC_SIM_*` dials. Called once a frame, before the
+   * fixed steps, so every step of a catch-up burst culls against the same shape.
+   *
+   * The heading is taken from the PLAYER's velocity when there is one, not the eye's, because the
+   * chase camera lags, swings and orbits and a cone aimed down the camera's look would drop the
+   * lane the car is actually driving into. With nobody driving (flying the orbit camera) the eye's
+   * own motion is the only heading there is.
+   */
+  private updateSimCone(dt: number, eye: THREE.Vector3): void {
+    const x = eye.x
+    const y = -eye.z
+    const step = Math.min(0.2, Math.max(1e-3, dt))
+    let speed = 0
+    let fx = this.simFx
+    let fy = this.simFy
+    const p = this.player
+    if (p) {
+      speed = Math.hypot(p.vx, p.vy)
+      if (speed > 0.3) { fx = p.vx / speed; fy = p.vy / speed }
+    } else if (Number.isFinite(this.prevEyeX)) {
+      const ex = x - this.prevEyeX
+      const ey = y - this.prevEyeY
+      speed = Math.hypot(ex, ey) / step
+      if (speed > 0.3) { fx = ex / (speed * step); fy = ey / (speed * step) }
+    }
+    this.prevEyeX = x
+    this.prevEyeY = y
+    this.simX = x
+    this.simY = y
+    this.simFx = fx
+    this.simFy = fy
+    this.simSpeedFrac = THREE.MathUtils.smoothstep(speed, T.TRAFFIC_SIM_CONE_SPEED - Math.max(0.1, T.TRAFFIC_SIM_FADE), Math.max(0.2, T.TRAFFIC_SIM_CONE_SPEED))
+    this.simTightenFrac = T.TRAFFIC_SIM_TIGHTEN_SPEED > T.TRAFFIC_SIM_CONE_SPEED
+      ? THREE.MathUtils.smoothstep(speed, T.TRAFFIC_SIM_CONE_SPEED, T.TRAFFIC_SIM_TIGHTEN_SPEED)
+      : 0
+    const reachFrac = THREE.MathUtils.smoothstep(speed, Math.max(0.2, T.TRAFFIC_SIM_REACH_SPEED - Math.max(0.1, T.TRAFFIC_SIM_REACH_FADE)), Math.max(0.4, T.TRAFFIC_SIM_REACH_SPEED))
+    this.simConeDeg =
+      T.TRAFFIC_SIM_STILL_DEG +
+      (T.TRAFFIC_SIM_CONE_DEG - T.TRAFFIC_SIM_STILL_DEG) * this.simSpeedFrac +
+      (T.TRAFFIC_SIM_CONE_DEG_VMAX - T.TRAFFIC_SIM_CONE_DEG) * this.simTightenFrac
+    this.simReachM = T.TRAFFIC_SIM_RADIUS * (1 + (T.TRAFFIC_SIM_REACH - 1) * reachFrac)
+    this.simConeCos = this.simConeDeg >= 179.5 ? -1 : Math.cos(Math.min(Math.PI, ((this.simConeDeg + T.TRAFFIC_SIM_FEATHER) * Math.PI) / 180))
+    this.simNear2 = T.TRAFFIC_SIM_NEAR * T.TRAFFIC_SIM_NEAR
+    this.simReach2 = this.simReachM * this.simReachM
+  }
+
+  /** Is this car inside the simulation footprint? Everything else holds its place on the road. */
+  private inSim(x: number, y: number): boolean {
+    const dx = x - this.simX
+    const dy = y - this.simY
+    const d2 = dx * dx + dy * dy
+    if (d2 <= this.simNear2) return true
+    if (d2 > this.simReach2) return false
+    if (this.simConeCos <= -1) return true
+    const d = Math.sqrt(d2)
+    return (dx * this.simFx + dy * this.simFy) / d >= this.simConeCos
+  }
+
+  /**
    * LET GO OF DENTS NOBODY CAN SEE. A dented car keeps a private copy of its geometry, and with a
    * four-thousand-car level and an armed player that copy was made for every car ever touched and
    * never given back — the DC metro tab passed 5 GB (Rich, 2026-10-07). A dent on a car beyond
@@ -739,6 +828,11 @@ export class TrafficLayer {
     const t0 = performance.now()
     this.eyeSite.x = eye.x
     this.eyeSite.y = -eye.z
+    // the footprint first: the steps below cull against it, so a catch-up burst all uses one shape
+    this.updateSimCone(dt, eye)
+    let inside = 0
+    for (const s of this.shown) if (this.inSim(Transform.x[s.e], Transform.y[s.e])) inside++
+    this.simCars = inside
     this.sinceReproject += dt
     this.sinceDentSweep += dt
     if (this.dentedCars.size && this.sinceDentSweep > 0.5) { this.sinceDentSweep = 0; this.sweepDents() }

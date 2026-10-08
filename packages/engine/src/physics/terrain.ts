@@ -26,6 +26,13 @@ import type { PhysicsWorld } from './world'
 /** Ground height at a world x, z, or null where there is no data. */
 export type HeightAt = (x: number, z: number) => number | null
 
+/**
+ * How far a tile's stored sample may differ from the live ground function before the tile is
+ * considered stale and rebuilt, metres. An unchanged field matches exactly; a road that streamed in
+ * moves it by a metre or more. The slack only absorbs the odd centimetre a re-slide can wobble.
+ */
+const STALE_M = 0.25
+
 export interface TerrainOptions {
   /** metres across one tile */
   tile?: number
@@ -44,6 +51,12 @@ interface Tile {
   collider: Collider
   cx: number
   cz: number
+  /** tile origin (its lower corner in x,z), so a stored sample's world point can be recomputed */
+  x0: number
+  z0: number
+  /** the sampled heights and their validity, kept so a tile can be checked against the live ground */
+  heights: Float32Array
+  has: Uint8Array
 }
 
 /**
@@ -59,7 +72,7 @@ export class Terrain {
   private phys: PhysicsWorld
   private height: HeightAt
   /** what a probe reads: how many tiles exist, and how many were built or dropped last update */
-  readonly stats = { tiles: 0, built: 0, dropped: 0, skipped: 0 }
+  readonly stats = { tiles: 0, built: 0, dropped: 0, skipped: 0, rebuilt: 0 }
 
   constructor(phys: PhysicsWorld, height: HeightAt, opts: TerrainOptions = {}) {
     this.phys = phys
@@ -84,6 +97,7 @@ export class Terrain {
     const { tile, radius } = this.opts
     this.stats.built = 0
     this.stats.dropped = 0
+    this.stats.rebuilt = 0
     const i0 = Math.floor((x - radius) / tile)
     const i1 = Math.floor((x + radius) / tile)
     const j0 = Math.floor((z - radius) / tile)
@@ -107,6 +121,21 @@ export class Terrain {
       if (this.stats.built >= budget) break
       if (this.build(t.i, t.j)) this.stats.built++
       else this.stats.skipped++
+    }
+    /*
+     * A TILE BUILT BEFORE A ROAD STREAMED IN IS STALE, and the car — standing on the heightfield —
+     * sinks through asphalt that is drawn at the true height (Rich, 2026-10-07, "drop through the
+     * asphalt and grass onto the underlying terrain"). The corridor's ground is live: the spine
+     * window slides and branch cells adopt as you drive. Re-check the tile the wheel is over against
+     * the function it was built from and rebuild it in place when the ground has moved under it.
+     * Only that one tile, and only when it has actually changed, so this is a rare synchronous
+     * rebuild rather than a per-frame cost — and it happens before the step, with the new collider
+     * registered before the old one is removed, so the ground is never absent under the wheels.
+     */
+    const ci = Math.floor(x / tile), cj = Math.floor(z / tile)
+    const here = this.tiles.get(`${ci},${cj}`)
+    if (here && this.stale(here, x, z)) {
+      if (this.build(ci, cj)) this.stats.rebuilt++
     }
     for (const [key, t] of this.tiles) {
       // hysteresis: a tile is dropped only once it is a whole tile past the radius, so driving back
@@ -170,8 +199,45 @@ export class Terrain {
     const desc = R.ColliderDesc.heightfield(cells, cells, heights, { x: tile, y: 1, z: tile }).setFriction(friction)
     this.phys.describe(desc, 'terrain', { events: false })
     const collider = this.phys.world.createCollider(desc, body)
-    this.tiles.set(`${i},${j}`, { key: `${i},${j}`, body, collider, cx: x0 + tile / 2, cz: z0 + tile / 2 })
+    const key = `${i},${j}`
+    // A rebuild replaces a live tile; drop the old body AFTER the new one exists so the ground under
+    // the wheels is never absent, not even for the rest of this call.
+    const existing = this.tiles.get(key)
+    this.tiles.set(key, { key, body, collider, cx: x0 + tile / 2, cz: z0 + tile / 2, x0, z0, heights, has })
+    if (existing) this.phys.world.removeRigidBody(existing.body)
     return true
+  }
+
+  /**
+   * Has the ground under this tile moved since it was built?
+   *
+   * The physics ground is `site.physGroundAt` — a FUNCTION, not a bake — and the corridor feeds it
+   * new roads as they stream in (the spine window slides, branch cells adopt). A tile sampled before
+   * one arrived holds the bare earth where the drawn surface is now pavement, and the car, standing
+   * on the heightfield, sinks through it. Re-sample the tile's OWN grid points and compare them to
+   * what it stored: an unchanged field matches to the bit, a road that appeared does not, and
+   * because the comparison is at the stored coordinates there is no interpolation error to trip on.
+   */
+  private stale(t: Tile, x: number, z: number): boolean {
+    const { tile, cells } = this.opts
+    const n = cells + 1
+    const a0 = Math.min(cells, Math.max(0, Math.floor(((x - t.x0) / tile) * cells)))
+    const b0 = Math.min(cells, Math.max(0, Math.floor(((z - t.z0) / tile) * cells)))
+    // +/- 2 cells: a couple of metres, enough to include the wheels when the body centre is between
+    // samples and the ground a frame ahead at speed. Wider would be a per-frame cost for ground the
+    // car is not on; narrower would miss the front axle on a fast approach.
+    for (let da = -2; da <= 2; da++) {
+      for (let db = -2; db <= 2; db++) {
+        const a = Math.min(cells, Math.max(0, a0 + da))
+        const b = Math.min(cells, Math.max(0, b0 + db))
+        const k = a * n + b
+        if (!t.has[k]) continue
+        const h = this.height(t.x0 + (a / cells) * tile, t.z0 + (b / cells) * tile)
+        if (h === null || !Number.isFinite(h)) continue
+        if (Math.abs(h - t.heights[k]) > STALE_M) return true
+      }
+    }
+    return false
   }
 
   /** Throw every tile away — a new site, or a bake that changed under us. */

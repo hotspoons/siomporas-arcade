@@ -88,6 +88,29 @@ describe('terrain', () => {
     expect(t.stats.skipped).toBeGreaterThan(0)
     phys.free()
   })
+
+  it('rebuilds the tile under the eye when a road streams in beneath it', () => {
+    const phys = new PhysicsWorld()
+    // the corridor's ground is live: this stands in for a branch cell adopting, or the spine
+    // window sliding, under a car that is already parked on that tile
+    let road = 0
+    const t = new Terrain(phys, () => road, { tile: 64, cells: 16, radius: 100 })
+    for (let i = 0; i < 30; i++) t.update(0, 0, 8)
+    expect(groundUnder(phys, 0, 0)).toBeCloseTo(0, 1)
+    // the road appears a couple of metres up — the heightfield must follow, or the car sinks to 0
+    road = 2.5
+    t.update(0, 0, 0)
+    expect(t.stats.rebuilt).toBe(1)
+    expect(groundUnder(phys, 0, 0)).toBeCloseTo(2.5, 1)
+    // once it agrees, it is left alone — no per-frame rebuild
+    t.update(0, 0, 0)
+    expect(t.stats.rebuilt).toBe(0)
+    // a wobble smaller than the threshold is not a streamed road
+    road = 2.5 + 0.1
+    t.update(0, 0, 0)
+    expect(t.stats.rebuilt).toBe(0)
+    phys.free()
+  })
 })
 
 describe('static things', () => {

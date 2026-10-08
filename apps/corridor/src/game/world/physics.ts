@@ -787,6 +787,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
         tiles: terrain.stats.tiles,
         built: terrain.stats.built,
         skipped: terrain.stats.skipped,
+        rebuilt: terrain.stats.rebuilt,
         trees: trees.size,
         props: standing.size,
         catalogued: props?.length ?? 0,

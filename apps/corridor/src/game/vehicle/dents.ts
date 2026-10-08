@@ -35,8 +35,8 @@ let live = 0
 const MAX_VERTS = 200_000
 /** ms between dents on one object: a crash still lands several, a resting pile lands none */
 const DENT_EVERY_MS = 90
-/** meshes whose normals are recomputed per frame */
-const FLUSH_PER_FRAME = 2
+/** ms of normal recomputes and uploads a frame; at least one mesh goes whatever it costs */
+const FLUSH_MS_PER_FRAME = 1.5
 
 /**
  * Dent every mesh of `root` around an impact. `intoOtherSide` is true when this object belongs to
@@ -56,6 +56,12 @@ export function dentObject(root: THREE.Object3D, im: Impact, intoOtherSide: bool
     if (m.geometry.attributes.position.count > MAX_VERTS) return
     let d = dented.get(m)
     if (!d) {
+      // DENT THE COPY THE DETAIL LEVEL WANTS. A car that has just come into range wears its full
+      // geometry until the next ranking pass hands it the simplified copy, and a dent in that
+      // window cloned the full 101k-vertex car and pinned it there (setDetail leaves a dented mesh
+      // alone): 7–20 ms a flush, again (2026-10-08). If the copy exists, wear it first.
+      const ud = m.userData as { lodLow?: THREE.BufferGeometry; lodFull?: THREE.BufferGeometry; lodWant?: number }
+      if (ud.lodLow && ud.lodWant !== undefined && ud.lodWant < 1 && m.geometry === ud.lodFull) m.geometry = ud.lodLow
       d = new Deformable(m)
       dented.set(m, d)
       live++
@@ -72,8 +78,9 @@ export function dentObject(root: THREE.Object3D, im: Impact, intoOtherSide: bool
 /** Push this frame's dents to the GPU. Once per frame, from the main loop. Returns how many went. */
 export function flushDents(): number {
   let n = 0
+  const deadline = performance.now() + FLUSH_MS_PER_FRAME
   for (const d of pending) {
-    if (n >= FLUSH_PER_FRAME) break
+    if (n > 0 && performance.now() >= deadline) break
     pending.delete(d)
     if (d.flush()) n++
   }

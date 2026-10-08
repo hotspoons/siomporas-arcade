@@ -600,7 +600,7 @@ export function treesFromCanopy(
      */
     seedM?: number
   } = {},
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number; pump: { cells: number; measured: number; placed: number; measureMaxMs: number; ms: number } } } {
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number; pump: { cells: number; measured: number; placed: number; measureMaxMs: number; nextMs: number; ms: number } } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
@@ -677,7 +677,7 @@ export function treesFromCanopy(
   /** a tree cell that did not fit in the budget; tried again before the cursor moves on */
   let hold: { i: number; j: number; x0: number; y0: number } | null = null
   /** what the last `pump` did: cells walked, cells measured, trees placed, the slowest measure, ms */
-  const pumpStats = { cells: 0, measured: 0, placed: 0, measureMaxMs: 0, ms: 0 }
+  const pumpStats = { cells: 0, measured: 0, placed: 0, measureMaxMs: 0, nextMs: 0, ms: 0 }
   const tally = () => {
     liveCount = 0
     spareCount = 0
@@ -881,13 +881,16 @@ export function treesFromCanopy(
     let placed = 0
     let measured = 0
     let measureMax = 0
+    let nextMs = 0
     const pumpT0 = performance.now()
     while ((hold || scan) && placed < 480) {
       // every fourth cell, not every thirty-second: a cell asks the canopy, the road field, the
       // species raster and the ground, ~150 µs together, and thirty-two of them pushed a 0.75 ms
       // share to 6 ms (2026-10-08)
       if ((n & 3) === 0 && performance.now() >= deadline) break
+      const c0 = performance.now()
       const c = hold ?? nextCell()
+      nextMs += performance.now() - c0
       hold = null
       n++
       if (!c) break
@@ -925,6 +928,7 @@ export function treesFromCanopy(
     pumpStats.measured = measured
     pumpStats.placed = placed
     pumpStats.measureMaxMs = measureMax
+    pumpStats.nextMs = nextMs
     pumpStats.ms = performance.now() - pumpT0
     if (!scan && !hold && settled) {
       settled = [centre[0], centre[1]]

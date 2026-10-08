@@ -1063,8 +1063,13 @@ export class TrafficLayer {
    * all go by `mesh.position`.
    */
   private attach(s: Shown, on: boolean): void {
-    if (on) { if (s.mesh.parent !== this.group) this.group.add(s.mesh) }
-    else if (s.mesh.parent) s.mesh.removeFromParent()
+    if (on) {
+      if (s.mesh.parent !== this.group) this.group.add(s.mesh)
+      // a car never ranked wears its full geometry until the next ranking pass — up to ten frames
+      // of a 118k-triangle car, and a dent in that window cloned all of it. Low detail at once;
+      // the ranking promotes the nearest few afterwards.
+      if (s.lodWant === undefined) { s.lodWant = T.LOD_TRAFFIC_RATIO; setDetail(s.mesh, s.lodWant) }
+    } else if (s.mesh.parent) s.mesh.removeFromParent()
   }
 
   private placeCalls = 0

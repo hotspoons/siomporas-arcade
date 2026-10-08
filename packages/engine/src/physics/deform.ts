@@ -76,6 +76,8 @@ export const DEFORM_DEFAULTS: Required<DeformOptions> = {
 export class Deformable {
   readonly mesh: Mesh
   private geo: BufferGeometry
+  /** the geometry the mesh wore before the clone — shared with every other car of this model */
+  private readonly shared: BufferGeometry
   private readonly opts: Required<DeformOptions>
   /** the shape it was born with, so a repair is a copy and not a reload */
   private readonly rest: Float32Array
@@ -92,6 +94,7 @@ export class Deformable {
     this.opts = { ...DEFORM_DEFAULTS, ...opts }
     // CLONE. Three shares geometry between meshes as a matter of course, and a dent applied to a
     // shared geometry appears on every car using it — including the ones parked two streets away.
+    this.shared = mesh.geometry
     this.geo = mesh.geometry.clone()
     mesh.geometry = this.geo
     const pos = this.geo.getAttribute('position')
@@ -234,6 +237,23 @@ export class Deformable {
     this.damage = 0
     this.dirty = true
     this.flush()
+  }
+
+  /**
+   * Give the dent back: the mesh wears its shared, undented geometry again and the clone is freed.
+   *
+   * A Deformable is three copies of the mesh's vertices (the clone, `rest`, `moved`) plus the GPU
+   * buffers the renderer made for the clone — and the renderer holds a geometry it has drawn until
+   * that geometry's `dispose` event, so a clone that is merely dropped is never collected, on
+   * either side. Four thousand traffic cars that each took one knock was gigabytes (Rich,
+   * 2026-10-07, the DC metro level). A repair is the same thing: the shared geometry IS the rest
+   * shape. Unusable afterwards; make a new one for the next knock.
+   */
+  dispose(): void {
+    if (this.mesh.geometry === this.geo) this.mesh.geometry = this.shared
+    this.geo.dispose()
+    this.damage = 0
+    this.dirty = false
   }
 }
 

@@ -27,7 +27,7 @@ import { addComponent } from 'bitecs'
 import { ActorWorld, setPhysical, spawnVehicle } from '../actors/actorworld'
 import { hasComponent, removeComponent } from 'bitecs'
 import { Driver } from './traffic'
-import { dentObject, repairObject } from '../vehicle/dents'
+import { dentObject, releaseObject, repairObject } from '../vehicle/dents'
 import type { Impact } from '@apex/engine/physics/world'
 import type { TrafficBody } from '../world/physics'
 import { Doomed, OnRoad, Transform, Vehicle } from '../actors/actors'
@@ -230,6 +230,13 @@ export class TrafficLayer {
   parked = 0
   /** the loose wrecks, oldest first; past `TRAFFIC_WRECKS_MAX` the oldest is recycled */
   private wrecks: Shown[] = []
+  /**
+   * Cars wearing a dent clone. A dent is a private copy of the car's geometry (three copies of its
+   * vertices and the GPU buffers), so this set is what the traffic costs in memory beyond the
+   * shared models; `sweepDents` keeps it near the player and under `TRAFFIC_DENTS_MAX`.
+   */
+  private dentedCars = new Set<Shown>()
+  private sinceDentSweep = 0
   /** wrecks straightened out and sent back into traffic; a probe reads it */
   recycled = 0
   /** cars knocked loose, ever: `woken - recycled` is what is loose now */
@@ -393,8 +400,10 @@ export class TrafficLayer {
     for (const s of this.shown) {
       addComponent(this.actors.world, s.e, Doomed)
       s.body?.free()
+      releaseObject(s.mesh)
       s.mesh.removeFromParent()
     }
+    this.dentedCars.clear()
     this.shown = []
     this.wrecks = []
     this.byCollider.clear()
@@ -448,7 +457,9 @@ export class TrafficLayer {
     for (const [s, other] of [[a, true], [b, false]] as const) {
       if (!s) continue
       if (im.impulse >= T.TRAFFIC_WAKE_NS) this.wake(s, 'impact', im.impulse)
-      this.stats.dents += dentObject(s.mesh, im, !other)
+      const n = dentObject(s.mesh, im, !other)
+      if (n) this.dentedCars.add(s)
+      this.stats.dents += n
     }
   }
 
@@ -485,6 +496,7 @@ export class TrafficLayer {
     this.recycled++
     s.body.rest()
     repairObject(s.mesh)
+    this.dentedCars.delete(s)
     s.mesh.rotation.set(0, 0, 0)
     const e = s.e
     makeDriver(this.actors.world, e, this.rand, { obeyRate: s.obey })
@@ -669,11 +681,49 @@ export class TrafficLayer {
   private sinceReproject = 0
 
   /** what the last frame cost, ms, by part — for the perf panel and the bridge */
-  readonly stats = { actorsMs: 0, placeMs: 0, steps: 0, systems: {} as Record<string, number>, dents: 0, impacts: 0 }
+  readonly stats = { actorsMs: 0, placeMs: 0, steps: 0, systems: {} as Record<string, number>, dents: 0, dentsReleased: 0, impacts: 0 }
   /** 0 day, 1 full night. Beams are only drawn on the nearest handful of cars. */
   night = 0
   setNight(n: number): void {
     this.night = n
+  }
+
+  /**
+   * LET GO OF DENTS NOBODY CAN SEE. A dented car keeps a private copy of its geometry, and with a
+   * four-thousand-car level and an armed player that copy was made for every car ever touched and
+   * never given back — the DC metro tab passed 5 GB (Rich, 2026-10-07). A dent on a car beyond
+   * `TRAFFIC_DENTS_KEEP_M` from the eye, or hidden for a respawn, is invisible: release it. Past
+   * `TRAFFIC_DENTS_MAX` the farthest go too, so a pile-up at the player's feet is bounded as well.
+   * A released car is whole again when it next comes into view, which reads as the body shop.
+   */
+  private sweepDents(): void {
+    const ex = this.eyeSite.x
+    const ey = this.eyeSite.y
+    const keep2 = T.TRAFFIC_DENTS_KEEP_M * T.TRAFFIC_DENTS_KEEP_M
+    const near: { s: Shown; d2: number }[] = []
+    for (const s of this.dentedCars) {
+      const dx = s.mesh.position.x - ex
+      const dy = -s.mesh.position.z - ey
+      const d2 = dx * dx + dy * dy
+      if (s.hidden || d2 > keep2) {
+        releaseObject(s.mesh)
+        this.dentedCars.delete(s)
+        this.stats.dentsReleased++
+      } else near.push({ s, d2 })
+    }
+    const max = Math.max(0, Math.round(T.TRAFFIC_DENTS_MAX))
+    if (near.length <= max) return
+    near.sort((a, b) => b.d2 - a.d2)
+    for (let i = 0; i < near.length - max; i++) {
+      releaseObject(near[i].s.mesh)
+      this.dentedCars.delete(near[i].s)
+      this.stats.dentsReleased++
+    }
+  }
+
+  /** cars wearing a dent clone right now — a probe reads it */
+  get dented(): number {
+    return this.dentedCars.size
   }
 
   /** Step the simulation and put every car where it now is. */
@@ -690,6 +740,8 @@ export class TrafficLayer {
     this.eyeSite.x = eye.x
     this.eyeSite.y = -eye.z
     this.sinceReproject += dt
+    this.sinceDentSweep += dt
+    if (this.dentedCars.size && this.sinceDentSweep > 0.5) { this.sinceDentSweep = 0; this.sweepDents() }
     if (this.wrecked && this.sinceReproject > 0.5) { this.sinceReproject = 0; this.reprojectWrecks() }
     this.stats.steps = this.actors.tick(dt)
     const t1 = performance.now()
@@ -908,8 +960,10 @@ export class TrafficLayer {
     this.offImpact = null
     for (const s of this.shown) {
       s.body?.free()
+      releaseObject(s.mesh)
       s.mesh.removeFromParent()
     }
+    this.dentedCars.clear()
     this.shown = []
     this.wrecks = []
     this.byCollider.clear()

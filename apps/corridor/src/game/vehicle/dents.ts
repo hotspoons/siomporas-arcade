@@ -28,6 +28,8 @@ const dented = new WeakMap<THREE.Mesh, Deformable>()
 const lastDent = new WeakMap<THREE.Object3D, number>()
 /** meshes with a dent that has not reached the GPU yet */
 const pending = new Set<Deformable>()
+/** Deformables alive (made and not yet released): each is a full copy of a mesh, ×3, plus its GPU buffers */
+let live = 0
 
 /** How many vertices a mesh may have and still be dented; a reconstruction is under it. */
 const MAX_VERTS = 200_000
@@ -56,6 +58,7 @@ export function dentObject(root: THREE.Object3D, im: Impact, intoOtherSide: bool
     if (!d) {
       d = new Deformable(m)
       dented.set(m, d)
+      live++
     }
     if (d.apply(im, intoOtherSide)) {
       n++
@@ -77,18 +80,35 @@ export function flushDents(): number {
   return n
 }
 
-/** Straighten every dented mesh under `root`: the recycled wreck, the R key. Returns how many. */
-export function repairObject(root: THREE.Object3D): number {
+/**
+ * Straighten every dented mesh under `root` and FREE its dent: the recycled wreck, the R key, a
+ * car that left the player's sight. The mesh goes back to the shared geometry it was cloned from,
+ * which is exactly the undented shape, and the clone and its GPU buffers are released (see
+ * `Deformable.dispose`). Returns how many meshes were released.
+ */
+export function releaseObject(root: THREE.Object3D): number {
   let n = 0
   root.traverse((o) => {
-    const d = dented.get(o as THREE.Mesh)
+    const m = o as THREE.Mesh
+    const d = dented.get(m)
     if (!d) return
-    if (!d.damage && !d.pending) return
-    d.repair()
+    d.dispose()
+    dented.delete(m)
+    live--
     pending.delete(d)
     n++
   })
   return n
+}
+
+/** Straighten every dented mesh under `root`. A release: a repaired car carries no clone. */
+export function repairObject(root: THREE.Object3D): number {
+  return releaseObject(root)
+}
+
+/** how many meshes carry a dent clone right now — the bound the traffic layer holds, for a probe */
+export function dentedMeshes(): number {
+  return live
 }
 
 /** how many meshes are waiting for a flush — for a probe */

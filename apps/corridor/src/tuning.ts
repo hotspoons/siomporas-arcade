@@ -393,6 +393,14 @@ export let TRAFFIC_PHYS_M = 220
  * a dynamic body plus a 130k-vertex mesh drawn at full detail, so a pile of hundreds was 13 fps.
  */
 export let TRAFFIC_WRECKS_MAX = 40
+/**
+ * DENTS ARE MEMORY. A dented traffic car carries a private copy of its geometry — three copies of
+ * its vertices plus GPU buffers, ~6-8 MB for a 130k-vertex reconstruction — and on a 4000-car
+ * level nothing gave them back (the DC metro tab passed 5 GB). A dent farther than KEEP_M from the
+ * eye is released (the car is whole when you next see it); past MAX the farthest go first.
+ */
+export let TRAFFIC_DENTS_KEEP_M = 600
+export let TRAFFIC_DENTS_MAX = 60
 /** a traffic car hit harder than this (N·s) stops being driven and becomes a loose body */
 export let TRAFFIC_WAKE_NS = 8000
 /** the missile: how fast it leaves, how far its blast reaches, and how hard (m/s given to a car at the centre) */
@@ -2472,6 +2480,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TRAFFIC_PHYS_M', () => TRAFFIC_PHYS_M, (v) => (TRAFFIC_PHYS_M = v), [50, 1000], 10, 'traffic further than this has no body in the solver'),
           tune('TRAFFIC_RESPAWN_M', () => TRAFFIC_RESPAWN_M, (v) => (TRAFFIC_RESPAWN_M = v), [50, 1000], 10, 'a car that ran off its road comes back at least this far away'),
           tune('TRAFFIC_WRECKS_MAX', () => TRAFFIC_WRECKS_MAX, (v) => (TRAFFIC_WRECKS_MAX = v), [1, 400], 1, 'loose wrecks at once; the oldest is recycled into traffic'),
+          tune('TRAFFIC_DENTS_MAX', () => TRAFFIC_DENTS_MAX, (v) => (TRAFFIC_DENTS_MAX = v), [0, 400], 1, 'dented cars at once (each holds its own copy of the mesh); the farthest are straightened'),
+          tune('TRAFFIC_DENTS_KEEP_M', () => TRAFFIC_DENTS_KEEP_M, (v) => (TRAFFIC_DENTS_KEEP_M = v), [50, 3000], 50, 'a dent farther than this from the eye is released'),
         ],
       },
       {

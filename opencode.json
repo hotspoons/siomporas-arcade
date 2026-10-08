@@ -1,0 +1,21 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    
+    "model": "chungus/deepseek/deepseek-v4.1-flash", 
+  
+    "provider": {
+      "chungus": {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "Chungus",
+        "options": {
+          "baseURL": "http://chungus.basedweights.com:8000/v1",
+          "apiKey": "your-api-key"
+        },
+        "models": {
+          "deepseek/deepseek-v4.1-flash": {
+            "name": "DeepSeek V4.1 Flash"
+          }
+        }
+      }
+    }
+  }

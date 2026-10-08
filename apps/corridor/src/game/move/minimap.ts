@@ -17,27 +17,19 @@
 // the browser had, and the size you drag it to is remembered in this browser.
 import { DATA_BASE, type Manifest } from '../../world/site'
 import { button } from '../../ui/shell'
+import { enuProjector, siteProjector, utmProjector } from './siteproj'
 
-interface Road {
-  pts: Float32Array // site x,y pairs
-  cls: string
-  name?: string
-}
-
-const CLASS_STYLE: Record<string, { w: number; c: string; minPxPerM: number }> = {
-  motorway: { w: 4, c: '#ffb648', minPxPerM: 0 },
-  trunk: { w: 3.5, c: '#ffd07a', minPxPerM: 0 },
-  primary: { w: 3, c: '#ffe8a8', minPxPerM: 0 },
-  secondary: { w: 2.5, c: '#ffffff', minPxPerM: 0.02 },
-  tertiary: { w: 2, c: '#e6e6e6', minPxPerM: 0.05 },
-  motorway_link: { w: 2, c: '#ffb648', minPxPerM: 0.05 },
-  residential: { w: 1.5, c: '#c9c9c9', minPxPerM: 0.12 },
-  unclassified: { w: 1.5, c: '#c9c9c9', minPxPerM: 0.12 },
-  service: { w: 1, c: '#9a9a9a', minPxPerM: 0.3 },
-  track: { w: 1, c: '#8a7a5a', minPxPerM: 0.3 },
-  railway: { w: 2, c: '#7a5aa0', minPxPerM: 0.02 },
-  waterway: { w: 1.5, c: '#5a8ad0', minPxPerM: 0.05 },
-}
+/**
+ * THE LINEWORK IS TILED, IN A WORKER (minimap.worker.ts). Every other frame this used to stroke every
+ * road in the world and every carriageway streamed so far — a sampled profile put it at 23.6% of the
+ * main thread (Rich, 2026-10-08). Now the worker rasterises each map tile once and the map composites
+ * the few in view. Tile scales step by √2 from TILE_BASE px/m, so a tile is never stretched past 1.41×.
+ */
+const TILE_PX = 256
+const TILE_BASE = 0.02
+const TILE_STEP = Math.SQRT2
+/** bitmaps kept; a full-screen map at 2560×1440 needs ~60 */
+const TILE_CACHE = 96
 
 const SIZE_KEY = 'apex-corridor-minimap-size'
 const MIN = 160
@@ -71,9 +63,15 @@ export class MiniMap {
    * wrote for exactly this purpose, and the 3D world has been using it all along (RasterFrame).
    */
   private imgQuad: { tl: [number, number]; tr: [number, number]; bl: [number, number] } | null = null
-  private roads: Road[] = []
+  /** the road tiles: rendered in the worker, composited here */
+  private worker: Worker | null = null
+  private tiles = new Map<string, ImageBitmap>()
+  private pending = new Map<string, number>()
+  private reqKey = new Map<number, string>()
+  private reqSeq = 0
+  private sentSiblings = 0
+  private lastMarker: { x: number; y: number; yaw: number } | null = null
   private spine: Float32Array
-  private siblings: Float32Array[]
   private pxPerM = 0.25 // zoom
   private centre = { x: 0, y: 0 } // site frame
   private follow = true
@@ -161,9 +159,15 @@ export class MiniMap {
     this.el.append(this.canvas, locate, this.expandBtn, this.grip)
     parent.append(this.el)
     this.spine = new Float32Array(manifest.spine.coords.flatMap(([x, y]) => [x, y]))
-    // `siblings` grows as a tiled world streams its carriageways (`manifest.siblings` is the running
-    // view); the non-tiled path is complete at construction. `refreshSiblings` appends the new ones.
-    this.siblings = []
+    // `manifest.siblings` grows as a tiled world streams its carriageways; `refreshSiblings` hands the
+    // new ones to the worker, which keeps them — this thread holds no copy.
+    try {
+      this.worker = new Worker(new URL('./minimap.worker.ts', import.meta.url), { type: 'module' })
+      this.worker.onmessage = (e) => this.onWorker(e.data)
+      this.worker.postMessage({ type: 'lines', layer: 'spine', lines: [this.spine] })
+    } catch (e) {
+      console.warn('minimap: no worker, so no road linework', e)
+    }
     this.refreshSiblings()
 
     // the remembered size, then let the CSS resize handle change it from there
@@ -340,50 +344,59 @@ export class MiniMap {
       }
       img.src = `${DATA_BASE}/sites/${this.manifest.slug}/web/${L.file}`
     }
-    try {
-      // context.json is the bake's compact projection of osm.geojson: class + coords only, tens of
-      // kB instead of 389 MB. Fall back to the raw extract for sites baked before it existed.
-      const fr = this.manifest.frame as { epsg: number; origin: [number, number]; kind?: string; anchor?: { lon: number; lat: number; h?: number } }
-      // WHICH METRES does this manifest hold? `frame.kind` is the only thing that says, and
-      // guessing wrong rotates the overlay by the grid convergence — measured 12 m mean and 30 m
-      // worst against the ENU bakes, which looks exactly like the imagery offset Rich chased for
-      // hours. ENU is true north about the site anchor; the old bakes are UTM minus the origin.
-      const proj = fr.kind === 'enu' && fr.anchor ? enuProjector(fr.anchor.lon, fr.anchor.lat, fr.anchor.h ?? 0) : utmProjector(fr.epsg, fr.origin[0], fr.origin[1])
-      const push = (coords: number[][], cls: string, name?: string) => {
-        const pts = new Float32Array(coords.length * 2)
-        coords.forEach(([lon, lat], i) => {
-          const [x, y] = proj(lon, lat)
-          pts[i * 2] = x
-          pts[i * 2 + 1] = y
-        })
-        this.roads.push({ pts, cls, name })
-      }
-      const rc = await fetch(`${DATA_BASE}/sites/${this.manifest.slug}/context.json`, { cache: 'force-cache' })
-      if (rc.ok) {
-        const ctx = (await rc.json()) as { roads?: { cls: string; name?: string | null; coords: number[][] }[] }
-        for (const rd of ctx.roads ?? []) {
-          if (!(rd.cls in CLASS_STYLE)) continue
-          push(rd.coords, rd.cls, rd.name ?? undefined)
-        }
-        this.draw(null)
-        return
-      }
-      const r = await fetch(`${DATA_BASE}/sites/${this.manifest.slug}/osm.geojson`, { cache: 'force-cache' })
-      if (!r.ok) return
-      const gj = (await r.json()) as { features: { geometry: { type: string; coordinates: number[][] }; properties: Record<string, string> }[] }
-      // osm.geojson is WGS84; project with the site's frame. The manifest gives the origin in UTM;
-      // a local equirectangular fit is accurate to well under a metre over a 6 km corridor.
-      for (const f of gj.features) {
-        if (f.geometry.type !== 'LineString') continue
-        const p = f.properties
-        const cls = p.highway ?? (p.railway ? 'railway' : p.waterway ? 'waterway' : null)
-        if (!cls || !(cls in CLASS_STYLE)) continue
-        push(f.geometry.coordinates, cls, p.name ?? p.ref)
-      }
-      this.draw(null)
-    } catch {
-      /* no roads layer */
+    // the roads: the worker fetches, parses and projects them (context.json, or the raw extract for
+    // a site baked before it) and draws them into tiles — none of it on this thread
+    this.worker?.postMessage({
+      type: 'load',
+      url: new URL(`${DATA_BASE}/sites/${this.manifest.slug}/context.json`, location.href).href,
+      fallback: new URL(`${DATA_BASE}/sites/${this.manifest.slug}/osm.geojson`, location.href).href,
+      frame: this.manifest.frame,
+    })
+  }
+
+  /** What the worker sends back: the roads are in (every tile is stale), or one tile. */
+  private onWorker(msg: { type: string; id?: number; bitmap?: ImageBitmap; roads?: number; message?: string }) {
+    if (msg.type === 'ready') {
+      this.clearTiles()
+      this.paint(this.lastMarker)
+      return
     }
+    if (msg.type === 'error') {
+      console.warn('minimap worker:', msg.message)
+      if (msg.id !== undefined) { const k = this.reqKey.get(msg.id); this.reqKey.delete(msg.id); if (k && this.pending.get(k) === msg.id) this.pending.delete(k) }
+      return
+    }
+    if (msg.type !== 'tile' || msg.id === undefined || !msg.bitmap) return
+    const key = this.reqKey.get(msg.id)
+    this.reqKey.delete(msg.id)
+    // a tile invalidated while it was being drawn is answered again by a newer request
+    if (!key || this.pending.get(key) !== msg.id) { msg.bitmap.close(); return }
+    this.pending.delete(key)
+    this.tiles.get(key)?.close()
+    this.tiles.set(key, msg.bitmap)
+    while (this.tiles.size > TILE_CACHE) {
+      const [old, bm] = this.tiles.entries().next().value as [string, ImageBitmap]
+      bm.close()
+      this.tiles.delete(old)
+    }
+    this.paint(this.lastMarker)
+  }
+
+  private clearTiles() {
+    for (const bm of this.tiles.values()) bm.close()
+    this.tiles.clear()
+    this.pending.clear()
+  }
+
+  /** Drop the cached tiles a new piece of linework crosses (site metres box), so they are drawn again. */
+  private invalidate(x0: number, y0: number, x1: number, y1: number) {
+    const hit = (key: string) => {
+      const [k, tx, ty] = key.split('/').map(Number)
+      const S = TILE_PX / (TILE_BASE * TILE_STEP ** k)
+      return !(tx * S > x1 || (tx + 1) * S < x0 || ty * S > y1 || (ty + 1) * S < y0)
+    }
+    for (const [key, bm] of [...this.tiles]) if (hit(key)) { bm.close(); this.tiles.delete(key) }
+    for (const key of [...this.pending.keys()]) if (hit(key)) this.pending.delete(key)
   }
 
   /** Ahead is up, instead of north. The chevron then points at the top of the map. */
@@ -401,21 +414,40 @@ export class MiniMap {
    *  `manifest.siblings` as its vector tiles stream, so this is how the map keeps up. */
   private refreshSiblings() {
     const all = this.manifest.siblings ?? []
-    for (let i = this.siblings.length; i < all.length; i++) {
-      const s = all[i]
-      this.siblings.push(new Float32Array(s.flatMap(([x, y]) => [x, y])))
+    if (all.length === this.sentSiblings) return
+    const fresh: Float32Array[] = []
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (let i = this.sentSiblings; i < all.length; i++) {
+      const pts = new Float32Array(all[i].flatMap(([x, y]) => [x, y]))
+      fresh.push(pts)
+      for (let j = 0; j < pts.length; j += 2) {
+        if (pts[j] < x0) x0 = pts[j]
+        if (pts[j] > x1) x1 = pts[j]
+        if (pts[j + 1] < y0) y0 = pts[j + 1]
+        if (pts[j + 1] > y1) y1 = pts[j + 1]
+      }
     }
+    this.sentSiblings = all.length
+    // the worker holds them; this thread keeps no copy
+    this.worker?.postMessage({ type: 'lines', layer: 'siblings', lines: fresh }, fresh.map((f) => f.buffer))
+    this.invalidate(x0 - 20, y0 - 20, x1 + 20, y1 + 20)
   }
 
   /** Draw with the marker at site x,y heading `yaw` (radians, 0 = east, counter-clockwise). */
   draw(marker: { x: number; y: number; yaw: number } | null) {
     this.refreshSiblings()
+    if (marker) this.lastMarker = marker
     if (marker && this.follow) {
       this.centre.x = marker.x
       this.centre.y = marker.y
     }
     // redraw at most every other frame; the map is small but the imagery blit is not free
     if (marker && ++this.frameCount % 2) return
+    this.paint(marker)
+  }
+
+  /** Paint now, no throttle — the frame's draw, or a tile that has just arrived. */
+  private paint(marker: { x: number; y: number; yaw: number } | null) {
     const ctx = this.ctx, W = this.w, H = this.h, dpr = devicePixelRatio
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
@@ -458,22 +490,7 @@ export class MiniMap {
       ctx.drawImage(this.imagery, px0, py0, px1 - px0, py1 - py0)
       ctx.globalAlpha = 1
     }
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    for (const r of this.roads) {
-      const st = CLASS_STYLE[r.cls]
-      if (this.pxPerM < st.minPxPerM) continue // detail fades with zoom
-      ctx.strokeStyle = st.c
-      ctx.lineWidth = st.w
-      this.stroke(r.pts, toPx)
-    }
-    // our carriageways
-    ctx.strokeStyle = '#ffdc00'
-    ctx.lineWidth = 3
-    this.stroke(this.spine, toPx)
-    ctx.strokeStyle = '#ff8c00'
-    ctx.lineWidth = 2
-    for (const s of this.siblings) this.stroke(s, toPx)
+    this.drawTiles(toPx, W, H, dpr)
     const DOT: Record<string, string> = { start: '#4fc3f7', finish: '#ff8a65', checkpoint: '#b39ddb', pickup: '#81c784', dropoff: '#ffb74d', goal: '#fff176', home: '#ffd54f' }
     for (const t of this.targets) {
       const [tx, ty] = toPx(t.x, t.y)
@@ -602,18 +619,43 @@ export class MiniMap {
     ctx.restore()
   }
 
-  private stroke(pts: Float32Array, toPx: (x: number, y: number) => [number, number]) {
-    const ctx = this.ctx
-    ctx.beginPath()
-    for (let i = 0; i < pts.length; i += 2) {
-      const [px, py] = toPx(pts[i], pts[i + 1])
-      if (i === 0) ctx.moveTo(px, py)
-      else ctx.lineTo(px, py)
+  /**
+   * The road tiles in view, from the cache, and a request for each that is missing. The view's
+   * circumscribed circle decides "in view", so a heading-up map turning never shows a hole.
+   */
+  private drawTiles(toPx: (x: number, y: number) => [number, number], W: number, H: number, dpr: number) {
+    if (!this.worker) return
+    const k = Math.max(0, Math.ceil(Math.log(this.pxPerM / TILE_BASE) / Math.log(TILE_STEP) - 1e-9))
+    const levelPx = TILE_BASE * TILE_STEP ** k
+    const S = TILE_PX / levelPx
+    const R = Math.hypot(W, H) / 2 / this.pxPerM
+    const tx0 = Math.floor((this.centre.x - R) / S), tx1 = Math.floor((this.centre.x + R) / S)
+    const ty0 = Math.floor((this.centre.y - R) / S), ty1 = Math.floor((this.centre.y + R) / S)
+    const side = S * this.pxPerM
+    for (let tx = tx0; tx <= tx1; tx++) {
+      for (let ty = ty0; ty <= ty1; ty++) {
+        const key = `${k}/${tx}/${ty}/${dpr}`
+        const bm = this.tiles.get(key)
+        if (bm) {
+          // used: to the back of the eviction order
+          this.tiles.delete(key)
+          this.tiles.set(key, bm)
+          const [x, y] = toPx(tx * S, (ty + 1) * S)
+          this.ctx.drawImage(bm, x, y, side, side)
+        } else if (!this.pending.has(key)) {
+          const id = ++this.reqSeq
+          this.pending.set(key, id)
+          this.reqKey.set(id, key)
+          this.worker.postMessage({ type: 'tile', id, k, tx, ty, px: TILE_PX, levelPxPerM: levelPx, dpr })
+        }
+      }
     }
-    ctx.stroke()
   }
 
   dispose() {
+    this.clearTiles()
+    this.worker?.terminate()
+    this.worker = null
     this.ro.disconnect()
     removeEventListener('keydown', this.onKey)
     removeEventListener('resize', this.onResize)
@@ -630,57 +672,4 @@ function niceScale(m: number): number {
   return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * p
 }
 
-/**
- * WGS84 → local east/north metres about the site anchor (the `enu` frame), through ECEF.
- *
- * Exact, not a rotation of the UTM grid: verified against the baked spines at 0.6-0.7 m mean,
- * which is OSM's own digitising accuracy.
- */
-export function enuProjector(lon0: number, lat0: number, h0: number): (lon: number, lat: number) => [number, number] {
-  const A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F)
-  const D = Math.PI / 180
-  const ecef = (lon: number, lat: number, h: number): [number, number, number] => {
-    const lo = lon * D, la = lat * D
-    const N = A / Math.sqrt(1 - E2 * Math.sin(la) ** 2)
-    return [(N + h) * Math.cos(la) * Math.cos(lo), (N + h) * Math.cos(la) * Math.sin(lo), (N * (1 - E2) + h) * Math.sin(la)]
-  }
-  const [x0, y0, z0] = ecef(lon0, lat0, h0)
-  const lo0 = lon0 * D, la0 = lat0 * D
-  const sLo = Math.sin(lo0), cLo = Math.cos(lo0), sLa = Math.sin(la0), cLa = Math.cos(la0)
-  return (lon, lat) => {
-    const [x, y, z] = ecef(lon, lat, 0)
-    const dx = x - x0, dy = y - y0, dz = z - z0
-    return [-sLo * dx + cLo * dy, -sLa * cLo * dx - sLa * sLo * dy + cLa * dz]
-  }
-}
-
-/**
- * WGS84 → site frame (UTM easting/northing minus the origin). A compact transverse-Mercator
- * forward formula (Krüger series, good to mm), because osm.geojson is the only layer the viewer
- * reads that is not already in metres.
- */
-export function utmProjector(epsg: number, ox: number, oy: number): (lon: number, lat: number) => [number, number] {
-  const zone = epsg % 100
-  const south = Math.floor(epsg / 100) === 327
-  const lon0 = ((zone - 1) * 6 - 180 + 3) * (Math.PI / 180)
-  const a = 6378137, f = 1 / 298.257223563
-  const n = f / (2 - f), A = (a / (1 + n)) * (1 + n ** 2 / 4 + n ** 4 / 64)
-  const alpha = [n / 2 - (2 / 3) * n ** 2 + (5 / 16) * n ** 3, (13 / 48) * n ** 2 - (3 / 5) * n ** 3, (61 / 240) * n ** 3]
-  const k0 = 0.9996, E0 = 500000, N0 = south ? 10000000 : 0
-  return (lon, lat) => {
-    const phi = (lat * Math.PI) / 180, lam = (lon * Math.PI) / 180 - lon0
-    const t = Math.sinh(Math.atanh(Math.sin(phi)) - ((2 * Math.sqrt(n)) / (1 + n)) * Math.atanh(((2 * Math.sqrt(n)) / (1 + n)) * Math.sin(phi)))
-    const xi = Math.atan(t / Math.cos(lam)), eta = Math.atanh(Math.sin(lam) / Math.sqrt(1 + t * t))
-    let E = eta, N = xi
-    for (let j = 1; j <= 3; j++) {
-      E += alpha[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta)
-      N += alpha[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta)
-    }
-    return [E0 + k0 * A * E - ox, N0 + k0 * A * N - oy]
-  }
-}
-
-/** WGS84 → this site's metres, whichever frame the manifest holds — see the note in `load()`. */
-export function siteProjector(frame: { epsg: number; origin: [number, number]; kind?: string; anchor?: { lon: number; lat: number; h?: number } }): (lon: number, lat: number) => [number, number] {
-  return frame.kind === 'enu' && frame.anchor ? enuProjector(frame.anchor.lon, frame.anchor.lat, frame.anchor.h ?? 0) : utmProjector(frame.epsg, frame.origin[0], frame.origin[1])
-}
+export { enuProjector, utmProjector, siteProjector }

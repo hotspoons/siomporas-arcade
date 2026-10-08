@@ -193,6 +193,11 @@ export default defineConfig({
     strictPort: true,
     host: true,
     allowedHosts: true,
+    // With the operator bridge on, let the page profile itself: the JS Self-Profiling API
+    // (`new Profiler(...)`) needs this document policy, and it is how a bridge probe gets a real
+    // sampled call-stack profile of Rich's tab instead of wrapping functions one at a time
+    // (2026-10-08). Dev and bridge only; a build never sees it.
+    ...(process.env.APEX_BRIDGE ? { headers: { 'Document-Policy': 'js-profiling' } } : {}),
     // DEV ONLY, and only when WORLDEDITOR is set. `tools/worldeditor` serves these paths in the
     // pod, from the same origin as the app; this makes development identical to that, so the
     // world editor's fetches are relative in both places and there is no CORS anywhere.

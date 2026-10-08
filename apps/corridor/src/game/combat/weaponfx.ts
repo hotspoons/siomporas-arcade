@@ -86,17 +86,27 @@ export function builtinMissile(): THREE.Group {
 
 /* ---- the bullet: a shader, not a model -------------------------------------------------------- */
 
+// THE LOG-DEPTH CHUNKS ARE NOT OPTIONAL. The renderer runs `logarithmicDepthBuffer`, so every
+// built-in material writes a logarithmic depth; a ShaderMaterial without these four includes writes
+// the ordinary hyperbolic one (≈0.9999 at any range), which loses the depth test to anything opaque
+// already drawn. The tracers were visible against the sky — cleared depth — and nowhere over the
+// road, which is where they are always seen (Rich, 2026-10-08).
 const TRACER_VERT = `
+#include <common>
+#include <logdepthbuf_pars_vertex>
 varying float vAlong;
 void main() {
   vAlong = uv.x;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  #include <logdepthbuf_vertex>
 }`
 const TRACER_FRAG = `
+#include <logdepthbuf_pars_fragment>
 uniform float uFade;
 uniform vec3 uColour;
 varying float vAlong;
 void main() {
+  #include <logdepthbuf_fragment>
   float head = smoothstep(0.0, 0.15, vAlong) * smoothstep(1.0, 0.7, vAlong);
   gl_FragColor = vec4(uColour * (0.6 + 0.4 * vAlong), head * uFade);
 }`

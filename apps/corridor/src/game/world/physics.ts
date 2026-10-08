@@ -498,6 +498,22 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     mesh.userData.offset = offset.clone()
     site.group.add(mesh)
     detached.push({ mesh, rec, collider: e.collider })
+    /*
+     * A BROKEN PROP IS DEBRIS, AND DEBRIS IS BOUNDED. Every sign or post a blast knocks loose became
+     * a mesh of its own with a dynamic body, kept for the rest of the level and synced to that body
+     * every frame — so a session of rockets made the street a growing pile the frame paid for on
+     * each tick (Rich, 2026-10-08, "see if we are leaking anything"). Past PHYS_LOOSE_MAX the oldest
+     * piece goes: out of the scene, out of the breakables, its body out of the world. Its geometry is
+     * the instanced batch's, shared, so there is nothing to dispose.
+     */
+    const cap = Math.max(0, Math.round(T.PHYS_LOOSE_MAX))
+    while (detached.length > cap) {
+      const old = detached.shift()!
+      old.mesh.removeFromParent()
+      breakables.remove(old.collider)
+      const body = old.collider.parent()
+      if (body) phys.world.removeRigidBody(body)
+    }
   })
 
   /** Keep the detached meshes on their bodies. One frame of lag is a sign that skates. */

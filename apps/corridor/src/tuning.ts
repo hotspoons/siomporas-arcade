@@ -1769,6 +1769,8 @@ export let DRESS_WINDOW_WALLS = 3
  * Changing it reloads nothing: the world is built with the site, so toggle it and reload.
  */
 export let PHYS_ENABLED = 1
+/** broken props kept loose at once; past this the oldest piece is cleared away (a blast session made an ever-growing pile synced every frame) */
+export let PHYS_LOOSE_MAX = 60
 /** fixed steps per second. 120 matches what the hand-written car already ran at */
 export let PHYS_HZ = 120
 /** most steps one frame may run before the rest of the backlog is DROPPED rather than banked */
@@ -2983,6 +2985,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'the world (reload after changing any of these)',
         keys: [
           tune('PHYS_ENABLED', () => PHYS_ENABLED, (v) => (PHYS_ENABLED = v), [0, 1], 1, 'Rapier at all, on by default. Read once, when the site builds \u2014 use ?phys=0 in the URL to skip the wasm; this slider needs a reload and does not persist'),
+          tune('PHYS_LOOSE_MAX', () => PHYS_LOOSE_MAX, (v) => (PHYS_LOOSE_MAX = v), [0, 500], 5, 'broken props kept loose at once; the oldest is cleared past this'),
           tune('PHYS_HZ', () => PHYS_HZ, (v) => (PHYS_HZ = v), [30, 240], 10, 'fixed steps per second'),
           tune('PHYS_MAX_STEPS', () => PHYS_MAX_STEPS, (v) => (PHYS_MAX_STEPS = v), [1, 24], 1, 'a stall past this is dropped, never paid back'),
           tune('PHYS_STEP_BUDGET_MS', () => PHYS_STEP_BUDGET_MS, (v) => (PHYS_STEP_BUDGET_MS = v), [2, 30], 1, 'ms of a frame the steps may take; past it the backlog is dropped'),

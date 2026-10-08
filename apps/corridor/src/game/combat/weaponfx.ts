@@ -60,24 +60,47 @@ export function builtinGun(): THREE.Group {
   return g
 }
 
-/** a missile: a body, a nose, four fins; 1.1 m, pointing +X */
+/**
+ * THE MISSILE'S PARTS ARE MADE ONCE. Every missile fired used to build its own seven geometries and
+ * seven materials, and a missile that landed was taken out of the scene without disposing them —
+ * three keeps a drawn geometry until it is disposed, so each missile was a permanent GPU buffer set.
+ * After a long session of rockets the renderer held 5,400 geometries no longer in the scene (Rich,
+ * 2026-10-08). Shared parts: a missile is now a group of meshes over them, and dropping one frees
+ * nothing because it owns nothing.
+ */
+let missileParts: { body: THREE.BufferGeometry; nose: THREE.BufferGeometry; fin: THREE.BufferGeometry; flame: THREE.BufferGeometry; bodyMat: THREE.Material; noseMat: THREE.Material; finMat: THREE.Material; flameMat: THREE.Material } | null = null
+function parts() {
+  return (missileParts ??= {
+    body: new THREE.CylinderGeometry(0.09, 0.09, 0.8, 10),
+    nose: new THREE.ConeGeometry(0.09, 0.3, 10),
+    fin: new THREE.BoxGeometry(0.2, 0.16, 0.01),
+    flame: new THREE.ConeGeometry(0.07, 0.35, 8),
+    bodyMat: new THREE.MeshStandardMaterial({ color: 0xdcdcdc, roughness: 0.4, metalness: 0.5 }),
+    noseMat: new THREE.MeshStandardMaterial({ color: 0xd23c1e, roughness: 0.5 }),
+    finMat: dark(),
+    flameMat: new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.85, depthWrite: false }),
+  })
+}
+
+/** a missile: a body, a nose, four fins; 1.1 m, pointing +X. Its geometry and materials are shared */
 export function builtinMissile(): THREE.Group {
+  const P = parts()
   const g = new THREE.Group()
   g.name = 'missile'
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.8, 10), new THREE.MeshStandardMaterial({ color: 0xdcdcdc, roughness: 0.4, metalness: 0.5 }))
+  const body = new THREE.Mesh(P.body, P.bodyMat)
   body.rotation.z = Math.PI / 2
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0xd23c1e, roughness: 0.5 }))
+  const nose = new THREE.Mesh(P.nose, P.noseMat)
   nose.rotation.z = -Math.PI / 2
   nose.position.set(0.55, 0, 0)
   g.add(body, nose)
   for (let i = 0; i < 4; i++) {
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.16, 0.01), dark())
+    const fin = new THREE.Mesh(P.fin, P.finMat)
     fin.position.set(-0.32, 0, 0)
     fin.rotation.x = (i * Math.PI) / 2
     fin.translateY(0.12)
     g.add(fin)
   }
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.35, 8), new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.85, depthWrite: false }))
+  const flame = new THREE.Mesh(P.flame, P.flameMat)
   flame.rotation.z = Math.PI / 2
   flame.position.set(-0.55, 0, 0)
   g.add(flame)

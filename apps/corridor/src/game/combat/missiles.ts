@@ -47,6 +47,10 @@ interface Flash {
  */
 const FLASH_LIGHTS = 1
 
+/** the fallback missile's cone, made once (see weaponfx.ts `builtinMissile` for why) */
+let coneGeo: THREE.ConeGeometry | null = null
+let coneMat: THREE.MeshStandardMaterial | null = null
+
 export class MissileLayer {
   readonly group = new THREE.Group()
   private live: Missile[] = []
@@ -88,10 +92,8 @@ export class MissileLayer {
   fire(from: THREE.Vector3, dir: THREE.Vector3, carry = 0): void {
     const d = dir.clone().normalize()
     const custom = this.model?.() ?? null
-    const mesh: THREE.Object3D = custom ?? new THREE.Mesh(
-      new THREE.ConeGeometry(0.14, 1.1, 8),
-      new THREE.MeshStandardMaterial({ color: 0xdddddd, emissive: 0xff5500, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.5 }),
-    )
+    // the plain cone shares one geometry and material: a landed missile is dropped, not disposed
+    const mesh: THREE.Object3D = custom ?? new THREE.Mesh((coneGeo ??= new THREE.ConeGeometry(0.14, 1.1, 8)), (coneMat ??= new THREE.MeshStandardMaterial({ color: 0xdddddd, emissive: 0xff5500, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.5 })))
     // a cone points up +Y and a model +X; turn it to fly along `d`
     const axis = custom ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
     mesh.quaternion.setFromUnitVectors(axis, d)

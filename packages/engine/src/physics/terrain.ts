@@ -43,6 +43,31 @@ export interface TerrainOptions {
   /** a tile with fewer than this fraction of real samples is not built at all */
   minCoverage?: number
   friction?: number
+  /**
+   * Milliseconds of ground sampling per `update` for the tiles AHEAD. Sampling a 65 × 65 tile
+   * through the corridor's graded ground is 17–23 ms (Rich's machine, the DC Beltway, 2026-10-08),
+   * and it landed whole on one frame every few hundred metres — most of the 25–30 ms frames under
+   * the test rig. With a slice, a tile's rows are sampled across frames and the collider is made
+   * when the last row is in. The tile under the wheels and the next one over are never deferred: a
+   * missing one there is a hole, so it is built whole on the spot. 0 = whole tiles, `budget` of
+   * them per call.
+   */
+  sliceMs?: number
+}
+
+/** a tile whose rows are still being sampled */
+interface Partial {
+  key: string
+  i: number
+  j: number
+  x0: number
+  z0: number
+  heights: Float32Array
+  has: Uint8Array
+  /** the next row to sample */
+  a: number
+  good: number
+  sum: number
 }
 
 interface Tile {
@@ -73,6 +98,7 @@ export class Terrain {
   private height: HeightAt
   /** what a probe reads: how many tiles exist, and how many were built or dropped last update */
   readonly stats = { tiles: 0, built: 0, dropped: 0, skipped: 0, rebuilt: 0 }
+  private partial: Partial | null = null
 
   constructor(phys: PhysicsWorld, height: HeightAt, opts: TerrainOptions = {}) {
     this.phys = phys
@@ -83,6 +109,7 @@ export class Terrain {
       radius: opts.radius ?? 180,
       minCoverage: opts.minCoverage ?? 0.25,
       friction: opts.friction ?? 1,
+      sliceMs: opts.sliceMs ?? 0,
     }
   }
 
@@ -93,7 +120,7 @@ export class Terrain {
    * frame somebody drives over a tile boundary is a visible hitch. The ones that did not get built
    * are built next frame; the car is never near enough to the edge of the ring for that to matter.
    */
-  update(x: number, z: number, budget = 2): void {
+  update(x: number, z: number, budget = 2, sliceMs = this.opts.sliceMs ?? 0): void {
     const { tile, radius } = this.opts
     this.stats.built = 0
     this.stats.dropped = 0
@@ -117,10 +144,33 @@ export class Terrain {
       }
     }
     todo.sort((a, b) => a.d - b.d)
+    // the tiles under and beside the wheels first, and whole: a hole there is a fall
+    const near = tile * 1.5
+    const ahead: typeof todo = []
     for (const t of todo) {
+      if (sliceMs > 0 && t.d > near) { ahead.push(t); continue }
       if (this.stats.built >= budget) break
       if (this.build(t.i, t.j)) this.stats.built++
       else this.stats.skipped++
+    }
+    if (sliceMs > 0 && ahead.length && this.stats.built < budget) {
+      // keep sampling the tile already begun while it is still wanted, else start the nearest
+      let p = this.partial && want.has(this.partial.key) ? this.partial : null
+      const deadline = performance.now() + sliceMs
+      const tried = new Set<string>()
+      while (this.stats.built < budget) {
+        if (!p) {
+          const t = ahead.find((c) => { const k = `${c.i},${c.j}`; return !tried.has(k) && !this.tiles.has(k) })
+          if (!t) break
+          p = this.start(t.i, t.j)
+        }
+        if (!this.sampleRows(p, deadline)) break
+        tried.add(p.key)
+        if (this.commit(p)) this.stats.built++
+        else this.stats.skipped++
+        p = null
+      }
+      this.partial = p
     }
     /*
      * A TILE BUILT BEFORE A ROAD STREAMED IN IS STALE, and the car — standing on the heightfield —
@@ -163,28 +213,48 @@ export class Terrain {
    * `test/physics-world.test.ts` exist for exactly this and would each pass on their own.
    */
   private build(i: number, j: number): boolean {
+    const p = this.start(i, j)
+    this.sampleRows(p, Infinity)
+    return this.commit(p)
+  }
+
+  private start(i: number, j: number): Partial {
+    const { tile, cells } = this.opts
+    const n = cells + 1
+    return { key: `${i},${j}`, i, j, x0: i * tile, z0: j * tile, heights: new Float32Array(n * n), has: new Uint8Array(n * n), a: 0, good: 0, sum: 0 }
+  }
+
+  /**
+   * Sample rows until the deadline. At least one row per call, so a tiny slice still makes
+   * progress; returns true once the last row is in.
+   */
+  private sampleRows(p: Partial, deadline: number): boolean {
+    const { tile, cells } = this.opts
+    const n = cells + 1
+    const first = p.a
+    for (; p.a < n; p.a++) {
+      if (p.a > first && performance.now() >= deadline) return false
+      const wx = p.x0 + (p.a / cells) * tile
+      for (let b = 0; b < n; b++) {
+        const wz = p.z0 + (b / cells) * tile
+        const h = this.height(wx, wz)
+        const k = p.a * n + b
+        if (h === null || !Number.isFinite(h)) continue
+        p.heights[k] = h
+        p.has[k] = 1
+        p.good++
+        p.sum += h
+      }
+    }
+    return true
+  }
+
+  /** The sampled tile into the world, or false when there was not enough ground to be worth it. */
+  private commit(p: Partial): boolean {
     const R = rapier()
     const { tile, cells, minCoverage, friction } = this.opts
     const n = cells + 1
-    const x0 = i * tile
-    const z0 = j * tile
-    const heights = new Float32Array(n * n)
-    const has = new Uint8Array(n * n)
-    let good = 0
-    let sum = 0
-    for (let a = 0; a < n; a++) {
-      const wx = x0 + (a / cells) * tile
-      for (let b = 0; b < n; b++) {
-        const wz = z0 + (b / cells) * tile
-        const h = this.height(wx, wz)
-        const k = a * n + b
-        if (h === null || !Number.isFinite(h)) continue
-        heights[k] = h
-        has[k] = 1
-        good++
-        sum += h
-      }
-    }
+    const { x0, z0, heights, has, good, sum } = p
     if (good < n * n * minCoverage) return false
     // Fill the holes with the tile's own mean rather than with zero. A zero is sea level, and a
     // cliff to sea level at the edge of the data is what a car drives off at 30 m/s.
@@ -199,7 +269,7 @@ export class Terrain {
     const desc = R.ColliderDesc.heightfield(cells, cells, heights, { x: tile, y: 1, z: tile }).setFriction(friction)
     this.phys.describe(desc, 'terrain', { events: false })
     const collider = this.phys.world.createCollider(desc, body)
-    const key = `${i},${j}`
+    const key = p.key
     // A rebuild replaces a live tile; drop the old body AFTER the new one exists so the ground under
     // the wheels is never absent, not even for the rest of this call.
     const existing = this.tiles.get(key)
@@ -244,6 +314,7 @@ export class Terrain {
   clear() {
     for (const t of this.tiles.values()) this.phys.world.removeRigidBody(t.body)
     this.tiles.clear()
+    this.partial = null
     this.stats.tiles = 0
   }
 

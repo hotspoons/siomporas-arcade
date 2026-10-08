@@ -771,7 +771,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
 
     update(eye, dt) {
       const t0 = performance.now()
-      terrain.update(eye.x, eye.z, T.PHYS_TILE_BUDGET)
+      terrain.update(eye.x, eye.z, T.PHYS_TILE_BUDGET, T.PHYS_TILE_MS)
       refreshTrees(eye.x, eye.z)
       refreshProps(eye.x, eye.z)
       refreshDecks(eye.x, eye.z)

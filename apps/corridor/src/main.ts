@@ -44,6 +44,7 @@ import { setDetail } from './lod/simplify'
 import { DETAILS, applyDetail, type Detail } from './game/session/detail'
 import { TestRig } from './game/session/testrig'
 import { setWakeLock, wakeLockState } from './game/session/wakelock'
+import { setStreamScale, streamScale } from './world/streamscale'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
@@ -3923,6 +3924,32 @@ const viewDir = new THREE.Vector3()
 const earDir = new THREE.Vector3()
 const earUp = new THREE.Vector3()
 const UP_LOCAL = new THREE.Vector3(0, 1, 0)
+/**
+ * THE FRAME GOVERNOR. The frame's own CPU time, just measured, against STREAM_TARGET_MS: over it,
+ * the builders' budgets (world/streamscale.ts) come down fast — in proportion to how far over —
+ * and under it they creep back up. Fast down and slow up, because one long frame is a dropped
+ * frame and one short one is nothing. `governor` is what a probe reads.
+ */
+const governor = { cpuMs: 0, scale: 1, over: 0 }
+function governFrame(cpuMs: number): void {
+  governor.cpuMs = cpuMs
+  if (T.STREAM_GOVERNOR <= 0) {
+    if (streamScale !== 1) setStreamScale(1)
+    governor.scale = 1
+    return
+  }
+  const target = Math.max(1, T.STREAM_TARGET_MS)
+  let k = streamScale
+  if (cpuMs > target) {
+    governor.over++
+    k *= Math.max(0.5, 1 - (cpuMs - target) / target)
+  } else {
+    k += 0.02
+  }
+  k = Math.min(1, Math.max(T.STREAM_SCALE_MIN, k))
+  setStreamScale(k)
+  governor.scale = k
+}
 /** the simulated instant the sky was last built for; 20 s of world time is well under a degree of sun */
 let lastSkyMs = -1e15
 let lastSkyReal = -1e15
@@ -3939,7 +3966,7 @@ function frame() {
   if (!menu.open) for (const a of PAD_HOTKEYS) if (input.padHotkey(a)) hotkey(a)
   // the frame's own clock, for the performance panel: `real` is the gap between frames, and the
   // work we do inside this function is measured separately so the two can be compared
-  const cpu0 = perfHud.open ? performance.now() : 0
+  const cpu0 = performance.now()
   // the adaptive near-tree budget's clock: `dt` is the frame gap, capped, and the loop ignores a
   // zero or non-finite delta (a tab that was hidden) so a stall cannot slam the trim
   TREE_BUDGET.frame(dt * 1000)
@@ -4386,9 +4413,11 @@ function frame() {
    * including submitting it. What it does NOT include is the GPU actually finishing — the gap
    * between `cpuMs` and the frame time is where that shows up.
    */
+  const cpuMs = performance.now() - cpu0
+  governFrame(cpuMs)
   if (perfHud.open) {
     const info = renderer.info
-    perfMeter.frame(real * 1000, performance.now() - cpu0, {
+    perfMeter.frame(real * 1000, cpuMs, {
       calls: info.render.calls,
       triangles: info.render.triangles,
       lines: info.render.lines,
@@ -4564,6 +4593,10 @@ registerBridgeContext({
   },
   /** the screen wake lock's state: wanted (the knob), held (the browser agreed), supported */
   wakeLock: () => wakeLockState(),
+  /** the frame governor: the frame's last CPU ms, the builders' budget scale, frames over target */
+  get governor() {
+    return governor
+  },
   perf: (frames = 30) =>
     new Promise<unknown>((resolve) => {
       const t: number[] = []

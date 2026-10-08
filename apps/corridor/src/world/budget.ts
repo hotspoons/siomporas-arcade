@@ -18,6 +18,8 @@
 // bounded amount per frame, nearest first — plus a wanted set and eviction. There is no point
 // adding those on top of a builder that cannot be interrupted.
 
+import { streamScale } from './streamscale'
+
 /**
  * How the yield happens: a frame if one is actually coming, otherwise a macrotask.
  *
@@ -87,7 +89,8 @@ export class Budget {
     this.done += n
     const now = performance.now()
     const slice = now - this.sliceStart
-    if (slice < this.sliceMs) return
+    // the frame governor's share (streamscale.ts): a slice shrinks while the frame is over budget
+    if (slice < this.sliceMs * streamScale) return
     // A HIDDEN TAB HAS NO FRAMES TO PROTECT. requestAnimationFrame is paused outright there, and
     // setTimeout is clamped to about 1 Hz, so yielding costs a second an item and a 427-branch
     // build never finishes — measured crawling 1 -> 46 of 427 in a minute before this check, and

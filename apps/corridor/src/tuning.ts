@@ -1073,6 +1073,19 @@ export let STREAM_CHUNK_M = 250
  * site opens. Set this if the streamed path misbehaves; it is the old code, not a second bake.
  */
 export let STREAM_LOCAL = 1
+/**
+ * THE FRAME GOVERNOR (world/streamscale.ts). The grass generator, the tree planter and the grading
+ * pump each take a fixed millisecond budget a frame; on the DC Beltway the frame's own work was at
+ * the vsync limit and every one of those budgets was spent on top of it (2026-10-08). With the
+ * governor on, the frame measures its own CPU time and scales those budgets: the whole knob while
+ * the frame is under STREAM_TARGET_MS, a fraction of it (never below STREAM_SCALE_MIN) while it is
+ * over. The world streams a little later and the frame stays whole.
+ */
+export let STREAM_GOVERNOR = 1
+/** the frame CPU time the governor steers the builders toward, ms: 60 fps is 16.7 and the browser wants some of that */
+export let STREAM_TARGET_MS = 11
+/** the smallest share of their budgets the builders keep while the frame is over */
+export let STREAM_SCALE_MIN = 0.15
 // trees (props.treesFromCanopy): a FIXED cell so density does not depend on how big the site is,
 // the budget spent within TREE_PLANT_RADIUS_M of the eye, replanted when the eye leaves that
 // centre by TREE_REPLANT_M
@@ -1835,6 +1848,12 @@ export let PHYS_TILE_M = 64
 export let PHYS_TILE_CELLS = 64
 /** how many tiles may be BUILT in one frame. Each is CELLS² calls into the site's height function */
 export let PHYS_TILE_BUDGET = 1
+/**
+ * ms of ground sampling a frame for the tiles AHEAD of the car; the collider is made when the last
+ * row is in. Sampling a whole tile is 17–23 ms on the DC Beltway, and that used to land on one
+ * frame. The tile under the wheels is still built whole the moment it is missing. 0 = whole tiles.
+ */
+export let PHYS_TILE_MS = 2
 /** tiles are kept within this many metres of the eye */
 export let PHYS_RADIUS_M = 180
 /** the ground's friction coefficient before a profile's own grip is applied */
@@ -2562,6 +2581,14 @@ export const TUNE_TABS: TuneTab[] = [
         ],
       },
       {
+        title: 'frame governor',
+        keys: [
+          tune('STREAM_GOVERNOR', () => STREAM_GOVERNOR, (v) => (STREAM_GOVERNOR = v), [0, 1], 1, 'scale the builders’ per-frame budgets (grass, trees, grading) to the CPU time the frame has left; 0 = every budget is the full knob'),
+          tune('STREAM_TARGET_MS', () => STREAM_TARGET_MS, (v) => (STREAM_TARGET_MS = v), [4, 16], 0.5, 'the frame CPU time the governor steers toward, ms'),
+          tune('STREAM_SCALE_MIN', () => STREAM_SCALE_MIN, (v) => (STREAM_SCALE_MIN = v), [0.05, 1], 0.05, 'the smallest share of their budgets the builders keep while the frame is over'),
+        ],
+      },
+      {
         title: 'tiles',
         keys: [
           tune('PYR_DROP_M', () => PYR_DROP_M, (v) => (PYR_DROP_M = v), [0, 200], 1, 'metres a coarse tile sinks while a finer one covers it. z10 still showing through wants more than 8'),
@@ -3051,7 +3078,8 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('PHYS_TILE_M', () => PHYS_TILE_M, (v) => (PHYS_TILE_M = v), [16, 256], 8, 'metres across one heightfield tile'),
           tune('PHYS_TILE_CELLS', () => PHYS_TILE_CELLS, (v) => (PHYS_TILE_CELLS = v), [8, 128], 8, 'samples per edge \u2014 TILE_M/CELLS is the resolution a wheel feels'),
-          tune('PHYS_TILE_BUDGET', () => PHYS_TILE_BUDGET, (v) => (PHYS_TILE_BUDGET = v), [1, 8], 1, 'tiles built per frame. THE HITCH KNOB'),
+          tune('PHYS_TILE_BUDGET', () => PHYS_TILE_BUDGET, (v) => (PHYS_TILE_BUDGET = v), [1, 8], 1, 'tiles finished per frame'),
+          tune('PHYS_TILE_MS', () => PHYS_TILE_MS, (v) => (PHYS_TILE_MS = v), [0, 12], 0.5, 'ms a frame spent sampling the ground for the tiles ahead; a tile lands when its last row is in. 0 = a whole tile at once, THE HITCH'),
           tune('PHYS_RADIUS_M', () => PHYS_RADIUS_M, (v) => (PHYS_RADIUS_M = v), [64, 600], 10, 'how far the solid ground reaches'),
           tune('PHYS_GROUND_FRICTION', () => PHYS_GROUND_FRICTION, (v) => (PHYS_GROUND_FRICTION = v), [0, 2], 0.05),
           tune('OVERPASS_CLEAR_M', () => OVERPASS_CLEAR_M, (v) => (OVERPASS_CLEAR_M = v), [0.5, 12], 0.5, 'height (m) above the DEM that makes a carriageway a deck, not ground'),

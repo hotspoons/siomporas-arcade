@@ -7,6 +7,7 @@ import { inside } from './polygon'
 import { VegCover } from '../lod/vegmask'
 import { landuseZone, zoneOfRoad } from './zoning'
 import * as T from '../tuning'
+import { scaledMs } from './streamscale'
 import { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
 import { makeSplatFading, type SplatMaskUniforms } from '../visuals/splatmask'
@@ -61,6 +62,24 @@ function relieveCell(files: Record<string, unknown>): void {
 }
 
 export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x, z, -y)
+
+/** what one `updateNear` cost, by layer, in ms */
+export interface NearPerf {
+  roadCover: number
+  trees: number
+  grass: number
+  /** crops, precipitation, impostor uploads */
+  other: number
+  water: number
+  stream: number
+  pyr: number
+  /** the per-level visibility pass: roads, houses, trees, grass, crops against the tile under the eye */
+  lod: number
+  /** the grading pump's scheduling (the units themselves run off-frame) */
+  grade: number
+  veg: number
+  total: number
+}
 
 export interface Site {
   manifest: Manifest
@@ -129,6 +148,8 @@ export interface Site {
   weather: { current: Weather; settled: number; particles: number; wetness: number }
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
+  /** what the last `updateNear` cost, by layer, ms — the perf panel and the bridge read it */
+  nearPerf: NearPerf
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
   retune: () => void
   /** the world's textures changed (World tab): the road is redrawn with them; buildings on the next load */
@@ -1653,6 +1674,7 @@ if (uLodOn > 0.5) {
   let trees: THREE.Group | undefined
   let treeCount = 0
   let updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void = () => {}
+  const nearPerf: NearPerf = { roadCover: 0, trees: 0, grass: 0, other: 0, water: 0, stream: 0, pyr: 0, lod: 0, grade: 0, veg: 0, total: 0 }
   let retune: () => void = () => {}
   let applySurfaces: (doc: SurfacesDoc) => void = () => {}
   let setSeason: (season: Season) => void = () => {}
@@ -3129,7 +3151,7 @@ if (uLodOn > 0.5) {
       // The crescent fills a few ms a frame, and the first look walks it from the far side in.
       // A tree that lands inside the model radius or the shadow box has to be seated this frame.
       // Waiting for the 15 m gate is what left the road in cards until the car rolled forward.
-      if (!t.pump(T.TREE_PLANT_BUDGET_MS)) return
+      if (!t.pump(scaledMs(T.TREE_PLANT_BUDGET_MS))) return
       const note = t.patch()
       const touch = (Math.max(T.TREE_NEAR_RADIUS, T.SHADOW_REACH) + 40) ** 2
       let close = false
@@ -3364,16 +3386,23 @@ if (uLodOn > 0.5) {
         return { nearSet: near.near.size, cards, inBand, doubled, band, replants: replantStats.replants, uploads: imp!.uploadState() }
       }
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
+        const n0 = performance.now()
         replantIfMoved(eye, fwd, pitch)
         lollipops()
         const reseated = near.update(eye, false, fwd, pitch)
         if (reseated) refreshFar(near.near, eye, fwd, pitch)
         shadowRef?.update(near, t.records, eye, reseated, fwd)
+        const n1 = performance.now()
         grass.update(eye, fwd, pitch)
         grass.tick(time)
+        const n2 = performance.now()
         if (crops) tickCrops(crops.group, time)
         precip?.tick(eye, time)
         imp!.tick()
+        const n3 = performance.now()
+        nearPerf.trees = n1 - n0
+        nearPerf.grass = n2 - n1
+        nearPerf.other = n3 - n2
       }
     } else {
       // no renderer (tests): lollipops for everything
@@ -4090,14 +4119,25 @@ if (uLodOn > 0.5) {
   {
     const inner = updateNear
     let canopyLevel = -2
+    // the per-road / per-block visibility pass below is 1.1 ms a frame over the DC Beltway's
+    // children (2026-10-08); it only has an answer to change when the level under the eye does,
+    // the eye has moved a way, or tiles have had time to land — so that is when it runs
+    const lodPass = { here: -99 as number | null, x: NaN, z: NaN, frame: 0 }
+    let lodFrame = 0
     updateNear = (eye, time, fwd, pitch) => {
+      const m0 = performance.now()
       roadCover?.refresh(road, eye)
+      const m1 = performance.now()
       inner(eye, time, fwd, pitch)
+      const m2 = performance.now()
       water.tick(time, eye, fwd)
+      const m3 = performance.now()
       stream?.update(eye.x, -eye.z) // site frame: y = -z
+      const m4 = performance.now()
       const ground = heightAt(eye.x, -eye.z)
       const agl = Number.isFinite(ground) ? Math.max(0, eye.y - ground) : 0
       pyr?.update(eye.x, -eye.z, false, fwd ? { agl, fx: fwd.x, fy: fwd.y, fz: fwd.z } : { agl, fx: 0, fy: -1, fz: 0 })
+      const m5 = performance.now()
       // Roads, houses, trees and grass leave with the coarse tiles. Houses are one group per
       // block, so a z10 patch drops its own. A long road follows the tile under the camera.
       if (pyrSet) {
@@ -4122,6 +4162,14 @@ if (uLodOn > 0.5) {
         show(trees, T.PYR_TREE_Z)
         show(grassRef?.mesh, T.PYR_GRASS_Z)
         road.visible = layerOn(road)
+        built.group.visible = layerOn(built.group)
+        lodFrame++
+        const due = here !== lodPass.here || !(Math.hypot(eye.x - lodPass.x, eye.z - lodPass.z) < 40) || lodFrame - lodPass.frame >= 20
+        if (due) {
+        lodPass.here = here
+        lodPass.x = eye.x
+        lodPass.z = eye.z
+        lodPass.frame = lodFrame
         if (T.PYR_ROAD_Z <= 0 || here == null) {
           for (const c of road.children) c.visible = true
         } else {
@@ -4141,7 +4189,6 @@ if (uLodOn > 0.5) {
             c.visible = z == null || z >= T.PYR_ROAD_Z
           }
         }
-        built.group.visible = layerOn(built.group)
         if (T.PYR_HOUSE_Z <= 0) {
           for (const c of built.group.children) c.visible = true
         } else {
@@ -4152,6 +4199,7 @@ if (uLodOn > 0.5) {
             const z = zAt(x, y)
             c.visible = z == null || z >= T.PYR_HOUSE_Z
           }
+        }
         }
       }
       // The overview mesh is the ground before a tile covers the camera. Once one does, drawing
@@ -4178,9 +4226,20 @@ if (uLodOn > 0.5) {
           replantAt(eye, fwd, pitch ?? 0)
         }
       }
+      const m6 = performance.now()
       for (const tick of signalTicks) tick(time)
       gradeNear(eye)
+      const m7 = performance.now()
       veg?.update(eye.x, -eye.z)
+      const m8 = performance.now()
+      nearPerf.roadCover = m1 - m0
+      nearPerf.water = m3 - m2
+      nearPerf.stream = m4 - m3
+      nearPerf.pyr = m5 - m4
+      nearPerf.lod = m6 - m5
+      nearPerf.grade = m7 - m6
+      nearPerf.veg = m8 - m7
+      nearPerf.total = m8 - m0
     }
   }
 
@@ -4268,6 +4327,7 @@ if (uLodOn > 0.5) {
       return { current: precip?.current ?? ('clear' as Weather), settled: precip?.settled ?? 0, particles: precip?.count ?? 0, wetness: precip?.wetness ?? 0 }
     },
     updateNear,
+    nearPerf,
     retune,
     setSurfaces: (doc) => applySurfaces(doc),
     surfaces: () => surfacesDoc,

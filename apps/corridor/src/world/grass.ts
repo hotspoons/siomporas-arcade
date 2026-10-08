@@ -35,6 +35,7 @@ import type { SeasonLook } from '../visuals/season'
 import { GRASS_LOOK, type GrassType } from './groundcover'
 import { ACCUM_PARS, accumUniforms } from '../visuals/weather'
 import * as T from '../tuning'
+import { scaledMs } from './streamscale'
 import { ROAD_CLIP_PARS, roadClipUniforms } from '../visuals/roadcover'
 import { grassReliefLook, grassReliefTick } from '../visuals/grassrelief'
 
@@ -310,6 +311,9 @@ export class Grass {
   private lastPitch = Infinity
   private dirty = true
   private frame = 0
+  /** the last frame a tile was generated on, and what a card-only / blade tile last cost (ms, eased) */
+  private lastMadeFrame = 0
+  private tileMs = [0.3, 2]
   private eye = new THREE.Vector3()
   private fwd = new THREE.Vector3(1, 0, 0)
   /** the visible tile set for this eye/heading, nearest first; rebuilt only when the view moved */
@@ -1051,17 +1055,29 @@ export class Grass {
     // tiles means the queue drains as fast as the frame can afford and never faster.
     let made = 0, tiles = T.GRASS_TILES_PER_FRAME
     const t0 = performance.now()
-    const deadline = t0 + T.GRASS_MS_PER_FRAME
+    // the frame governor's share of the budget (streamscale.ts): the full knob while the frame
+    // has room, a fraction of it while the frame is over
+    const deadline = t0 + scaledMs(T.GRASS_MS_PER_FRAME)
+    // a tile costs what the last one of its kind cost, and one that will not fit is not started:
+    // the deadline used to be checked only AFTER a tile, so a 0.6 ms budget still ran a 7 ms blade
+    // tile every frame. The ring must still move, though — with nothing made for a few frames one
+    // tile goes regardless.
+    const starving = this.frame - this.lastMadeFrame > 6
     while (this.pending.length && tiles > 0) {
-      const p = this.pending.shift()!
+      const p = this.pending[0]
       const have = this.tiles.get(p.key)
-      if (!have || (p.withBlades && !have.hasBlades)) {
-        this.tiles.set(p.key, this.generate(p.tx, p.tz, p.withBlades))
-        made++
-        tiles -= p.withBlades ? 1 : 0.15
-        if (performance.now() >= deadline) break
-      }
+      if (have && !(p.withBlades && !have.hasBlades)) { this.pending.shift(); continue }
+      const kind = p.withBlades ? 1 : 0
+      if (!(made === 0 && starving) && performance.now() + this.tileMs[kind] * 0.6 > deadline) break
+      this.pending.shift()
+      const g0 = performance.now()
+      this.tiles.set(p.key, this.generate(p.tx, p.tz, p.withBlades))
+      this.tileMs[kind] += (performance.now() - g0 - this.tileMs[kind]) * 0.3
+      made++
+      tiles -= p.withBlades ? 1 : 0.15
+      if (performance.now() >= deadline) break
     }
+    if (made) this.lastMadeFrame = this.frame
     const t1 = performance.now()
     if (made) this.dirty = true
     // assemble: every 4th frame while a burst is still filling, at once when it is complete

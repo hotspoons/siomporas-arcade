@@ -288,6 +288,33 @@ export class TuneUI {
     }
   }
 
+  /**
+   * A detail level's values (game/session/detail.ts). Forced — the player picked a level — every
+   * knob is written and the browser's override of it is forgotten, so the level is what you get
+   * until you move the knob again; unforced — a page load — knobs this browser overrode are left
+   * as they are. The tabs that held a changed knob are persisted. Returns how many knobs moved.
+   */
+  applyPreset(values: Record<string, number>, force: boolean): number {
+    let n = 0
+    const tabs = new Set<string>()
+    for (const [name, v] of Object.entries(values)) {
+      const k = this.keys.get(name)
+      if (!k) continue
+      if (!force && this.touched.has(name)) continue
+      if (force) this.touched.delete(name)
+      if (k.get() !== v) { k.set(v); n++ }
+      this.redraw.get(name)?.()
+      // only a level the player CHOSE re-derives the world: at page load (unforced) nothing is built
+      // yet, and the retune it would run reaches things main.ts has not declared ("Cannot access
+      // 'traffic' before initialization", the tab would not start — 2026-10-08)
+      if (force) this.o.onChange(name, v)
+      for (const t of TUNE_TABS) if (t.sections.some((sec) => sec.keys.some((x) => x.name === name))) tabs.add(t.name)
+    }
+    for (const t of tabs) this.persist(t)
+    this.markGroups()
+    return n
+  }
+
   /** The code defaults, for the diff a per-site tuning.json is. */
   get baseline(): Record<string, number> {
     const out: Record<string, number> = {}

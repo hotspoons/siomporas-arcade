@@ -366,6 +366,23 @@ export let GRASS_MS_PER_FRAME = 4
 /** evict cached tiles once the map holds this multiple of what the ring needs */
 export let GRASS_CACHE_SLACK = 1.5
 
+/**
+ * MODEL DETAIL, BY CLASS (lod/simplify.ts). The reconstructions are ~120k triangles each — every
+ * traffic car, the cash, the props — far more than they need at the size they are drawn. A class
+ * at a ratio below 1 draws a copy simplified to that fraction of its triangles, made once per asset
+ * in a worker. The Display ▸ Detail setting (Low…Ultra) writes all of these; the panel overrides
+ * until Detail is changed again (game/session/detail.ts). Rich, 2026-10-08.
+ */
+/** traffic beyond the full-detail budget draws at this fraction of its triangles */
+export let LOD_TRAFFIC_RATIO = 0.05
+/** how many of the nearest traffic cars may draw at full detail */
+export let LOD_TRAFFIC_FULL_N = 10000
+/** …and only within this many metres of the eye */
+export let LOD_TRAFFIC_FULL_M = 100000
+/** the player's car; 1 is the original */
+export let LOD_HERO_RATIO = 1
+/** placed props and the rewards a level throws (the cash); 1 is the original */
+export let LOD_PROP_RATIO = 1
 // --- traffic ------------------------------------------------------------------------------------
 /** never more traffic cars than this, whatever the zones and the level ask for */
 export let TRAFFIC_MAX = 600
@@ -2518,6 +2535,16 @@ export const TUNE_TABS: TuneTab[] = [
   {
     name: 'lod',
     sections: [
+      {
+        title: 'models (Display ▸ Detail sets these)',
+        keys: [
+          tune('LOD_TRAFFIC_RATIO', () => LOD_TRAFFIC_RATIO, (v) => (LOD_TRAFFIC_RATIO = v), [0.01, 1], 0.01, 'fraction of its triangles a traffic car draws with once it is outside the full-detail budget'),
+          tune('LOD_TRAFFIC_FULL_N', () => LOD_TRAFFIC_FULL_N, (v) => (LOD_TRAFFIC_FULL_N = v), [0, 10000], 1, 'how many of the nearest traffic cars draw at full detail'),
+          tune('LOD_TRAFFIC_FULL_M', () => LOD_TRAFFIC_FULL_M, (v) => (LOD_TRAFFIC_FULL_M = v), [0, 100000], 10, 'full-detail traffic only within this many metres'),
+          tune('LOD_HERO_RATIO', () => LOD_HERO_RATIO, (v) => (LOD_HERO_RATIO = v), [0.01, 1], 0.01, 'fraction of its triangles the player’s car draws with (1 = original)'),
+          tune('LOD_PROP_RATIO', () => LOD_PROP_RATIO, (v) => (LOD_PROP_RATIO = v), [0.01, 1], 0.01, 'fraction of its triangles a placed prop or a flying reward draws with (1 = original). New ones pick it up'),
+        ],
+      },
       {
         title: 'tiles',
         keys: [

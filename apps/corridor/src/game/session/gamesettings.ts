@@ -120,6 +120,8 @@ export interface AudioSettings {
   muted: boolean
 }
 
+import type { Detail } from './detail'
+
 export interface GameSettingsData {
   keysV?: number
   padV?: number
@@ -142,6 +144,8 @@ export interface GameSettingsData {
   mapHeading: boolean
   /** the interface the player chose in the Escape menu; null = the deployment's default */
   ui: UiMode | null
+  /** Display ▸ Detail: how much geometry traffic, the car and props draw with (game/session/detail.ts) */
+  detail: Detail
 }
 
 export const SETTINGS_KEY = 'apex-corridor.settings.v1'
@@ -171,6 +175,7 @@ export const DEFAULT_SETTINGS: GameSettingsData = {
   ui: null,
   mapExpand: false,
   mapHeading: false,
+  detail: 'ultra',
 }
 
 export class GameSettings extends SettingsStore<GameSettingsData> {

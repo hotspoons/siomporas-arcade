@@ -59,6 +59,7 @@ export const SETTING_CONTROLS = {
   'display.weather': 'the weather selector',
   'display.perf': 'the performance stats panel toggle',
   'display.aa': 'anti-aliasing',
+  'display.detail': 'model detail (low … ultra)',
   'display.theme': 'dark or light chrome',
   'display.interface': 'the hide-the-interface toggle (M)',
   'display.units': 'mph or km/h',

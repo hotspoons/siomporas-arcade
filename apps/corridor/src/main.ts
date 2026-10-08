@@ -40,6 +40,8 @@ import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './game/
 import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from './game/world/points'
 import { ZoneMarks } from './game/world/markers'
 import { AvatarBeacon } from './game/world/beacon'
+import { setDetail } from './lod/simplify'
+import { DETAILS, applyDetail, type Detail } from './game/session/detail'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
@@ -298,6 +300,8 @@ const tuneUI = new TuneUI({
       }).el,
   },
 })
+// the saved Display ▸ Detail level, into the LOD knobs this browser has not overridden in the panel
+applyDetail(tuneUI, settings.data.detail ?? 'ultra', false)
 
 /**
  * The zone the clock's date and time are read and written in.
@@ -413,6 +417,16 @@ const menu = new GameMenu({
     },
     weather: { options: WEATHERS.map((v) => ({ value: v, label: v })), get: () => WEATHERS[Math.round(T.WEATHER)] ?? WEATHERS[0], set: (v) => setWeatherSelection(v as Weather) },
     perf: { get: () => perfHud.open, set: (v) => { perfHud.show(v); setPerfWanted(v) } },
+    detail: {
+      options: DETAILS.map((v) => ({ value: v, label: v })),
+      get: () => settings.data.detail ?? 'ultra',
+      set: (v) => {
+        settings.update((d) => (d.detail = v as Detail))
+        // a chosen level resets every LOD knob it governs; the panel overrides again from here
+        const n = applyDetail(tuneUI, v as Detail, true)
+        toast(`detail: ${v}${n ? ` · ${n} LOD knob${n === 1 ? '' : 's'} reset` : ''}`, 'ok', 1600)
+      },
+    },
     aa: {
       options: (['auto', 'msaa', 'fxaa', 'smaa', 'off'] as AAMode[]).map((v) => ({ value: v, label: v })),
       get: () => aaMode(),
@@ -2081,6 +2095,9 @@ function ownFadeMaterials(holder: THREE.Object3D): THREE.Material[] {
   return out
 }
 
+/** what the hero car's detail was last set to, so it is only re-applied on a change */
+const heroDetail: { mesh: THREE.Object3D | null; ratio: number } = { mesh: null, ratio: 1 }
+
 /** the camera position, reused by the fade */
 const fadeEye = new THREE.Vector3()
 const fadeAt = new THREE.Vector3()
@@ -2151,7 +2168,13 @@ const modelsHost: ModelHost = {
       const rec = programModels.get(id)
       if (!m || rec?.holder !== holder) return
       holder.add(fitModel(m, entry, entry.height_m))
-      if ((rec.pose.nearFade ?? 0) > 0) rec.fade = ownFadeMaterials(holder)
+      if ((rec.pose.nearFade ?? 0) > 0) {
+        rec.fade = ownFadeMaterials(holder)
+        // A REWARD IS SMALL ON SCREEN AND GONE IN A SECOND: the prop detail (Display ▸ Detail, or
+        // LOD_PROP_RATIO) draws it from a simplified copy made once per asset in a worker. The cash
+        // wad is 116,680 triangles; its cost is vertex work (5 near the camera: 1.1 ms of GPU).
+        setDetail(holder, T.LOD_PROP_RATIO)
+      }
     })
     return id
   },
@@ -4280,6 +4303,12 @@ function frame() {
   beacon.update(camera, !drive.on && drive.car ? drive.car.pos : null, dt)
   // program models that asked to fade near the camera (the money flying at the car)
   fadeProgramModels()
+  // the player's car at its detail (LOD_HERO_RATIO): applied when the knob or the car changes
+  if (drive.car && (heroDetail.mesh !== drive.car.mesh || heroDetail.ratio !== T.LOD_HERO_RATIO)) {
+    heroDetail.mesh = drive.car.mesh
+    heroDetail.ratio = T.LOD_HERO_RATIO
+    setDetail(drive.car.mesh, T.LOD_HERO_RATIO)
+  }
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0
   if (perfHud.open) {
     // Time each pass as it is submitted. `poll` first collects whatever the GPU finished since last

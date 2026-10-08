@@ -27,6 +27,7 @@ import { addComponent } from 'bitecs'
 import { ActorWorld, setPhysical, spawnVehicle } from '../actors/actorworld'
 import { hasComponent, removeComponent } from 'bitecs'
 import { Driver } from './traffic'
+import { setDetail } from '../../lod/simplify'
 import { dentObject, releaseObject, repairObject } from '../vehicle/dents'
 import type { Impact } from '@apex/engine/physics/world'
 import type { TrafficBody } from '../world/physics'
@@ -90,6 +91,8 @@ interface Shown {
   /** gunfire soaked up lately, m/s, decaying: a burst escalates a swerve into a knock */
   heat: number
   heatAt: number
+  /** the detail it was last set to (lod/simplify.ts `setDetail`); 0 = never set */
+  lodWant?: number
 }
 
 /** What a hit did to a car, mildest first. */
@@ -1038,15 +1041,43 @@ export class TrafficLayer {
     else if (s.mesh.parent) s.mesh.removeFromParent()
   }
 
+  private placeCalls = 0
+  /** the cars in the graph this place(), with their distance, for the detail budget */
+  private inView: { s: Shown; d2: number }[] = []
+
+  /**
+   * THE DETAIL BUDGET. Every traffic car is a ~118k-triangle reconstruction; the nearest
+   * LOD_TRAFFIC_FULL_N within LOD_TRAFFIC_FULL_M draw it, the rest a copy simplified to
+   * LOD_TRAFFIC_RATIO (Display ▸ Detail sets all three). Ranked every few frames, and a car's
+   * geometry is swapped only when its rank changes its detail.
+   */
+  private budgetDetail(): void {
+    const list = this.inView
+    list.sort((a, b) => a.d2 - b.d2)
+    const n = Math.max(0, Math.round(T.LOD_TRAFFIC_FULL_N))
+    const far2 = T.LOD_TRAFFIC_FULL_M * T.LOD_TRAFFIC_FULL_M
+    const low = T.LOD_TRAFFIC_RATIO
+    for (let i = 0; i < list.length; i++) {
+      const { s, d2 } = list[i]
+      const want = i < n && d2 <= far2 ? 1 : low
+      if (s.lodWant === want) continue
+      s.lodWant = want
+      setDetail(s.mesh, want)
+    }
+  }
+
   private place(all: boolean, eye?: THREE.Vector3): void {
     const drawM = T.TRAFFIC_DRAW_M
     const glow: { s: Shown; d2: number }[] = []
+    const ranking = ++this.placeCalls % 10 === 0
+    if (ranking) this.inView.length = 0
     for (const s of this.shown) {
       const e = s.e
       if (s.wrecked && s.body) {
         // a loose body: the mesh follows the solver, and the entity follows the mesh
         const q = s.body.pose()
         this.attach(s, true)
+        if (ranking && eye) this.inView.push({ s, d2: (eye.x - q.x) ** 2 + (eye.z - q.z) ** 2 })
         s.mesh.visible = true
         s.lamps.visible = false
         s.mesh.position.set(q.x, q.y, q.z)
@@ -1076,6 +1107,7 @@ export class TrafficLayer {
       // the model's nose is +X; three's rotation about +Y takes +X toward -Z, which is NORTH here
       s.mesh.rotation.set(0, yaw, 0)
       const dist2 = eye ? (eye.x - x) ** 2 + (eye.z + y) ** 2 : 0
+      if (ranking) this.inView.push({ s, d2: dist2 })
       // bulbs on anything close enough to read; the spots are spent afterwards, nearest first
       const showLamps = this.night > 0.08 && dist2 < 80 * 80
       s.lamps.visible = showLamps
@@ -1090,6 +1122,7 @@ export class TrafficLayer {
       }
     }
     this.lightCars(glow)
+    if (ranking) this.budgetDetail()
   }
 
   /**

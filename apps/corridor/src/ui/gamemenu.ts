@@ -53,6 +53,7 @@ export interface GameMenuHost {
     weather: Choice
     perf: Flag
     aa: Choice
+    detail: Choice
     theme: Choice
     interface: Flag
   }
@@ -221,7 +222,8 @@ export class GameMenu {
     if (p.allows('display.relief')) items.push(choice('Relief', d.relief, 'terrain exaggeration — the world reloads'))
     if (p.allows('display.trees')) items.push(choice('Trees', d.trees))
     if (p.allows('display.weather')) items.push(choice('Weather', d.weather))
-    if (['display.perf', 'display.aa'].some((id) => p.allows(id))) sec('Rendering')
+    if (['display.perf', 'display.aa', 'display.detail'].some((id) => p.allows(id))) sec('Rendering')
+    if (p.allows('display.detail')) items.push(choice('Detail', d.detail, 'how much geometry traffic, your car and props draw with — resets the LOD knobs in F6'))
     if (p.allows('display.aa')) items.push(choice('Anti-aliasing', d.aa, 'MSAA reloads the page'))
     if (p.allows('display.perf')) items.push(flag('Performance stats', d.perf, 'F7 — frame rate, p95/p99, draw calls, heap'))
     if (['display.theme', 'display.interface', 'display.units'].some((id) => p.allows(id))) sec('Interface')

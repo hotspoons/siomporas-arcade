@@ -3,11 +3,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store } from './store.mjs'
-import { plan, run, defaultPrefix, workerName, stringsOf, literalsOf, LEDGER_KEY } from './deploy.mjs'
+import { plan, run, defaultPrefix, workerName, stringsOf, literalsOf, LEDGER_KEY, GAME_TOP } from './deploy.mjs'
 import { keyFor } from './deploy/worker.mjs'
 import { MULTIPART_OVER } from './cloudflare.mjs'
 
@@ -297,3 +297,76 @@ test('a file too big for one REST PUT goes up as a multipart upload read from th
   assert.equal(cf.objects.get('corridor/alpha-big/sites/alpha/osm.geojson').type, 'application/geo+json')
   assert.ok(cf.objects.has('corridor/alpha-big/sites/alpha/web/tiles/0/0_0.pack'), 'the small ones still go whole')
 })
+
+test('a game deploy leaves the bake sources home; sources ships them; the raw OSM only when there is no context.json', async () => {
+  const { store } = await volume()
+  const dir = path.join(store.sites, 'alpha')
+  // what dc-metro carried: the game reads context.json and tuning.json, not the rest
+  await writeFile(path.join(dir, 'context.json'), '{"lanes":{},"crossings":[]}')
+  await writeFile(path.join(dir, 'tuning.json'), '{}')
+  await writeFile(path.join(dir, 'branches.json'), JSON.stringify({ big: 'x'.repeat(5000) }))
+  await writeFile(path.join(dir, 'spine_utm.json'), '[]')
+  const keys = (p) => p.objects.map((o) => o.key).filter((k) => k.startsWith('sites/alpha/') && !k.includes('/web/'))
+  const game = await plan({ store, worlds: ['alpha'], transpile })
+  assert.deepEqual(keys(game).sort(), ['sites/alpha/context.json', 'sites/alpha/fixtures.json', 'sites/alpha/manifest.json', 'sites/alpha/tuning.json'])
+  assert.ok(game.objects.some((o) => o.key === 'sites/alpha/web/tiles/0/0_0.pack'), 'the web export always goes')
+  assert.ok(game.warnings.some((w) => /alpha: 3 bake source files left out/.test(w)), game.warnings.join(' | '))
+  assert.equal(game.sources, false)
+  const all = await plan({ store, worlds: ['alpha'], transpile, sources: true })
+  for (const k of ['branches.json', 'spine_utm.json', 'osm.geojson']) assert.ok(keys(all).includes(`sites/alpha/${k}`), k)
+  // beta has no context.json: its OSM is what the minimap and the junctions fall back to, so it goes
+  const beta = await plan({ store, worlds: ['beta'], transpile })
+  assert.ok(beta.objects.some((o) => o.key === 'sites/beta/osm.geojson'))
+})
+
+test('the plan names the monoliths: the biggest things the game loads whole, never the tiles', async () => {
+  const { store } = await volume()
+  await writeFile(path.join(store.sites, 'alpha', 'web', 'chm_2m.png'), Buffer.alloc(3 * 2 ** 20))
+  await writeFile(path.join(store.sites, 'alpha', 'web', 'tiles', '0', '1_1.pack'), Buffer.alloc(2 * 2 ** 20))
+  const p = await plan({ store, worlds: ['alpha'], transpile })
+  assert.deepEqual(p.largest.map((o) => o.key), ['sites/alpha/web/chm_2m.png'])
+})
+
+test('every site file the game client fetches by name is in the game set — a deploy cannot leave one behind', async () => {
+  // MEASURED, NOT LISTED: walk the viewer's source for `${…slug…}/<file>` and hold GAME_TOP to it
+  const src = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'apps', 'corridor', 'src')
+  const found = new Set()
+  const walkSrc = async (d) => {
+    for (const e of await readdir(d, { withFileTypes: true })) {
+      const f = path.join(d, e.name)
+      if (e.isDirectory()) await walkSrc(f)
+      else if (/\.ts$/.test(e.name) && !/\.test\.ts$/.test(e.name)) {
+        for (const m of (await readFile(f, 'utf8')).matchAll(/\$\{[^}]*slug[^}]*\}\/([a-z_]+\.(?:json|geojson|png|jpg))/g)) found.add(m[1])
+      }
+    }
+  }
+  await walkSrc(src)
+  assert.ok(found.size >= 10, `the scan found too little to trust: ${[...found]}`)
+  const missing = [...found].filter((f) => !GAME_TOP.has(f) && f !== 'osm.geojson')
+  assert.deepEqual(missing, [], `the client fetches these, and a game deploy would leave them out: ${missing.join(', ')}`)
+})
+
+test('one failed upload stops the whole deploy — the other workers do not carry on into a failed run', async () => {
+  const { store, root } = await volume()
+  const appDir = path.join(root, 'dist')
+  await mkdir(appDir, { recursive: true })
+  await writeFile(path.join(appDir, 'index.html'), '<!doctype html>')
+  for (let i = 0; i < 40; i++) await writeFile(path.join(store.sites, 'alpha', 'web', 'tiles', '0', `t${i}.pack`), Buffer.alloc(8, i))
+  const cf = fakeCloudflare()
+  let puts = 0
+  let after = 0
+  let failed = false
+  cf.putObject = async () => {
+    const n = ++puts
+    if (failed) after++
+    await new Promise((r) => setTimeout(r, 2))
+    if (n === 5) { failed = true; throw Object.assign(new Error('HTTP 429'), { status: 429 }) }
+    return 8
+  }
+  const p = await plan({ store, worlds: ['alpha'], transpile, appDir })
+  await assert.rejects(run({ cf, accountId: 'acc', bucket: 'existing', prefix: 'corridor/alpha-x', plan: p, worker: { name: 'w', workersDev: false }, appDir, log: () => {}, concurrency: 4 }), /429/)
+  // the three others may each have had one upload in flight; nothing new starts after the failure
+  assert.ok(after <= 3, `${after} uploads started after the failure`)
+  assert.ok(puts < p.objects.length, 'the deploy stopped well short of the end')
+})
+

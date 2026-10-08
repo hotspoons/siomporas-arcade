@@ -1440,7 +1440,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
  *   POST   /api/deploy/token  {token}    hold a token in memory; DELETE forgets it
  *   GET    /api/deploy/cloudflare        accounts, zones, buckets, the workers.dev subdomain
  *   POST   /api/deploy/bucket {account, name}
- *   POST   /api/deploy/plan   {worlds}   the object list, as a dry run
+ *   POST   /api/deploy/plan   {worlds, sources?}   the object list, as a dry run (sources: ship the bake's raw files too)
  *   POST   /api/deploy/start  {...}      a run; its log is the deploy's progress
  *   GET    /api/deploy/revisions?account=&bucket=   the ledger of deploys in a bucket
  *   GET    /api/deploy/history           every deploy started from this editor: what was asked, and the URL it got
@@ -1508,7 +1508,7 @@ async function deployApi(req, res, seg, q) {
     }
     if (seg[0] === 'plan' && req.method === 'POST') {
       const body = await readJson(req)
-      const p = await deploy.plan({ store, worlds: body?.worlds ?? [], assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP })
+      const p = await deploy.plan({ store, worlds: body?.worlds ?? [], assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP, sources: !!body?.sources })
       // the object list is long; the panel wants the shape of it, and the keys only on request
       return json(res, 200, { ...p, objects: body?.objects ? p.objects.map((o) => ({ key: o.key, bytes: o.bytes, group: o.group })) : undefined, count: p.objects.length })
     }
@@ -1531,7 +1531,7 @@ async function deployApi(req, res, seg, q) {
         slug: worlds.join('+'),
         label: `deploy ${worlds.join(', ')} → ${name}`,
         task: async ({ log }) => {
-          const p = await deploy.plan({ store, worlds, assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP })
+          const p = await deploy.plan({ store, worlds, assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP, sources: !!body.sources })
           const out = await deploy.run({
             cf: cfFor(), accountId: body.account, bucket: body.bucket, createBucket: body.createBucket !== false, prefix, plan: p,
             worker, appDir: APP, prune: !!body.prune, replacePrefix: body.replacePrefix || null, dryRun: !!body.dryRun, log,

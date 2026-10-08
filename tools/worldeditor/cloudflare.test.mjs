@@ -105,7 +105,7 @@ test('queries: accounts, zones, subdomain, buckets — with the bearer header an
 test('objects: put with the content type, get back the same bytes, delete, and a key with slashes and spaces survives the path', async () => {
   const f = await fake()
   try {
-    const cf = new Cloudflare('t', { base: f.base })
+    const cf = new Cloudflare('t', { base: f.base, objectsVia: 'rest' })
     const key = 'corridor/alpha-1/assetsvc/catalog/my car/file/mesh.finished.glb'
     const n = await cf.putObject('acc1', 'games', key, Buffer.from('glb-bytes'), 'model/gltf-binary')
     assert.equal(n, 9)
@@ -205,7 +205,8 @@ test('sigv4 reproduces the signatures in AWS\'s own S3 examples', () => {
 })
 
 /** R2's S3 endpoint, in memory: multipart only, and every request's signature checked */
-function fakeS3({ token, tokenId, failPart = null, flakyPart = null } = {}) {
+function fakeS3({ token, tokenId, failPart = null, flakyPart = null, throttle = 0 } = {}) {
+  let throttled = 0
   const reqs = []
   const uploads = new Map()
   const objects = new Map()
@@ -229,6 +230,15 @@ function fakeS3({ token, tokenId, failPart = null, flakyPart = null } = {}) {
       const id = `up${nextId++}`
       uploads.set(id, { key, type: req.headers['content-type'], parts: new Map() })
       res.writeHead(200); return res.end(`<InitiateMultipartUploadResult><UploadId>${id}</UploadId></InitiateMultipartUploadResult>`)
+    }
+    // a plain object: PUT and DELETE with no upload id
+    if (!u.searchParams.has('uploadId')) {
+      if (req.method === 'PUT') {
+        if (throttled < throttle) { throttled++; res.writeHead(429, { 'content-type': 'application/xml', 'retry-after': '1' }); return res.end('<Error><Code>SlowDown</Code><Message>slow down</Message></Error>') }
+        objects.set(key, { body, type: req.headers['content-type'] })
+        res.writeHead(200, { etag: '"x"' }); return res.end()
+      }
+      if (req.method === 'DELETE') { objects.delete(key); res.writeHead(204); return res.end() }
     }
     const up = uploads.get(u.searchParams.get('uploadId'))
     if (!up) return fail(404, 'NoSuchUpload')
@@ -309,3 +319,35 @@ test('an account-owned token finds its access key id at the account verify', asy
     f.close()
   }
 })
+
+test('small objects go up through S3 by default, not the rate-limited REST API, and so do deletes', async () => {
+  const f = await fake()
+  const s3 = await fakeS3({ token: 'user-token', tokenId: 't' })
+  try {
+    const cf = new Cloudflare('user-token', { base: f.base, s3: () => s3.base })
+    assert.equal(await cf.putObject('acc1', 'games', 'corridor/a/sites/x/web/tiles/0/0_0.pack', Buffer.from('tile'), 'application/octet-stream'), 4)
+    assert.equal(s3.objects.get('corridor/a/sites/x/web/tiles/0/0_0.pack').body.toString(), 'tile')
+    assert.equal(f.reqs.filter((r) => r.url.includes('/r2/buckets/')).length, 0, 'not one object call went to the REST API')
+    assert.equal(await cf.deleteObject('acc1', 'games', 'corridor/a/sites/x/web/tiles/0/0_0.pack'), true)
+    assert.equal(s3.objects.size, 0)
+  } finally {
+    f.close()
+    s3.close()
+  }
+})
+
+test('a 429 waits as long as Retry-After says, then goes through', async () => {
+  const f = await fake()
+  const s3 = await fakeS3({ token: 'user-token', tokenId: 't', throttle: 2 })
+  try {
+    const waits = []
+    const cf = new Cloudflare('user-token', { base: f.base, s3: () => s3.base, retryWait: (n, e) => { waits.push(e.retryAfter); return 1 } })
+    await cf.putObject('acc1', 'games', 'k', Buffer.from('v'))
+    assert.deepEqual(waits, [1, 1], 'each 429 carried its Retry-After to the wait')
+    assert.equal(s3.objects.get('k').body.toString(), 'v')
+  } finally {
+    f.close()
+    s3.close()
+  }
+})
+

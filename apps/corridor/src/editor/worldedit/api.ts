@@ -249,6 +249,10 @@ export interface DeployPlan {
   app: { files: number; bytes: number } | null
   warnings: string[]
   problems: string[]
+  /** whether the bake sources the game never reads were included */
+  sources?: boolean
+  /** the biggest things the game loads WHOLE rather than as tiles — what is left to cut up */
+  largest?: { key: string; bytes: number }[]
 }
 export interface DeployRevision {
   prefix: string
@@ -285,6 +289,8 @@ export interface DeployRequest {
   /** delete this prefix's objects, then upload the current bake in its place */
   replacePrefix?: string | null
   dryRun?: boolean
+  /** also upload the bake sources the game never reads (raw OSM, branches, spine…) */
+  sources?: boolean
 }
 
 /* ---- what the new services return ------------------------------------------------------------ */
@@ -556,7 +562,7 @@ export const api = {
   deployForgetToken: () => call<{ token: DeployStatus['token'] }>('/api/deploy/token', { method: 'DELETE' }),
   deployCloudflare: (account?: string | null) => call<DeployCloudflare>(`/api/deploy/cloudflare${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   deployCreateBucket: (account: string, name: string) => call<{ bucket: string }>('/api/deploy/bucket', { method: 'POST', body: JSON.stringify({ account, name }) }),
-  deployPlan: (worlds: string[]) => call<DeployPlan>('/api/deploy/plan', { method: 'POST', body: JSON.stringify({ worlds }) }),
+  deployPlan: (worlds: string[], sources = false) => call<DeployPlan>('/api/deploy/plan', { method: 'POST', body: JSON.stringify({ worlds, sources }) }),
   deployRevisions: (account: string, bucket: string) => call<{ deployments: DeployRevision[] }>(`/api/deploy/revisions?account=${encodeURIComponent(account)}&bucket=${encodeURIComponent(bucket)}`),
   deployHistory: () => call<{ deploys: DeployRecord[] }>('/api/deploy/history'),
   deployStart: (body: DeployRequest) => call<{ run: Run; prefix: string; worker: string }>('/api/deploy/start', { method: 'POST', body: JSON.stringify(body) }),

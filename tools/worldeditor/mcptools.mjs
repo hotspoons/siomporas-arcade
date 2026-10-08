@@ -246,9 +246,9 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     T(
       'deploy_plan',
       'What a deploy would upload, without uploading it. objects true includes every key; leave it off unless you need the list.',
-      { worlds: { type: 'array', items: { type: 'string' }, description: 'world slugs' }, objects: bool('include every object key') },
+      { worlds: { type: 'array', items: { type: 'string' }, description: 'world slugs' }, objects: bool('include every object key'), sources: bool('also ship the bake sources the game never reads (raw OSM, branches, spine…); default false') },
       ['worlds'],
-      (a) => post('/api/deploy/plan', { worlds: a.worlds, objects: !!a.objects }),
+      (a) => post('/api/deploy/plan', { worlds: a.worlds, objects: !!a.objects, sources: !!a.sources }),
     ),
     T(
       'deploy_start',
@@ -263,6 +263,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
         dryRun: bool('count the upload and write nothing'),
         createBucket: bool('create the bucket if it is missing. default true'),
         replacePrefix: str('an old prefix to delete after a successful deploy'),
+        sources: bool('also upload the bake sources the game never reads (raw OSM, branches, spine…). default false: a game deploy'),
       },
       ['worlds', 'account', 'bucket'],
       (a) => post('/api/deploy/start', a),

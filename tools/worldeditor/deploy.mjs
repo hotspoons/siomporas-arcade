@@ -30,6 +30,7 @@ import { open, readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MULTIPART_OVER } from './cloudflare.mjs'
+import { SITE_DOCS } from './mcp.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 /** the Worker module, as published */
@@ -75,6 +76,20 @@ export function contentType(file) {
 
 /** the site's files the viewer can read: the export's `web/`, the manifest, the docs, the OSM */
 const SITE_TOP = new Set(['.json', '.geojson', '.png'])
+
+/**
+ * THE TOP-LEVEL FILES THE GAME READS. Everything under `web/` is the game's own export and always
+ * goes; at the top of a site the game reads only the documents people author (`SITE_DOCS`, the same
+ * list the MCP projects), the manifest, the splats list, and `context.json` — the bake's compact
+ * projection of the OSM extract that the minimap and the junctions read. The rest is what the bake
+ * worked from: on dc-metro that was osm.geojson 389 MB, branches.json 81 MB, spine_utm.json 30 MB
+ * and a dozen more, ~520 MB a deploy for nothing the game opens (Rich, 2026-10-08: "keep my free R2
+ * bucket size down"). `deploy.test.mjs` scans the client for every `sites/<slug>/<file>` it fetches
+ * and fails if one is missing here, so this cannot drift into breaking a deployed game.
+ */
+export const GAME_TOP = new Set([...SITE_DOCS, 'manifest.json', 'context.json', 'splats.json'])
+/** read only when a site has no context.json (bakes from before it), as the fallback the viewer takes */
+const GAME_FALLBACK = { 'osm.geojson': 'context.json' }
 
 /** a default prefix: `corridor/<worlds>-<stamp>`, which is what Rich asked for */
 export function defaultPrefix(worlds, at = new Date()) {
@@ -143,7 +158,7 @@ export function stringsOf(doc, into = new Set()) {
  * @param {typeof fetch} [o.fetch]
  * @param {string} [o.appDir]           the built app (dist); listed for the summary only
  */
-export async function plan({ store, worlds, assetsvc = '', transpile, fetch = globalThis.fetch, appDir = null }) {
+export async function plan({ store, worlds, assetsvc = '', transpile, fetch = globalThis.fetch, appDir = null, sources = false }) {
   const objects = []
   const warnings = []
   const problems = []
@@ -163,14 +178,26 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
     }
     baked.push(slug)
     docs.push(manifest)
-    for (const rel of await walk(dir)) {
+    const files = await walk(dir)
+    const have = new Set(files)
+    let skipped = 0
+    let skippedBytes = 0
+    for (const rel of files) {
       const top = !rel.includes('/')
       if (top ? !SITE_TOP.has(path.extname(rel)) : !rel.startsWith('web/')) continue
+      // a bake source the game never opens stays home unless asked for (`sources`)
+      if (top && !sources && !GAME_TOP.has(rel) && !(GAME_FALLBACK[rel] && !have.has(GAME_FALLBACK[rel]))) {
+        skipped++
+        skippedBytes += (await stat(path.join(dir, rel))).size
+        continue
+      }
       const file = path.join(dir, rel)
       const size = (await stat(file)).size
       add({ key: `sites/${slug}/${rel}`, file, bytes: size, contentType: contentType(rel), group: rel.startsWith('web/') ? 'bake' : 'docs' })
-      if (top && rel.endsWith('.json') && rel !== 'manifest.json') docs.push(await store.readJson(file))
+      // the asset closure reads the authored docs; a bake source (tens of MB of JSON) is no asset list
+      if (top && rel.endsWith('.json') && rel !== 'manifest.json' && GAME_TOP.has(rel)) docs.push(await store.readJson(file))
     }
+    if (skipped) warnings.push(`${slug}: ${skipped} bake source file${skipped === 1 ? '' : 's'} left out (${(skippedBytes / 2 ** 20).toFixed(1)} MiB) — the game does not read them; tick "include bake sources" to ship them`)
   }
 
   /* ---- the index the viewer's site picker reads: the chosen worlds only ------------------- */
@@ -367,8 +394,22 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
     g.objects++
     g.bytes += o.bytes
   }
+  /*
+   * THE MONOLITHS. The game streams most of a world as tiles; anything it loads WHOLE is a cost every
+   * player pays up front and in memory, however little of the world they see. The largest objects of
+   * the game's own set are listed so each plan shows what is left to cut into tiles (Rich,
+   * 2026-10-08: "a good tell how many monoliths we have left").
+   */
+  const tiled = (k) => /\/web\/(tiles|pyramid|vt|pyr)\//.test(k) || /\/web\/[^/]+\/\d+[_/]/.test(k)
+  const largest = objects
+    .filter((o) => o.key.startsWith('sites/') && !tiled(o.key) && o.bytes >= 2 ** 20)
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, 12)
+    .map((o) => ({ key: o.key, bytes: o.bytes }))
   return {
     worlds: baked,
+    sources,
+    largest,
     levels: levels.map((l) => l.id),
     assets: { items: [...assets.items.keys()], builds: assets.builds, materials: assets.materials },
     objects,
@@ -421,6 +462,28 @@ async function putFileLarge(cf, accountId, bucket, key, file, contentType, log) 
   }
 }
 
+/**
+ * `count` workers, each calling `step` until it answers false. THE FIRST FAILURE STOPS THEM ALL: a
+ * plain Promise.all rejects on the first throw and leaves the other workers running, and the
+ * dc-metro log showed exactly that — uploads carrying on to object 4,300 after the deploy had
+ * already been reported failed at 3,230.
+ */
+async function pool(count, step) {
+  let failed = null
+  const worker = async () => {
+    while (!failed) {
+      try {
+        if (!(await step())) return
+      } catch (e) {
+        failed ??= e
+        return
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, count) }, worker))
+  if (failed) throw failed
+}
+
 /** Every object under a prefix, from its deploy manifest or by listing. */
 async function deletePrefix(cf, accountId, bucket, prefix, concurrency) {
   prefix = String(prefix).replace(/^\/+|\/+$/g, '')
@@ -430,15 +493,13 @@ async function deletePrefix(cf, accountId, bucket, prefix, concurrency) {
     : (await cf.listObjects(accountId, bucket, `${prefix}/`)).map((o) => o.key)
   const q = [...new Set([...listed, `${prefix}/deploy.json`])]
   let n = 0
-  const del = async () => {
-    for (;;) {
-      const k = q.shift()
-      if (!k) return
-      await cf.deleteObject(accountId, bucket, k)
-      n++
-    }
-  }
-  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, del))
+  await pool(concurrency, async () => {
+    const k = q.shift()
+    if (!k) return false
+    await cf.deleteObject(accountId, bucket, k)
+    n++
+    return true
+  })
   return n
 }
 
@@ -462,7 +523,7 @@ async function deletePrefix(cf, accountId, bucket, prefix, concurrency) {
  * @param {typeof fetch} [o.fetch]
  * @param {number} [o.concurrency]
  */
-export async function run({ cf, accountId, bucket, createBucket = true, prefix, plan: p, worker, appDir, prune = false, replacePrefix = null, dryRun = false, log, fetch = globalThis.fetch, concurrency = 4 }) {
+export async function run({ cf, accountId, bucket, createBucket = true, prefix, plan: p, worker, appDir, prune = false, replacePrefix = null, dryRun = false, log, fetch = globalThis.fetch, concurrency = 8 }) {
   const at = new Date().toISOString()
   prefix = String(prefix).replace(/^\/+|\/+$/g, '')
   if (!prefix) throw new Error('a prefix is required (the default is corridor/<world>-<stamp>)')
@@ -493,31 +554,29 @@ export async function run({ cf, accountId, bucket, createBucket = true, prefix, 
   let bytes = 0
   const keys = []
   const queue = [...p.objects]
-  const worker1 = async () => {
-    for (;;) {
-      const o = queue.shift()
-      if (!o) return
-      const key = `${prefix}/${o.key}`
-      let n
-      if (o.file && o.bytes > MULTIPART_OVER) {
-        // A FILE TOO BIG FOR ONE REQUEST goes up in parts, read from the volume a part at a time:
-        // the REST PUT's front answers a 371 MiB osm.geojson with a 413, and four of those held
-        // in memory at once is a pod's whole allowance
-        log(`  ${o.key}  (${mib(o.bytes)}) — multipart`)
-        n = await putFileLarge(cf, accountId, bucket, key, o.file, o.contentType, log)
-      } else {
-        const body = await bodyOf(o, fetch)
-        n = body.byteLength > MULTIPART_OVER
-          ? await cf.putObjectLarge(accountId, bucket, key, { size: body.byteLength, read: async (off, len) => body.subarray(off, off + len) }, o.contentType, { log })
-          : await cf.putObject(accountId, bucket, key, body, o.contentType)
-      }
-      keys.push(key)
-      sent++
-      bytes += n
-      if (sent % 50 === 0 || n > 4 * 2 ** 20) log(`  ${sent}/${p.objects.length}  ${o.key}  (${mib(n)})`)
+  await pool(concurrency, async () => {
+    const o = queue.shift()
+    if (!o) return false
+    const key = `${prefix}/${o.key}`
+    let n
+    if (o.file && o.bytes > MULTIPART_OVER) {
+      // A FILE TOO BIG FOR ONE REQUEST goes up in parts, read from the volume a part at a time:
+      // the REST PUT's front answers a 371 MiB osm.geojson with a 413, and four of those held
+      // in memory at once is a pod's whole allowance
+      log(`  ${o.key}  (${mib(o.bytes)}) — multipart`)
+      n = await putFileLarge(cf, accountId, bucket, key, o.file, o.contentType, log)
+    } else {
+      const body = await bodyOf(o, fetch)
+      n = body.byteLength > MULTIPART_OVER
+        ? await cf.putObjectLarge(accountId, bucket, key, { size: body.byteLength, read: async (off, len) => body.subarray(off, off + len) }, o.contentType, { log })
+        : await cf.putObject(accountId, bucket, key, body, o.contentType)
     }
-  }
-  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker1))
+    keys.push(key)
+    sent++
+    bytes += n
+    if (sent % 50 === 0 || n > 4 * 2 ** 20) log(`  ${sent}/${p.objects.length}  ${o.key}  (${mib(n)})`)
+    return true
+  })
   log(`uploaded ${sent} objects, ${mib(bytes)}`)
 
   /* ---- the ledger: this deploy, and every one before it ---------------------------------- */
@@ -564,15 +623,13 @@ export async function run({ cf, accountId, bucket, createBucket = true, prefix, 
       const oldKeys = m?.keys ? m.keys.map((k) => `${d.prefix}/${k}`) : (await cf.listObjects(accountId, bucket, `${d.prefix}/`)).map((o) => o.key)
       log(`pruning ${d.prefix} (${d.worlds.join(', ')}, ${d.at}): ${oldKeys.length} objects`)
       const q = [...oldKeys, `${d.prefix}/deploy.json`]
-      const del = async () => {
-        for (;;) {
-          const k = q.shift()
-          if (!k) return
-          await cf.deleteObject(accountId, bucket, k)
-          pruned.objects++
-        }
-      }
-      await Promise.all(Array.from({ length: Math.max(1, concurrency) }, del))
+      await pool(concurrency, async () => {
+        const k = q.shift()
+        if (!k) return false
+        await cf.deleteObject(accountId, bucket, k)
+        pruned.objects++
+        return true
+      })
       pruned.deployments++
     }
     if (old.length) {

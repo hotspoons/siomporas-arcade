@@ -66,23 +66,42 @@ export function sigv4({ method, url, headers, accessKey, secret, region = 'auto'
 /** a transient failure worth another go: the network, a 429, a 5xx */
 const transient = (e) => !e?.status || e.status === 429 || e.status >= 500
 
-/** `fn`, again on a transient failure: four tries over ~7 s. A 9,000-object deploy meets a blip. */
-async function retrying(fn, { tries = 4, wait = (n) => 500 * 2 ** n } = {}) {
+/**
+ * How long to wait before try `n + 1`: what Cloudflare asked for (`Retry-After`, capped at two
+ * minutes), else 1, 2, 4, 8, 16 s. The dc-metro deploy died on a 429 after ~3,200 objects with a
+ * retry that had given up 3.5 s into a rate-limit window measured in minutes.
+ */
+const backoff = (n, e) => (e?.retryAfter > 0 ? Math.min(120, e.retryAfter) * 1000 : Math.min(30_000, 1000 * 2 ** n))
+
+/** `fn`, again on a transient failure: six tries, waiting as `backoff` says (or `wait`, in a test). */
+async function retrying(fn, { tries = 6, wait = backoff } = {}) {
   for (let n = 0; ; n++) {
     try {
       return await fn()
     } catch (e) {
       if (n + 1 >= tries || !transient(e)) throw e
-      await new Promise((r) => setTimeout(r, wait(n)))
+      await new Promise((r) => setTimeout(r, wait(n, e)))
     }
   }
 }
 
+/** seconds from a Retry-After header (a number, or an HTTP date), or 0 */
+function retryAfterOf(r) {
+  const v = r?.headers?.get?.('retry-after')
+  if (!v) return 0
+  const n = Number(v)
+  if (Number.isFinite(n)) return Math.max(0, n)
+  const t = Date.parse(v)
+  return Number.isFinite(t) ? Math.max(0, (t - Date.now()) / 1000) : 0
+}
+
 export class CloudflareError extends Error {
-  constructor(message, status, errors = []) {
+  constructor(message, status, errors = [], retryAfter = 0) {
     super(message)
     this.status = status
     this.errors = errors
+    /** seconds Cloudflare asked us to wait (a 429's Retry-After), or 0 */
+    this.retryAfter = retryAfter
   }
 }
 
@@ -131,11 +150,18 @@ export function assetHash(body) {
 
 /** The REST calls. `fetch` and `base` are injectable so a test can stand in for Cloudflare. */
 export class Cloudflare {
-  constructor(token, { base = API, fetch = globalThis.fetch, s3 = (accountId) => `https://${accountId}.r2.cloudflarestorage.com`, retryWait } = {}) {
+  constructor(token, { base = API, fetch = globalThis.fetch, s3 = (accountId) => `https://${accountId}.r2.cloudflarestorage.com`, retryWait, objectsVia = 's3' } = {}) {
     this.base = base.replace(/\/$/, '')
     this.fetch = fetch
     this.s3Base = s3
     this.retryWait = retryWait
+    /**
+     * WHERE OBJECT WRITES GO. 's3' (the default): R2's S3 endpoint. The REST API is the account's
+     * management API, rate-limited for the whole account (~1,200 requests per five minutes), and a
+     * deploy is thousands of objects — dc-metro hit a 429 at ~3,200 (2026-10-08). 'rest' keeps the old
+     * path, for a token that cannot be used as S3 credentials.
+     */
+    this.objectsVia = objectsVia
     // a closure rather than a field, so `JSON.stringify(cf)` or a debugger dump shows nothing
     const raw = () => (typeof token === 'function' ? token() : token)
     this.auth = () => `Bearer ${raw()}`
@@ -165,12 +191,12 @@ export class Cloudflare {
     try {
       doc = text ? JSON.parse(text) : null
     } catch {
-      throw new CloudflareError(`${method} ${path}: HTTP ${r.status}, not JSON: ${text.slice(0, 200)}`, r.status)
+      throw new CloudflareError(`${method} ${path}: HTTP ${r.status}, not JSON: ${text.slice(0, 200)}`, r.status, [], retryAfterOf(r))
     }
     if (!r.ok || (doc && doc.success === false)) {
       const errors = doc?.errors ?? []
       const msg = errors.map((e) => `${e.code ? `${e.code}: ` : ''}${e.message}`).join('; ') || `HTTP ${r.status}`
-      throw new CloudflareError(`${method} ${path}: ${msg}`, r.status, errors)
+      throw new CloudflareError(`${method} ${path}: ${msg}`, r.status, errors, retryAfterOf(r))
     }
     return doc?.result ?? doc
   }
@@ -240,11 +266,15 @@ export class Cloudflare {
   }
 
   /**
-   * One object up, whole, through the REST API. Fine for tiles, docs and models — not for anything
-   * over MULTIPART_OVER, which the API's front refuses (see `putObjectLarge`).
+   * One object up, whole: an S3 PUT (see `objectsVia`), or the REST API's. Fine for tiles, docs and
+   * models — not for anything over MULTIPART_OVER (see `putObjectLarge`).
    */
   async putObject(accountId, bucket, key, body, contentType = 'application/octet-stream') {
     const bytes = body instanceof Uint8Array ? body : Buffer.from(body)
+    if (this.objectsVia === 's3') {
+      await retrying(() => this.#s3(accountId, 'PUT', bucket, key, { body: bytes, headers: { 'content-type': contentType } }), { wait: this.retryWait })
+      return bytes.byteLength
+    }
     await retrying(() => this.api(this.#objectPath(accountId, bucket, key), {
       method: 'PUT',
       body: bytes,
@@ -288,7 +318,7 @@ export class Cloudflare {
     if (!r.ok) {
       const code = text.match(/<Code>([^<]*)<\/Code>/)?.[1]
       const msg = text.match(/<Message>([^<]*)<\/Message>/)?.[1]
-      throw new CloudflareError(`S3 ${method} ${key}${query.partNumber ? ` part ${query.partNumber}` : ''}: HTTP ${r.status}${code ? ` ${code}` : ''}${msg ? `: ${msg}` : ''}`, r.status)
+      throw new CloudflareError(`S3 ${method} ${key}${query.partNumber ? ` part ${query.partNumber}` : ''}: HTTP ${r.status}${code ? ` ${code}` : ''}${msg ? `: ${msg}` : ''}`, r.status, [], retryAfterOf(r))
     }
     return { headers: r.headers, text }
   }
@@ -339,6 +369,12 @@ export class Cloudflare {
   }
 
   async deleteObject(accountId, bucket, key) {
+    // a prune is thousands of deletes: the same rate limit as the writes, so the same way round it.
+    // S3 answers 204 whether or not the key existed, so this cannot tell — it reports true.
+    if (this.objectsVia === 's3') {
+      await retrying(() => this.#s3(accountId, 'DELETE', bucket, key), { wait: this.retryWait })
+      return true
+    }
     const r = await this.api(this.#objectPath(accountId, bucket, key), { method: 'DELETE', raw: true })
     if (r.status !== 404 && !r.ok) throw new CloudflareError(`DELETE ${key}: HTTP ${r.status}`, r.status)
     return r.status !== 404

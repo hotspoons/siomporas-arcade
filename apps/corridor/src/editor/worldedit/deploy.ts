@@ -27,6 +27,28 @@ export interface DeployOpts {
 
 const MiB = (n: number) => `${(n / 2 ** 20).toFixed(1)} MiB`
 
+/**
+ * SHIP THE BAKE SOURCES TOO? Off by default: a game deploy carries what the game reads, and the raw
+ * OSM, branches and spine files a bake works from — ~520 MB on dc-metro — stay on the volume (Rich,
+ * 2026-10-08: "keep my free R2 bucket size down"). Remembered per browser, so whoever deploys a full
+ * copy for the editor keeps getting one.
+ */
+const SOURCES_KEY = 'corridor.deploy.sources'
+function storedSources(): boolean {
+  try {
+    return localStorage.getItem(SOURCES_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+function storeSources(on: boolean): void {
+  try {
+    localStorage.setItem(SOURCES_KEY, on ? '1' : '0')
+  } catch {
+    /* private window: it just will not stick */
+  }
+}
+
 export class DeployPanel {
   private o: DeployOpts
   private status: DeployStatus | null = null
@@ -48,6 +70,7 @@ export class DeployPanel {
     zoneId: '',
     host: '',
     prune: false,
+    sources: storedSources(),
   }
   /** set for one start(): delete this prefix, then upload the current bake there */
   private replacePrefix: string | null = null
@@ -103,7 +126,7 @@ export class DeployPanel {
     this.planning = true
     this.render()
     try {
-      this.plan = await api.deployPlan(this.worlds)
+      this.plan = await api.deployPlan(this.worlds, this.form.sources)
     } catch (e) {
       toast((e as Error).message, 'danger', 8000)
     } finally {
@@ -147,6 +170,7 @@ export class DeployPanel {
         prune: f.prune,
         replacePrefix,
         dryRun,
+        sources: f.sources,
       })
       toast(`${run.label} started`, 'ok')
       void this.o.logs.open(run.id)
@@ -291,6 +315,11 @@ export class DeployPanel {
     if (!f.bucket || f.newBucket) xb.append(textField({ label: 'New bucket', value: f.newBucket, placeholder: 'corridor-games', note: 'made on the first deploy if it does not exist', onChange: (v) => (f.newBucket = v.trim()) }))
     xb.append(textField({ label: 'Prefix', value: f.prefix, note: 'every object of this deploy lives under it, so an old copy can be deleted whole', onChange: (v) => { f.prefix = v.trim(); f.prefixTouched = true } }))
     xb.append(toggle({ label: 'delete older copies of these worlds from the bucket afterwards', value: f.prune, onChange: (v) => (f.prune = v) }))
+    xb.append(toggle({
+      label: 'include bake sources (raw OSM, branches, spine…) — the game does not read them',
+      value: f.sources,
+      onChange: (v) => { f.sources = v; storeSources(v); this.plan = null; this.render() },
+    }))
     if (this.cf && f.account && f.bucket && !f.newBucket) {
       xb.append(button({ label: 'What is in the bucket already', icon: 'queue-list', variant: 'ghost', onClick: async () => {
         try {
@@ -317,6 +346,8 @@ export class DeployPanel {
       const builds = Object.entries(p.assets.builds).filter(([, v]) => v.length).map(([k, v]) => `${k} ${v.length}`).join(' · ')
       if (builds) gb.append(readout('builds', builds, false))
       if (p.app) gb.append(readout('app', `${p.app.files} files · ${MiB(p.app.bytes)}`, false))
+      // what the game still loads whole: each one is a monolith waiting to be cut into tiles
+      if (p.largest?.length) gb.append(readout('loaded whole', p.largest.slice(0, 6).map((o) => `${o.key.split('/').slice(2).join('/')} ${MiB(o.bytes)}`).join(' · '), false))
       for (const w of p.warnings) gb.append(el('div', 'panel-hint warn', `⚠ ${w}`))
       for (const x of p.problems) gb.append(el('div', 'panel-hint warn', `✕ ${x}`))
     }

@@ -962,14 +962,19 @@ export let WATER_REFLECT_FAR = 300
  */
 export let WATER_REFLECT_REACH = 75
 /**
- * How far from the EYE the sea gate looks for ground at the waterline (m). The sea plane — and its
- * mirror — stands down when no held ground within this reach of the camera comes down to sea level.
- * Without it the gate reads the whole resident tile set, so one coastal tile kilometres away keeps
- * the sea drawn (and the whole scene rendered a second time) while the eye is deep inland: measured
- * 8 km from any waterline with the mirror still running. Near the coast the low ground comes within
- * reach and the sea returns. 0 falls back to the site-wide floor.
+ * THE SEA GATE (water.ts `seaVisible`): the sea plane, and the planar mirror that costs a whole
+ * second scene render, are drawn only when real sea is near or ahead. The ground is sampled on a
+ * disc of NEAR_M round the eye and down a cone of CONE_DEG either side of the view out to CONE_M;
+ * it takes MIN_HITS samples under the waterline. One low sample is a pit, not a coast — the old
+ * ±4 km grid found a −7 m gravel pit and mirrored the scene on the DC Beltway, 11 ms a frame.
+ * CONE_M 0 falls back to the site-wide floor. The answer is reused until the eye moves RECHECK_M
+ * or turns 10°.
  */
-export let WATER_SEA_REACH = 4000
+export let WATER_SEA_CONE_M = 1609
+export let WATER_SEA_CONE_DEG = 55
+export let WATER_SEA_NEAR_M = 400
+export let WATER_SEA_MIN_HITS = 3
+export let WATER_SEA_RECHECK_M = 25
 /**
  * SKY AND HORIZON, for the water the one planar mirror cannot serve.
  *
@@ -2143,7 +2148,10 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.6], 0.02, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
           tune('WATER_REFLECT_FAR', () => WATER_REFLECT_FAR, (v) => (WATER_REFLECT_FAR = v), [0, 20000], 50, 'how far the mirrored scene is drawn (m): the mirror detail dial. Lower culls distant tiles/horizon/trees from the reflection; 0 draws the whole main range'),
           tune('WATER_REFLECT_REACH', () => WATER_REFLECT_REACH, (v) => (WATER_REFLECT_REACH = v), [0, 3000], 25, 'aim the planar mirror at the nearest inland body within this many metres of its shore (else the sea); 0 keeps it on the sea alone'),
-          tune('WATER_SEA_REACH', () => WATER_SEA_REACH, (v) => (WATER_SEA_REACH = v), [0, 20000], 100, 'only show/mirror the sea when ground comes down to the waterline within this many metres of the eye; 0 uses the whole resident floor'),
+          tune('WATER_SEA_CONE_M', () => WATER_SEA_CONE_M, (v) => (WATER_SEA_CONE_M = v), [0, 10000], 50, 'show/mirror the sea only when it lies within this many metres ahead (the cone) — 0 uses the whole resident floor'),
+          tune('WATER_SEA_CONE_DEG', () => WATER_SEA_CONE_DEG, (v) => (WATER_SEA_CONE_DEG = v), [5, 180], 1, 'the sea cone, degrees either side of the view'),
+          tune('WATER_SEA_NEAR_M', () => WATER_SEA_NEAR_M, (v) => (WATER_SEA_NEAR_M = v), [0, 3000], 25, 'the sea gate also looks this far round the eye, whatever the view'),
+          tune('WATER_SEA_MIN_HITS', () => WATER_SEA_MIN_HITS, (v) => (WATER_SEA_MIN_HITS = v), [1, 20], 1, 'samples under the waterline it takes to call it sea; one is a pit'),
           tune('WATER_SKY_REFLECT', () => WATER_SKY_REFLECT, (v) => (WATER_SKY_REFLECT = v), [0, 1.5], 0.05, 'sky/horizon reflection from the environment map, for ponds and streams the sea plane cannot mirror; 0 is the old flat sheet'),
           tune('WATER_PROBES', () => WATER_PROBES, (v) => (WATER_PROBES = v), [0, 32], 1, 'reflection probes: how many inland lakes keep a live capture of their own surroundings (trees, bank) at once, nearest to the eye. 0 off; 1 is the lake you are at'),
           tune('WATER_PROBE_RES', () => WATER_PROBE_RES, (v) => (WATER_PROBE_RES = v), [16, 256], 1, 'probe cube face px; the stored equirect is 2× across. Higher is sharper and costs capture time + memory'),

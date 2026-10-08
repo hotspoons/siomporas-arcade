@@ -4093,7 +4093,7 @@ if (uLodOn > 0.5) {
     updateNear = (eye, time, fwd, pitch) => {
       roadCover?.refresh(road, eye)
       inner(eye, time, fwd, pitch)
-      water.tick(time, eye)
+      water.tick(time, eye, fwd)
       stream?.update(eye.x, -eye.z) // site frame: y = -z
       const ground = heightAt(eye.x, -eye.z)
       const agl = Number.isFinite(ground) ? Math.max(0, eye.y - ground) : 0

@@ -309,8 +309,8 @@ function setProbeIndex(geo: THREE.BufferGeometry, index: number) {
 
 export interface WaterResult {
   group: THREE.Group
-  /** advance the ripples; the eye (when given) gates the sea to ground near the camera */
-  tick: (time: number, eye?: THREE.Vector3) => void
+  /** advance the ripples; the eye and the way it faces (when given) gate the sea to real sea near or ahead */
+  tick: (time: number, eye?: THREE.Vector3, fwd?: THREE.Vector3) => void
   lines: number
   areas: number
   falls: number
@@ -376,28 +376,76 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     }
   }
   const sampledFloor = sawGround ? minGround : -Infinity
-  const seaVisible = (eye?: THREE.Vector3) => {
-    // Eye-local when the frame hands us the camera: a coastal tile far away is no reason to draw and
-    // mirror the sea under an inland eye. Sample the ground within WATER_SEA_REACH and let the
-    // site-wide floor stand in when there is no eye (the editor, the demo) or the knob is 0.
-    const reach = T.WATER_SEA_REACH
-    let active = lowestGround ? lowestGround() : Infinity
-    if (eye && reach > 0) {
-      let lo = Infinity
-      const n = 3
-      for (let i = -n; i <= n; i++) {
-        for (let j = -n; j <= n; j++) {
-          const g = groundAt(eye.x + (i / n) * reach, eye.z + (j / n) * reach)
-          if (g !== null && g < lo) lo = g
+  /**
+   * IS THERE REAL SEA WHERE WE ARE LOOKING? The cone the inland mirror already uses (`pickPlane`:
+   * the nearest body within reach AND in the frustum), adapted for the sea. Rich, 2026-10-08: "a
+   * cone sampler that checks the direction we are headed and the surrounding area within a mile
+   * or something has real sea, and if so render the sea, otherwise skip it."
+   *
+   * The ground is sampled on a small disc round the eye (WATER_SEA_NEAR_M: the water you are
+   * beside) and down a cone along the view (WATER_SEA_CONE_DEG either side, out to
+   * WATER_SEA_CONE_M: the water you are driving toward). A sample is sea when the plane would
+   * show there — ground under the waterline — and it takes WATER_SEA_MIN_HITS of them. One pit is
+   * not a coast: the old gate drew the sea, and rendered the whole scene a second time to mirror
+   * it, 35 m above sea level on the DC Beltway because one corner of a ±4 km grid fell in a −7 m
+   * gravel pit. That cost 11 ms a frame.
+   *
+   * Throttled: the answer is reused until the eye moves WATER_SEA_RECHECK_M or turns 10°.
+   */
+  let seaWas = false
+  let seaAtX = Number.NaN
+  let seaAtZ = 0
+  let seaFx = 0
+  let seaFz = 0
+  const seaVisible = (eye?: THREE.Vector3, fwd?: THREE.Vector3) => {
+    const line = T.WATER_LEVEL_M + SEA_DRAW_LIFT - 0.5
+    if (!eye || T.WATER_SEA_CONE_M <= 0) {
+      // no eye (the editor, the demo) or the cone switched off: the site-wide floor, as before
+      const floor = lowestGround ? lowestGround() : sampledFloor
+      return !Number.isFinite(floor) || floor < line
+    }
+    let fx = fwd ? fwd.x : 0
+    let fz = fwd ? fwd.z : 0
+    const fl = Math.hypot(fx, fz)
+    if (fl > 1e-3) { fx /= fl; fz /= fl } else { fx = 0; fz = 0 }
+    const moved = Math.hypot(eye.x - seaAtX, eye.z - seaAtZ)
+    const turned = fx * seaFx + fz * seaFz < 0.985
+    if (Number.isFinite(seaAtX) && moved < T.WATER_SEA_RECHECK_M && !turned) return seaWas
+    seaAtX = eye.x
+    seaAtZ = eye.z
+    seaFx = fx
+    seaFz = fz
+    let hits = 0
+    let seen = 0
+    const probe = (x: number, z: number) => {
+      const g = groundAt(x, z)
+      if (g === null) return
+      seen++
+      if (g < line) hits++
+    }
+    // the surrounding area: the eye and a ring
+    probe(eye.x, eye.z)
+    const near = T.WATER_SEA_NEAR_M
+    for (let k = 0; k < 8; k++) probe(eye.x + Math.cos((k * Math.PI) / 4) * near, eye.z + Math.sin((k * Math.PI) / 4) * near)
+    // the way we are facing; looking straight down there is no "ahead", and the disc decides
+    if (fl > 1e-3) {
+      const half = (T.WATER_SEA_CONE_DEG * Math.PI) / 180
+      for (const r of [0.25, 0.5, 0.75, 1]) {
+        for (const a of [-1, -0.5, 0, 0.5, 1]) {
+          const ang = a * half
+          const c = Math.cos(ang), sn = Math.sin(ang)
+          const dx = fx * c - fz * sn
+          const dz = fx * sn + fz * c
+          probe(eye.x + dx * r * T.WATER_SEA_CONE_M, eye.z + dz * r * T.WATER_SEA_CONE_M)
         }
       }
-      // all samples null (no DEM under this eye) leaves Infinity, which errs toward drawing the sea
-      active = lo
     }
-    const floor = Number.isFinite(active) ? active : sampledFloor
-    // the tile floor is `floor(min height)`, so it reads at or below the true low: a small margin
-    // still errs toward drawing the sea (cheap) rather than hiding it over a real puddle.
-    return !Number.isFinite(floor) || floor < T.WATER_LEVEL_M + SEA_DRAW_LIFT - 0.5
+    // nothing held under any sample (off the loaded DEM): no evidence, so the site-wide floor decides
+    if (!seen) {
+      const floor = lowestGround ? lowestGround() : sampledFloor
+      seaWas = !Number.isFinite(floor) || floor < line
+    } else seaWas = hits >= Math.max(1, Math.round(T.WATER_SEA_MIN_HITS))
+    return seaWas
   }
 
   const sea = seaPlane(uniforms, defaultLook)
@@ -408,7 +456,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   setProbeIndex(sea.geometry, -1)
   const seaMat = sea.material as THREE.MeshStandardMaterial
   waveMats.push({ u: (seaMat.userData.water as { u: WaterWaveUniforms }).u, look: defaultLook, name: defaultLookName, own: false, mat: seaMat, styleColoured: false })
-  const placeSea = (eye?: THREE.Vector3) => {
+  const placeSea = (eye?: THREE.Vector3, fwd?: THREE.Vector3) => {
     // The sea sits a hand's width above the DEM it lies on. Over open water a coastal site's DEM is
     // flat — there is no bathymetry to fetch — and it lands within a few centimetres of sea level,
     // so the plane and the terrain graze each other and the depth test fights: patches of flat
@@ -417,7 +465,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     // shader, which disables polygon offset. A lift of a third of a metre clears the log-depth
     // quantum out to the horizon and is invisible at the waterline. (WATER_LEVEL_M stays the sea
     // level a game reasons about; this is a draw bias.)
-    const shown = seaVisible(eye)
+    const shown = seaVisible(eye, fwd)
     sea.visible = shown
     sea.position.set(0, T.WATER_LEVEL_M + SEA_DRAW_LIFT, 0)
     sea.scale.set(T.WATER_LEVEL_SPAN * 2, 1, T.WATER_LEVEL_SPAN * 2)
@@ -429,7 +477,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   }
   placeSea()
   let lastFancy = T.WATER_FANCY >= 0.5
-  const advance = (t: number, eye?: THREE.Vector3) => {
+  const advance = (t: number, eye?: THREE.Vector3, fwd?: THREE.Vector3) => {
     uniforms.uTime.value = t * T.WATER_SPEED
     uniforms.uWind.value.copy(waterWind())
     const k = knobs()
@@ -444,7 +492,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       }
       refreshLook(wm.u, wm.look, k)
     }
-    placeSea(eye)
+    placeSea(eye, fwd)
     // WATER_FANCY flips the surface shader and the reflection path, both chosen at compile time.
     // Recompile every water material on the frame the switch moves, so it is live, not reload-only.
     const fancyNow = T.WATER_FANCY >= 0.5

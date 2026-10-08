@@ -1260,6 +1260,8 @@ export let CAR_PROBE_FAR = 400
 export let CAR_PROBE_LIFT = 0.9
 /** live mode: seconds between re-captures; 0 never re-captures on time (movement still does) */
 export let CAR_PROBE_REFRESH = 0.3
+/** cube faces a refresh renders per frame: 1 spreads it over six frames (~8 ms each), 6 is the whole cube at once (one 48 ms spike) */
+export let CAR_PROBE_SPREAD = 1
 /** live mode: metres the car may move before the probe is re-captured; 0 disables the movement gate */
 export let CAR_PROBE_MOVE = 25
 /**
@@ -2244,6 +2246,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CAR_PROBE_FAR', () => CAR_PROBE_FAR, (v) => (CAR_PROBE_FAR = v), [50, 3000], 25, 'how far a probe renders the world (m): the trees and bank that show, not the whole county'),
           tune('CAR_PROBE_LIFT', () => CAR_PROBE_LIFT, (v) => (CAR_PROBE_LIFT = v), [0, 5], 0.1, 'probe camera height above the car origin (m)'),
           tune('CAR_PROBE_REFRESH', () => CAR_PROBE_REFRESH, (v) => (CAR_PROBE_REFRESH = v), [0, 30], 0.1, 'live mode: seconds between re-captures; 0 re-captures on movement only'),
+          tune('CAR_PROBE_SPREAD', () => CAR_PROBE_SPREAD, (v) => (CAR_PROBE_SPREAD = v), [1, 6], 1, 'cube faces a probe refresh renders per frame: 1 spreads it, 6 is the old one-frame spike'),
           tune('CAR_PROBE_MOVE', () => CAR_PROBE_MOVE, (v) => (CAR_PROBE_MOVE = v), [0, 200], 1, 'live mode: metres the car may move before a re-capture; 0 disables the movement gate'),
         ],
       },

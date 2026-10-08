@@ -1023,6 +1023,21 @@ export class TrafficLayer {
     this.stats.systems = { ...this.actors.stats.systems }
   }
 
+  /**
+   * IN THE GRAPH ONLY WHILE IT CAN BE SEEN. three walks every object under the scene on every
+   * render call — `updateMatrixWorld` visits a hidden object exactly as it does a visible one — and
+   * a car is ~16 objects with its lamps. On the DC Beltway's 4,000 cars that walk was 64,000
+   * objects and 5.9 ms a render, twice a frame (the view and a probe face), for the four cars on
+   * screen (Rich, 2026-10-08: "21 ms of CPU … on an empty scene we are 2-4 ms"). So a car out of
+   * draw range, or hidden for a respawn, is taken OUT of the group, not just made invisible, and put
+   * back when it is near again. Nothing reads a far car's world matrix: hits, dents and the sweep
+   * all go by `mesh.position`.
+   */
+  private attach(s: Shown, on: boolean): void {
+    if (on) { if (s.mesh.parent !== this.group) this.group.add(s.mesh) }
+    else if (s.mesh.parent) s.mesh.removeFromParent()
+  }
+
   private place(all: boolean, eye?: THREE.Vector3): void {
     const drawM = T.TRAFFIC_DRAW_M
     const glow: { s: Shown; d2: number }[] = []
@@ -1031,6 +1046,7 @@ export class TrafficLayer {
       if (s.wrecked && s.body) {
         // a loose body: the mesh follows the solver, and the entity follows the mesh
         const q = s.body.pose()
+        this.attach(s, true)
         s.mesh.visible = true
         s.lamps.visible = false
         s.mesh.position.set(q.x, q.y, q.z)
@@ -1040,15 +1056,21 @@ export class TrafficLayer {
         Transform.z[e] = q.y
         continue
       }
-      if (s.hidden) { s.mesh.visible = false; s.lamps.visible = false; continue }
+      if (s.hidden) { this.attach(s, false); s.lamps.visible = false; continue }
       const x = Transform.x[e]
       const y = Transform.y[e]
       const yaw = Transform.yaw[e]
       // three: x east, y up, z south — the site's y is north
       const near = all || !eye || (eye.x - x) ** 2 + (eye.z + y) ** 2 < drawM * drawM
-      if (!near) { s.mesh.visible = false; s.lamps.visible = false; s.body?.enable(false); continue }
+      // a far car costs nothing once it is out: detach, lamps off and body off happen on the way out,
+      // not every frame (4,000 wasm `enable` calls a frame were most of `placeMs`)
+      if (!near) {
+        if (s.mesh.parent) { this.attach(s, false); s.lamps.visible = false; s.body?.enable(false) }
+        continue
+      }
       const g = this.site.groundAt(x, -y) ?? this.site.heightAt(x, y) ?? 0
       Transform.z[e] = g
+      this.attach(s, true)
       s.mesh.visible = true
       s.mesh.position.set(x, g, -y)
       // the model's nose is +X; three's rotation about +Y takes +X toward -Z, which is NORTH here

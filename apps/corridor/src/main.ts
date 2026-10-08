@@ -42,6 +42,8 @@ import { ZoneMarks } from './game/world/markers'
 import { AvatarBeacon } from './game/world/beacon'
 import { setDetail } from './lod/simplify'
 import { DETAILS, applyDetail, type Detail } from './game/session/detail'
+import { TestRig } from './game/session/testrig'
+import { setWakeLock, wakeLockState } from './game/session/wakelock'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
@@ -302,6 +304,8 @@ const tuneUI = new TuneUI({
 })
 // the saved Display ▸ Detail level, into the LOD knobs this browser has not overridden in the panel
 applyDetail(tuneUI, settings.data.detail ?? 'ultra', false)
+// a browser that saved SCREEN_WAKE_LOCK on gets its lock back at boot, not at the first retune
+void setWakeLock(T.SCREEN_WAKE_LOCK > 0)
 
 /**
  * The zone the clock's date and time are read and written in.
@@ -1346,6 +1350,8 @@ async function loadSite(slug: string) {
       sun: () => sunNow(),
     },
 
+    /** the test rig, from the console as well as the bridge: `corridor.rig.start()` */
+    rig,
     tune: {
       tabs: TUNE_TABS,
       names: () => TUNE_TABS.flatMap((t) => t.sections.flatMap((sec) => sec.keys.map((k) => k.name))),
@@ -1746,6 +1752,32 @@ async function buildTraffic(want: TrafficSpec): Promise<void> {
 }
 /** what the player fires (M), and the bang where it lands */
 let missiles: MissileLayer | null = null
+/**
+ * The test rig (game/session/testrig.ts): drives the spine and shoots the traffic on its own, so a
+ * probe can hold the frame against a repeatable worst case. `apex.rig.start()` / `.stop()`.
+ */
+const rig = new TestRig({
+  path: () => site?.manifest.spine.coords.map(([x, y]) => [x, -y] as [number, number]) ?? null,
+  car: () => drive.car,
+  ensureDriving: () => { if (!drive.on) setDrive(true) },
+  // the traffic's yaw is the site's (atan2(north, east)); the car's is atan2(z, x), its mirror
+  trafficNear: (x, z, r) => (traffic?.carsNear(x, z, r, 400) ?? []).filter((c) => !c.loose).map((c) => ({ x: c.x, z: c.z, yaw: -c.yaw })),
+  targetAhead: (from, forward, r) => {
+    let best: THREE.Vector3 | null = null
+    let bestD = Infinity
+    for (const c of traffic?.carsNear(from.x, from.z, r, 60) ?? []) {
+      if (c.loose) continue
+      const dx = c.x - from.x, dz = c.z - from.z
+      const d = Math.hypot(dx, dz)
+      if (d < 6) continue
+      // within 35° of the nose
+      if ((dx * forward.x + dz * forward.z) / d < 0.82) continue
+      if (d < bestD) { bestD = d; best = new THREE.Vector3(c.x, c.y + 0.7, c.z) }
+    }
+    return best
+  },
+  fire: (dir) => fireMissile(dir),
+})
 /** the machine gun (weaponfx.ts): tracers, flashes, and the hits handed to the traffic */
 let gun: GunLayer | null = null
 /** the hardware on the player's car, and where its muzzles are */
@@ -1817,7 +1849,10 @@ let offPlayerImpact: (() => void) | null = null
 function boom(at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number; damage?: number; weapon?: string }): number {
   // the traffic first, and with no physics too: a car on rails can still swerve
   const cars = traffic?.blast(at, opts.radius, opts.impulse, opts.lift, { damage: opts.damage, weapon: opts.weapon }) ?? 0
-  return cars + (physics ? physics.explode(at, opts) : 0)
+  // under the test rig the player's own body feels nothing: it fires every half second at the
+  // car in front, and a blast under its own bonnet would end the drive it exists to repeat
+  const exclude = rig.on && rig.shield && drive.car instanceof RapierCar ? drive.car.bodyHandle : undefined
+  return cars + (physics ? physics.explode(at, { ...opts, exclude }) : 0)
 }
 
 /**
@@ -1873,8 +1908,11 @@ function ensureMissiles(): MissileLayer | null {
   return missiles
 }
 
-/** Fire a missile from the player's bonnet, along the nose, at the missile speed plus the car's. */
-function fireMissile(): boolean {
+/**
+ * Fire a missile from the player's bonnet, along the nose (or along `aim`, the test rig's shot at
+ * the car ahead), at the missile speed plus the car's.
+ */
+function fireMissile(aim?: THREE.Vector3): boolean {
   if (!drive.on || !drive.car) return false
   const layer = ensureMissiles()
   if (!layer) return false
@@ -1882,7 +1920,7 @@ function fireMissile(): boolean {
   // from the bonnet, not the roof: the body origin is already a metre up, and a traffic car's box
   // tops out at a metre and a half — a missile launched from two metres sailed over every one
   const from = car.pos.clone().add(car.forward.clone().multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.15, 0))
-  const dir = car.forward.clone()
+  const dir = aim ? aim.clone().normalize() : car.forward.clone()
   layer.fire(from, dir, Math.max(0, car.speed))
   return true
 }
@@ -3280,6 +3318,8 @@ function applySeasonKnob() {
  * hook called `retune()` alone and the season knob silently did nothing under it.
  */
 function onTuneChange() {
+  // the screen stays on while the knob says so (a soak test); released the moment it is off
+  void setWakeLock(T.SCREEN_WAKE_LOCK > 0)
   // TRAFFIC_DENSITY is a switch as well as a level: raised on a world with no traffic simulation,
   // it builds one on the spot. Lowering it, or nudging any other knob, leaves the layer alone.
   if (T.TRAFFIC_DENSITY !== lastDensityKnob) {
@@ -3915,6 +3955,7 @@ function frame() {
    * an already-capped delta would make the simulation quietly run slow through every hitch.
    */
   if (missiles && !paused) missiles.tick(dt)
+  if (rig.on && !paused && drive.on) rig.tickFire(dt)
   if (!paused && !menu.open && drive.on && (input.held('gun') || radHold.gun)) fireGun(dt)
   if (gun && !paused) gun.tick(dt)
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
@@ -3995,6 +4036,8 @@ function frame() {
       drive.input.steer = THREE.MathUtils.clamp(r.steer || drive.steerKey || tilt, -1, 1)
       drive.input.handbrake = r.handbrake
     }
+    // the test rig's hands on the wheel, over whatever the keys said
+    if (rig.on && !paused) rig.drive(car, drive.input, dt)
     // fixed-step sim at 120 Hz like stuntin, so speed does not depend on the frame rate
     if (!paused) for (let acc = dt; acc > 0; acc -= 1 / 120) car.tick(Math.min(acc, 1 / 120), drive.input)
     /*
@@ -4515,6 +4558,12 @@ registerBridgeContext({
     return lightHud
   },
 
+  /** the test rig: `rig.start({ speed, fireEvery, lane })`, `rig.stop()`, `rig.stats()` */
+  get rig() {
+    return rig
+  },
+  /** the screen wake lock's state: wanted (the knob), held (the browser agreed), supported */
+  wakeLock: () => wakeLockState(),
   perf: (frames = 30) =>
     new Promise<unknown>((resolve) => {
       const t: number[] = []

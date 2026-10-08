@@ -102,6 +102,11 @@ export class RapierCar implements DrivableCar {
     return this.vehicle.collider.handle
   }
 
+  /** the chassis BODY's handle: what a blast is told to leave alone (the test rig's shield) */
+  get bodyHandle(): number {
+    return this.vehicle.body.handle
+  }
+
   get profile(): DriveProfile {
     return this.vehicle.profile
   }

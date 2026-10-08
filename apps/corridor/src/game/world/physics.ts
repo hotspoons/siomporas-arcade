@@ -99,7 +99,7 @@ export interface CorridorPhysics {
    * (`impulse` is metres per second at the centre), breakables break. A KINEMATIC traffic car is
    * not moved by this — wake it first (`TrafficLayer.wakeNear`), which `main.ts` does.
    */
-  explode(at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number }): number
+  explode(at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number; exclude?: number }): number
   /** every impact the world reports, for whoever wants to dent, wake or score on it */
   onImpact(fn: (im: Impact) => void): () => void
   /** the first solid thing along a ray, as a distance, or null; `exclude` is a collider handle to look past */
@@ -676,7 +676,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     },
 
     explode(at, opts) {
-      const blast: Blast = { x: at.x, y: at.y, z: at.z, radius: opts.radius, impulse: opts.impulse, lift: opts.lift ?? 0.55, breakAt: opts.breakAt ?? 1 }
+      const blast: Blast = { x: at.x, y: at.y, z: at.z, radius: opts.radius, impulse: opts.impulse, lift: opts.lift ?? 0.55, breakAt: opts.breakAt ?? 1, exclude: opts.exclude }
       return blastWorld(phys, blast, breakables)
     },
 

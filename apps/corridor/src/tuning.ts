@@ -1433,6 +1433,19 @@ export let WET_SPREAD = 1.25
 export let HUD_ROAD_NAME = 1
 /** ground elevation and compass heading alongside the speed and surface */
 export let HUD_TELEMETRY = 1
+/**
+ * Keep the screen on while this page is visible (the Screen Wake Lock API). For a soak: the test
+ * rig driving for an hour, a probe sampling the frame — all of it ends the moment the display
+ * sleeps and the tab is hidden. 0 lets the display sleep as usual.
+ */
+export let SCREEN_WAKE_LOCK = 0
+/**
+ * The test rig (game/session/testrig.ts): the car drives the spine on its own and fires at the
+ * traffic. These are its defaults; `apex.rig.start({...})` overrides per run.
+ */
+export let RIG_SPEED_MPS = 28
+export let RIG_FIRE_EVERY_S = 0.5
+export let RIG_LANE_M = 0
 export let SPLAT_ENABLED = 1
 /**
  * How hard the BUILT world yields where a capture has taken over. 0 draws both on top of each
@@ -2997,6 +3010,15 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('HUD_ROAD_NAME', () => HUD_ROAD_NAME, (v) => (HUD_ROAD_NAME = v), [0, 1], 1, 'show the name of the road you are on while driving'),
           tune('HUD_TELEMETRY', () => HUD_TELEMETRY, (v) => (HUD_TELEMETRY = v), [0, 1], 1, 'show ground elevation and compass heading while driving'),
+        ],
+      },
+      {
+        title: 'long sessions and the test rig',
+        keys: [
+          tune('SCREEN_WAKE_LOCK', () => SCREEN_WAKE_LOCK, (v) => (SCREEN_WAKE_LOCK = v), [0, 1], 1, 'keep the screen on while this tab is visible — for a soak test or a long drive left running'),
+          tune('RIG_SPEED_MPS', () => RIG_SPEED_MPS, (v) => (RIG_SPEED_MPS = v), [5, 80], 1, 'the test rig’s cruising speed along the spine (m/s)'),
+          tune('RIG_FIRE_EVERY_S', () => RIG_FIRE_EVERY_S, (v) => (RIG_FIRE_EVERY_S = v), [0.1, 10], 0.1, 'the test rig fires a missile this often (s); it aims at the nearest car ahead'),
+          tune('RIG_LANE_M', () => RIG_LANE_M, (v) => (RIG_LANE_M = v), [-12, 12], 0.5, 'the test rig’s offset from the spine, metres, + right of travel'),
         ],
       },
       {

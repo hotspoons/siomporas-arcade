@@ -208,6 +208,8 @@ export interface Blast {
   /** impulse above which a breakable in range simply breaks, N·s. 0 = never */
   breakAt?: number
   massScaled?: boolean
+  /** a rigid body's handle that feels nothing: the player's own car under the test rig */
+  exclude?: number
 }
 
 const EPS = 1e-4
@@ -253,6 +255,7 @@ export function explode(phys: PhysicsWorld, blast: Blast, breakables?: Breakable
     (c: Collider) => {
       const body = c.parent()
       if (!body) return true
+      if (blast.exclude !== undefined && body.handle === blast.exclude) return true
       hitColliders.push(c)
       if (!seen.has(body.handle)) {
         seen.add(body.handle)

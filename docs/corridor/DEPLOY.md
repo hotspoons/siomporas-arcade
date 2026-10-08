@@ -28,6 +28,8 @@ Mode **9 · Deploy** (the top bar, or the `9` key). The form, top to bottom:
    (the account's Manage Account → API Tokens). The second cannot answer the user verify call, so
    it is verified by which accounts it can see. The token needs *Workers Scripts: Edit*, *Workers R2 Storage: Edit*, *Account
    Settings: Read* and, for a custom hostname, *Zone: Read* + *Workers Routes: Edit* on the zone.
+   An account-owned token also needs to be able to read its own id (`/accounts/{id}/tokens/verify`),
+   because a large object uses it — see *Large objects* below.
 2. **Worlds.** Every baked world on the volume; tick one or several. Several share one address and
    the viewer's site picker chooses between them — that is the whole of "multiplexing".
 3. **Query Cloudflare.** Accounts, the zones the token can see, the R2 buckets, and the account's
@@ -94,6 +96,18 @@ POST   /api/deploy/plan       {worlds}     the dry run
 POST   /api/deploy/start      {worlds, account, bucket, prefix?, worker: {name, workersDev?, hostname?, zoneId?}, prune?, dryRun?}
 GET    /api/deploy/revisions?account=&bucket=   the ledger
 ```
+
+## Large objects
+
+Objects go up through the REST API one PUT each — except anything over 32 MiB, which that API's
+front refuses with an HTML `413 Payload Too Large` before R2 sees it (the dc-metro deploy,
+2026-10-08: a 371 MiB `osm.geojson`; the bake also holds a 133 MiB `chm_2m.png` and a 78 MiB
+`branches.json`). Those go to R2's S3 endpoint, `https://<account>.r2.cloudflarestorage.com`, as a
+multipart upload in 32 MiB parts read from the volume one at a time, so neither the request nor the
+pod's memory grows with the file. The S3 credentials are the ones Cloudflare derives from the same
+token — access key = the token's id, secret = SHA-256 of the token — so there is nothing new to
+configure. Parts are retried on a 429/5xx; any other failure aborts the upload so R2 keeps no
+orphaned parts. The signer is checked against AWS's published S3 examples (`cloudflare.test.mjs`).
 
 ## What has and has not been proven
 

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { Store } from './store.mjs'
 import { plan, run, defaultPrefix, workerName, stringsOf, literalsOf, LEDGER_KEY } from './deploy.mjs'
 import { keyFor } from './deploy/worker.mjs'
+import { MULTIPART_OVER } from './cloudflare.mjs'
 
 const transpile = (src, name) => (src.includes('BROKEN') ? { js: '', errors: [{ message: 'broken on purpose' }] } : { js: `// ${name}\n${src.replace(': number', '')}`, errors: [] })
 
@@ -81,6 +82,13 @@ function fakeCloudflare() {
     async buckets() { calls.push('buckets'); return [{ name: 'existing' }] },
     async createBucket(_a, name) { calls.push(`createBucket ${name}`) },
     async putObject(_a, _b, key, body, type) { objects.set(key, { body: Buffer.from(body), type }); return body.byteLength },
+    async putObjectLarge(_a, _b, key, { size, read }, type) {
+      const parts = []
+      for (let off = 0; off < size; off += 8 * 2 ** 20) parts.push(await read(off, Math.min(8 * 2 ** 20, size - off)))
+      calls.push(`multipart ${key} ${parts.length}`)
+      objects.set(key, { body: Buffer.concat(parts), type })
+      return size
+    },
     async getObject(_a, _b, key) { return objects.get(key)?.body ?? null },
     async getJson(_a, _b, key) { const o = objects.get(key); return o ? JSON.parse(o.body.toString()) : null },
     async deleteObject(_a, _b, key) { calls.push(`delete ${key}`); return objects.delete(key) },
@@ -270,4 +278,22 @@ test('names, prefixes, strings and the worker key map', () => {
   assert.equal(keyFor('/assets/catalog.json'), 'assets/catalog.json')
   assert.equal(keyFor('/assets/main-abc.js'), null)
   assert.equal(keyFor('/'), null)
+})
+
+test('a file too big for one REST PUT goes up as a multipart upload read from the volume; small ones do not', async () => {
+  const { store, root } = await volume()
+  const appDir = path.join(root, 'dist')
+  await mkdir(appDir, { recursive: true })
+  await writeFile(path.join(appDir, 'index.html'), '<!doctype html>')
+  // the dc-metro case: a raw OSM extract past the API's body ceiling (371 MiB there; just over the line here)
+  const big = Buffer.alloc(MULTIPART_OVER + 4321, 7)
+  await writeFile(path.join(store.sites, 'alpha', 'osm.geojson'), big)
+  const cf = fakeCloudflare()
+  const p = await plan({ store, worlds: ['alpha'], transpile, appDir })
+  await run({ cf, accountId: 'acc', bucket: 'existing', prefix: 'corridor/alpha-big', plan: p, worker: { name: 'w', workersDev: false }, appDir, log: () => {} })
+  const multi = cf.calls.filter((c) => c.startsWith('multipart '))
+  assert.deepEqual(multi, ['multipart corridor/alpha-big/sites/alpha/osm.geojson 5'])
+  assert.ok(cf.objects.get('corridor/alpha-big/sites/alpha/osm.geojson').body.equals(big))
+  assert.equal(cf.objects.get('corridor/alpha-big/sites/alpha/osm.geojson').type, 'application/geo+json')
+  assert.ok(cf.objects.has('corridor/alpha-big/sites/alpha/web/tiles/0/0_0.pack'), 'the small ones still go whole')
 })

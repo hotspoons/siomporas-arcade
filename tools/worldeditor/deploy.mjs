@@ -26,9 +26,10 @@
 // that hold asset ids" — the last four hand-typed tables in this repo are why things ended up
 // in the road.
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { open, readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { MULTIPART_OVER } from './cloudflare.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 /** the Worker module, as published */
@@ -399,6 +400,27 @@ async function bodyOf(o, fetch) {
 
 const mib = (n) => `${(n / 2 ** 20).toFixed(1)} MiB`
 
+/** One file from the volume as a multipart upload; its size is measured now, not taken from the plan. */
+async function putFileLarge(cf, accountId, bucket, key, file, contentType, log) {
+  const fh = await open(file, 'r')
+  try {
+    const { size } = await fh.stat()
+    const read = async (off, len) => {
+      const buf = Buffer.alloc(len)
+      let got = 0
+      while (got < len) {
+        const { bytesRead } = await fh.read(buf, got, len - got, off + got)
+        if (!bytesRead) throw new Error(`${file}: short read at ${off + got} of ${size}`)
+        got += bytesRead
+      }
+      return buf
+    }
+    return await cf.putObjectLarge(accountId, bucket, key, { size, read }, contentType, { log })
+  } finally {
+    await fh.close()
+  }
+}
+
 /** Every object under a prefix, from its deploy manifest or by listing. */
 async function deletePrefix(cf, accountId, bucket, prefix, concurrency) {
   prefix = String(prefix).replace(/^\/+|\/+$/g, '')
@@ -475,13 +497,24 @@ export async function run({ cf, accountId, bucket, createBucket = true, prefix, 
     for (;;) {
       const o = queue.shift()
       if (!o) return
-      const body = await bodyOf(o, fetch)
       const key = `${prefix}/${o.key}`
-      await cf.putObject(accountId, bucket, key, body, o.contentType)
+      let n
+      if (o.file && o.bytes > MULTIPART_OVER) {
+        // A FILE TOO BIG FOR ONE REQUEST goes up in parts, read from the volume a part at a time:
+        // the REST PUT's front answers a 371 MiB osm.geojson with a 413, and four of those held
+        // in memory at once is a pod's whole allowance
+        log(`  ${o.key}  (${mib(o.bytes)}) — multipart`)
+        n = await putFileLarge(cf, accountId, bucket, key, o.file, o.contentType, log)
+      } else {
+        const body = await bodyOf(o, fetch)
+        n = body.byteLength > MULTIPART_OVER
+          ? await cf.putObjectLarge(accountId, bucket, key, { size: body.byteLength, read: async (off, len) => body.subarray(off, off + len) }, o.contentType, { log })
+          : await cf.putObject(accountId, bucket, key, body, o.contentType)
+      }
       keys.push(key)
       sent++
-      bytes += body.byteLength
-      if (sent % 50 === 0 || body.byteLength > 4 * 2 ** 20) log(`  ${sent}/${p.objects.length}  ${o.key}  (${mib(body.byteLength)})`)
+      bytes += n
+      if (sent % 50 === 0 || n > 4 * 2 ** 20) log(`  ${sent}/${p.objects.length}  ${o.key}  (${mib(n)})`)
     }
   }
   await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker1))

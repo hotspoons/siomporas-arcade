@@ -17,9 +17,66 @@
 // closure; `describe()` says whether one is present and where it came from, and that is all any
 // route or log ever sees. Nothing here writes it to disk, and no error message includes it.
 
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 
 const API = 'https://api.cloudflare.com/client/v4'
+
+/**
+ * WHERE THE REST API STOPS. `PUT …/r2/buckets/{b}/objects/{key}` goes through api.cloudflare.com,
+ * whose front refuses a large body with an HTML 413 before R2 sees it — the dc-metro deploy died on
+ * a 371 MiB osm.geojson (2026-10-08). Anything over this goes to R2's S3 endpoint as a multipart
+ * upload instead, PART_BYTES at a time, so no single request is large however big the world gets.
+ * R2 wants every part but the last the same size, at least 5 MiB.
+ */
+export const MULTIPART_OVER = 32 * 2 ** 20
+export const PART_BYTES = 32 * 2 ** 20
+
+const sha256hex = (b) => createHash('sha256').update(b).digest('hex')
+const hmac = (k, s) => createHmac('sha256', k).update(s).digest()
+/** RFC 3986, as SigV4 wants it: encodeURIComponent also leaves !'()* alone */
+const rfc3986 = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+
+/**
+ * AWS Signature V4 for one request, by hand — the R2 S3 endpoint's auth, and nothing else uses it.
+ * `headers` must hold every header that is sent and signed (lower-case names), `x-amz-date` and
+ * `x-amz-content-sha256` among them; `host` is taken from the URL. Returns the Authorization value.
+ */
+export function sigv4({ method, url, headers, accessKey, secret, region = 'auto', service = 's3' }) {
+  const u = new URL(url)
+  const amzDate = headers['x-amz-date']
+  const day = amzDate.slice(0, 8)
+  const h = { ...headers, host: u.host }
+  const names = Object.keys(h).map((k) => k.toLowerCase()).sort()
+  const canonHeaders = names.map((k) => `${k}:${String(h[k]).trim().replace(/\s+/g, ' ')}\n`).join('')
+  const signed = names.join(';')
+  const query = [...u.searchParams.entries()]
+    .map(([k, v]) => [rfc3986(k), rfc3986(v)])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('&')
+  // the path as sent: already percent-encoded per segment by whoever built the URL
+  const canonical = [method, u.pathname, query, canonHeaders, signed, h['x-amz-content-sha256']].join('\n')
+  const scope = `${day}/${region}/${service}/aws4_request`
+  const toSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256hex(canonical)].join('\n')
+  const key = hmac(hmac(hmac(hmac(`AWS4${secret}`, day), region), service), 'aws4_request')
+  const signature = createHmac('sha256', key).update(toSign).digest('hex')
+  return `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signed}, Signature=${signature}`
+}
+
+/** a transient failure worth another go: the network, a 429, a 5xx */
+const transient = (e) => !e?.status || e.status === 429 || e.status >= 500
+
+/** `fn`, again on a transient failure: four tries over ~7 s. A 9,000-object deploy meets a blip. */
+async function retrying(fn, { tries = 4, wait = (n) => 500 * 2 ** n } = {}) {
+  for (let n = 0; ; n++) {
+    try {
+      return await fn()
+    } catch (e) {
+      if (n + 1 >= tries || !transient(e)) throw e
+      await new Promise((r) => setTimeout(r, wait(n)))
+    }
+  }
+}
 
 export class CloudflareError extends Error {
   constructor(message, status, errors = []) {
@@ -74,11 +131,17 @@ export function assetHash(body) {
 
 /** The REST calls. `fetch` and `base` are injectable so a test can stand in for Cloudflare. */
 export class Cloudflare {
-  constructor(token, { base = API, fetch = globalThis.fetch } = {}) {
+  constructor(token, { base = API, fetch = globalThis.fetch, s3 = (accountId) => `https://${accountId}.r2.cloudflarestorage.com`, retryWait } = {}) {
     this.base = base.replace(/\/$/, '')
     this.fetch = fetch
+    this.s3Base = s3
+    this.retryWait = retryWait
     // a closure rather than a field, so `JSON.stringify(cf)` or a debugger dump shows nothing
-    this.auth = () => `Bearer ${typeof token === 'function' ? token() : token}`
+    const raw = () => (typeof token === 'function' ? token() : token)
+    this.auth = () => `Bearer ${raw()}`
+    // the S3 secret Cloudflare derives from a token is its SHA-256; same closure rule
+    this.s3Secret = () => sha256hex(raw())
+    this.s3KeyId = new Map()
   }
 
   /**
@@ -176,15 +239,90 @@ export class Cloudflare {
     return `/accounts/${accountId}/r2/buckets/${encodeURIComponent(bucket)}/objects/${key.split('/').map(encodeURIComponent).join('/')}`
   }
 
-  /** One object up, whole. Fine for tiles and models; the API's own ceiling is ~300 MiB. */
+  /**
+   * One object up, whole, through the REST API. Fine for tiles, docs and models — not for anything
+   * over MULTIPART_OVER, which the API's front refuses (see `putObjectLarge`).
+   */
   async putObject(accountId, bucket, key, body, contentType = 'application/octet-stream') {
     const bytes = body instanceof Uint8Array ? body : Buffer.from(body)
-    await this.api(this.#objectPath(accountId, bucket, key), {
+    await retrying(() => this.api(this.#objectPath(accountId, bucket, key), {
       method: 'PUT',
       body: bytes,
       headers: { 'content-type': contentType, 'content-length': String(bytes.byteLength) },
-    })
+    }), { wait: this.retryWait })
     return bytes.byteLength
+  }
+
+  /**
+   * The S3 access key id for this token in this account: the TOKEN'S ID, which is what Cloudflare
+   * documents as the R2 access key of a token with R2 permissions (the secret is its SHA-256). A
+   * user token says its id at /user/tokens/verify; an account-owned token only at the account's.
+   */
+  async s3AccessKey(accountId) {
+    if (this.s3KeyId.has(accountId)) return this.s3KeyId.get(accountId)
+    let id = null
+    for (const p of ['/user/tokens/verify', `/accounts/${accountId}/tokens/verify`]) {
+      try {
+        id = (await this.api(p))?.id ?? null
+      } catch {
+        /* the other kind of token */
+      }
+      if (id) break
+    }
+    if (!id) throw new CloudflareError('cannot find this token\'s id, which a large R2 upload needs as its S3 access key', 403)
+    this.s3KeyId.set(accountId, id)
+    return id
+  }
+
+  /** One signed call to R2's S3 endpoint. Errors are XML there; they become CloudflareErrors. */
+  async #s3(accountId, method, bucket, key, { query = {}, body, headers = {} } = {}) {
+    const path = `/${rfc3986(bucket)}/${key.split('/').map(rfc3986).join('/')}`
+    const url = new URL(`${this.s3Base(accountId).replace(/\/$/, '')}${path}`)
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v))
+    const payload = body ?? Buffer.alloc(0)
+    const amzDate = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
+    const h = { ...headers, 'x-amz-date': amzDate, 'x-amz-content-sha256': sha256hex(payload) }
+    h.authorization = sigv4({ method, url: url.toString(), headers: h, accessKey: await this.s3AccessKey(accountId), secret: this.s3Secret() })
+    const r = await this.fetch(url.toString(), { method, headers: h, body: method === 'GET' || method === 'HEAD' ? undefined : payload })
+    const text = await r.text()
+    if (!r.ok) {
+      const code = text.match(/<Code>([^<]*)<\/Code>/)?.[1]
+      const msg = text.match(/<Message>([^<]*)<\/Message>/)?.[1]
+      throw new CloudflareError(`S3 ${method} ${key}${query.partNumber ? ` part ${query.partNumber}` : ''}: HTTP ${r.status}${code ? ` ${code}` : ''}${msg ? `: ${msg}` : ''}`, r.status)
+    }
+    return { headers: r.headers, text }
+  }
+
+  /**
+   * One LARGE object up: an S3 multipart upload to R2, a part at a time.
+   *
+   * `read(offset, length)` hands back the bytes of one part, so a 371 MiB file is never in memory
+   * whole — a deploy runs four of these at once on a pod. Parts go in order, each retried on a
+   * transient failure; any other failure aborts the upload so R2 does not keep the orphaned parts.
+   */
+  async putObjectLarge(accountId, bucket, key, { size, read }, contentType = 'application/octet-stream', { partBytes = PART_BYTES, log = () => {} } = {}) {
+    const init = await retrying(() => this.#s3(accountId, 'POST', bucket, key, { query: { uploads: '' }, headers: { 'content-type': contentType } }), { wait: this.retryWait })
+    const uploadId = init.text.match(/<UploadId>([^<]+)<\/UploadId>/)?.[1]
+    if (!uploadId) throw new CloudflareError(`S3 multipart ${key}: no UploadId in ${init.text.slice(0, 200)}`, 502)
+    const parts = []
+    try {
+      const count = Math.max(1, Math.ceil(size / partBytes))
+      for (let n = 1; n <= count; n++) {
+        const off = (n - 1) * partBytes
+        const body = await read(off, Math.min(partBytes, size - off))
+        const r = await retrying(() => this.#s3(accountId, 'PUT', bucket, key, { query: { partNumber: n, uploadId }, body }), { wait: this.retryWait })
+        const etag = r.headers.get('etag')
+        if (!etag) throw new CloudflareError(`S3 part ${n} of ${key}: no ETag`, 502)
+        parts.push(`<Part><PartNumber>${n}</PartNumber><ETag>${etag}</ETag></Part>`)
+        log(`    ${key}: part ${n}/${count}`)
+      }
+      const done = `<CompleteMultipartUpload>${parts.join('')}</CompleteMultipartUpload>`
+      await retrying(() => this.#s3(accountId, 'POST', bucket, key, { query: { uploadId }, body: Buffer.from(done), headers: { 'content-type': 'application/xml' } }), { wait: this.retryWait })
+    } catch (e) {
+      await this.#s3(accountId, 'DELETE', bucket, key, { query: { uploadId } }).catch(() => {})
+      throw e
+    }
+    return size
   }
 
   /** The object's bytes, or null when there is no such key. */

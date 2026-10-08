@@ -2059,7 +2059,52 @@ function showWorldPoints(): void {
 const programModelGroup = new THREE.Group()
 programModelGroup.name = 'program-models'
 scene.add(programModelGroup)
-const programModels = new Map<string, { holder: THREE.Group; entry: CatalogEntry; pose: ModelPose }>()
+const programModels = new Map<string, { holder: THREE.Group; entry: CatalogEntry; pose: ModelPose; fade?: THREE.Material[] }>()
+
+/**
+ * A model that fades near the camera gets materials of its own — the catalog's are shared by every
+ * copy — made transparent once, so the per-frame fade is an opacity write and never a recompile.
+ */
+function ownFadeMaterials(holder: THREE.Object3D): THREE.Material[] {
+  const out: THREE.Material[] = []
+  holder.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh) return
+    const one = (m: THREE.Material) => {
+      const c = m.clone()
+      c.transparent = true
+      out.push(c)
+      return c
+    }
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(one) : one(mesh.material)
+  })
+  return out
+}
+
+/** the camera position, reused by the fade */
+const fadeEye = new THREE.Vector3()
+const fadeAt = new THREE.Vector3()
+
+/**
+ * Fade every program model that asked for it (`ModelPose.nearFade`) by its distance from the camera:
+ * opaque beyond `nearFade`, down to a ghost at a fifth of it. Depth writes stop once it is see-through,
+ * so what is behind it — the road, the car — draws through.
+ */
+function fadeProgramModels(): void {
+  if (!programModels.size) return
+  camera.getWorldPosition(fadeEye)
+  for (const m of programModels.values()) {
+    const near = m.pose.nearFade ?? 0
+    if (!m.fade || !(near > 0)) continue
+    m.holder.getWorldPosition(fadeAt)
+    const k = THREE.MathUtils.smoothstep(fadeEye.distanceTo(fadeAt), near * 0.2, near)
+    const opacity = 0.06 + 0.94 * k
+    for (const mat of m.fade) {
+      mat.opacity = opacity
+      mat.depthWrite = opacity > 0.98
+    }
+  }
+}
 let programModelSeq = 0
 /** the placement catalog — shipped kit plus the library — read when a program starts */
 let placeCatalog: Map<string, CatalogEntry> | null = null
@@ -2084,7 +2129,10 @@ const modelsHost: ModelHost = {
     programModels.set(id, { holder, entry, pose: { ...pose } })
     void loadAssetModel(entry).then((m) => {
       // removed while it was loading: nothing to add it to
-      if (m && programModels.get(id)?.holder === holder) holder.add(fitModel(m, entry, entry.height_m))
+      const rec = programModels.get(id)
+      if (!m || rec?.holder !== holder) return
+      holder.add(fitModel(m, entry, entry.height_m))
+      if ((rec.pose.nearFade ?? 0) > 0) rec.fade = ownFadeMaterials(holder)
     })
     return id
   },
@@ -2105,6 +2153,7 @@ const modelsHost: ModelHost = {
     const m = programModels.get(id)
     if (!m) return false
     programModelGroup.remove(m.holder)
+    for (const mat of m.fade ?? []) mat.dispose()
     programModels.delete(id)
     return true
   },
@@ -2115,7 +2164,10 @@ const modelsHost: ModelHost = {
 }
 
 function clearProgramModels(): void {
-  for (const m of programModels.values()) programModelGroup.remove(m.holder)
+  for (const m of programModels.values()) {
+    programModelGroup.remove(m.holder)
+    for (const mat of m.fade ?? []) mat.dispose()
+  }
   programModels.clear()
 }
 
@@ -4199,6 +4251,8 @@ function frame() {
   // where the car is, for whoever is not in it (fly, walk, or a craft). The camera is settled by
   // now, so the on-screen/off-screen test is against the frame about to be drawn.
   beacon.update(camera, !drive.on && drive.car ? drive.car.pos : null, dt)
+  // program models that asked to fade near the camera (the money flying at the car)
+  fadeProgramModels()
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0
   if (perfHud.open) {
     // Time each pass as it is submitted. `poll` first collects whatever the GPU finished since last

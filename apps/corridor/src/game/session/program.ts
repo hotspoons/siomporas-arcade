@@ -163,6 +163,12 @@ export interface ModelPose {
   /** degrees anticlockwise from east, the way every site document writes a heading */
   yaw_deg?: number
   scale?: number
+  /**
+   * Metres from the camera inside which the model fades out, so a thing flying at the player never
+   * blocks the view: opaque beyond this, nearly clear at a fifth of it. Absent or 0: never fades.
+   * Rich, 2026-10-08: the money flying at the car "causes some visibility problems".
+   */
+  nearFade?: number
 }
 
 /**

@@ -69,6 +69,9 @@ export interface NearPerf {
   trees: number
   /** the parts of `trees`: the planter (replant + crescent pump), the near set's reseat, the far cards, the shadow casters */
   treesPlant: number
+  /** inside `treesPlant`: the crescent pump, and seating what it placed (the grids, the near set, the far cards) */
+  treesPump: number
+  treesPatch: number
   treesNear: number
   treesFar: number
   treesShadow: number
@@ -1679,7 +1682,7 @@ if (uLodOn > 0.5) {
   let trees: THREE.Group | undefined
   let treeCount = 0
   let updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void = () => {}
-  const nearPerf: NearPerf = { roadCover: 0, trees: 0, treesPlant: 0, treesNear: 0, treesFar: 0, treesShadow: 0, grass: 0, other: 0, water: 0, stream: 0, pyr: 0, lod: 0, grade: 0, veg: 0, total: 0 }
+  const nearPerf: NearPerf = { roadCover: 0, trees: 0, treesPlant: 0, treesPump: 0, treesPatch: 0, treesNear: 0, treesFar: 0, treesShadow: 0, grass: 0, other: 0, water: 0, stream: 0, pyr: 0, lod: 0, grade: 0, veg: 0, total: 0 }
   let retune: () => void = () => {}
   let applySurfaces: (doc: SurfacesDoc) => void = () => {}
   let setSeason: (season: Season) => void = () => {}
@@ -3190,7 +3193,11 @@ if (uLodOn > 0.5) {
       // The crescent fills a few ms a frame, and the first look walks it from the far side in.
       // A tree that lands inside the model radius or the shadow box has to be seated this frame.
       // Waiting for the 15 m gate is what left the road in cards until the car rolled forward.
-      if (!t.pump(scaledMs(T.TREE_PLANT_BUDGET_MS))) return
+      const p0 = performance.now()
+      const pumped = t.pump(scaledMs(T.TREE_PLANT_BUDGET_MS))
+      nearPerf.treesPump = performance.now() - p0
+      nearPerf.treesPatch = 0
+      if (!pumped) return
       const note = t.patch()
       const touch = (Math.max(T.TREE_NEAR_RADIUS, T.SHADOW_REACH) + 40) ** 2
       let close = false
@@ -3209,6 +3216,7 @@ if (uLodOn > 0.5) {
       }
       if (close) near.invalidate()
       reseat()
+      nearPerf.treesPatch = performance.now() - p0 - nearPerf.treesPump
     }
     if (renderer) {
       // far field: the SAME models as impostors, one quad a tree, re-assigned as the eye moves

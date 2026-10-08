@@ -867,7 +867,10 @@ export function treesFromCanopy(
     let n = 0
     let placed = 0
     while ((hold || scan) && placed < 480) {
-      if ((n & 31) === 0 && performance.now() >= deadline) break
+      // every fourth cell, not every thirty-second: a cell asks the canopy, the road field, the
+      // species raster and the ground, ~150 µs together, and thirty-two of them pushed a 0.75 ms
+      // share to 6 ms (2026-10-08)
+      if ((n & 3) === 0 && performance.now() >= deadline) break
       const c = hold ?? nextCell()
       hold = null
       n++

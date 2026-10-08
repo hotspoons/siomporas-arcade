@@ -193,8 +193,9 @@ export class TestRig {
       this.placeAt(car, this.s)
       return
     }
-    // pure pursuit: aim at a point down the lane, further the faster the car goes
-    const look = THREE.MathUtils.clamp(sp * 1.6, 10, 60)
+    // pure pursuit: aim at a point down the lane, further the faster the car goes — about a
+    // second and a half ahead, which at 175 mph is 120 m
+    const look = THREE.MathUtils.clamp(sp * 1.6, 10, 140)
     const tgt = this.at(Math.min(this.total, this.s + look))
     const tx = tgt.x - car.pos.x, tz = tgt.z - car.pos.z
     const fx = car.forward.x, fz = car.forward.z
@@ -204,9 +205,10 @@ export class TestRig {
     const crossY = (fx * tz - fz * tx) / fl
     const err = Math.atan2(crossY, dot)
     input.steer = THREE.MathUtils.clamp(err * 1.8, -1, 1)
-    // the bend ahead sets the speed: the heading change over the next 80 m
+    // the bend ahead sets the speed: the heading change over the next three seconds of road
+    const horizon = Math.max(100, sp * 3)
     const a = this.at(Math.min(this.total, this.s + 20))
-    const b = this.at(Math.min(this.total, this.s + 100))
+    const b = this.at(Math.min(this.total, this.s + horizon))
     const turn = Math.abs(Math.atan2(a.dx * b.dz - a.dz * b.dx, a.dx * b.dx + a.dz * b.dz))
     this.targetSpeed = this.speed * (turn > 0.5 ? 0.45 : turn > 0.25 ? 0.65 : turn > 0.12 ? 0.85 : 1)
     const want = this.targetSpeed

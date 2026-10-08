@@ -21,6 +21,15 @@
 import { streamScale } from './streamscale'
 
 /**
+ * Main-thread time the budgeted builders spent since the frame loop last read this. A slice yields
+ * on requestAnimationFrame, so the work resumes as a microtask inside the next frame's task — after
+ * the frame's own callback, where no frame-CPU clock sees it. The frame governor adds it to the
+ * frame's cost (main.ts), or the pump could run 6 ms slices on top of a full frame for ever and the
+ * governor would call the frame fine.
+ */
+export const sliceStats = { ms: 0, slices: 0 }
+
+/**
  * How the yield happens: a frame if one is actually coming, otherwise a macrotask.
  *
  * `requestAnimationFrame` DOES NOT FIRE in a background tab. Browsers pause it entirely, so a
@@ -101,6 +110,8 @@ export class Budget {
       return
     }
     if (slice > this.stats.worstSliceMs) this.stats.worstSliceMs = slice
+    sliceStats.ms += slice
+    sliceStats.slices++
     this.stats.yields++
     this.onProgress?.(this.done, this.total)
     await nextSlice()

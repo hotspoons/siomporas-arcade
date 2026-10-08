@@ -1456,7 +1456,7 @@ export let SCREEN_WAKE_LOCK = 0
  * The test rig (game/session/testrig.ts): the car drives the spine on its own and fires at the
  * traffic. These are its defaults; `apex.rig.start({...})` overrides per run.
  */
-export let RIG_SPEED_MPS = 28
+export let RIG_SPEED_MPS = 78
 export let RIG_FIRE_EVERY_S = 0.5
 export let RIG_LANE_M = 0
 export let SPLAT_ENABLED = 1
@@ -3043,7 +3043,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'long sessions and the test rig',
         keys: [
           tune('SCREEN_WAKE_LOCK', () => SCREEN_WAKE_LOCK, (v) => (SCREEN_WAKE_LOCK = v), [0, 1], 1, 'keep the screen on while this tab is visible — for a soak test or a long drive left running'),
-          tune('RIG_SPEED_MPS', () => RIG_SPEED_MPS, (v) => (RIG_SPEED_MPS = v), [5, 80], 1, 'the test rig’s cruising speed along the spine (m/s)'),
+          tune('RIG_SPEED_MPS', () => RIG_SPEED_MPS, (v) => (RIG_SPEED_MPS = v), [5, 100], 1, 'the test rig’s cruising speed along the spine (m/s). 78 is 175 mph: a stage rally, not a commute (Rich, 2026-10-08)'),
           tune('RIG_FIRE_EVERY_S', () => RIG_FIRE_EVERY_S, (v) => (RIG_FIRE_EVERY_S = v), [0.1, 10], 0.1, 'the test rig fires a missile this often (s); it aims at the nearest car ahead'),
           tune('RIG_LANE_M', () => RIG_LANE_M, (v) => (RIG_LANE_M = v), [-12, 12], 0.5, 'the test rig’s offset from the spine, metres, + right of travel'),
         ],

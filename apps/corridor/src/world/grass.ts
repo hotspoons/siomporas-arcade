@@ -331,6 +331,8 @@ export class Grass {
   // ~1 frame per 10 s at Rich's density), so the only honest frame-time number we can take here
   // is the CPU half — tile generation and buffer assembly. probes/corridor-grasscpu.mjs reads it.
   private genMs = 0
+  /** the longest single generator step this frame, ms: how far one cell can push past the share */
+  private maxStepMs = 0
   private asmMs = 0
   private madeThisFrame = 0
 
@@ -1061,6 +1063,7 @@ export class Grass {
     // tile, so a 0.6 ms share still ran a 5-7 ms verge tile on the frame — the commonest spike left
     // under the test rig (2026-10-08). `generateSteps` yields after each cell; the frame takes cells
     // until its share is spent, and the tile lands when its last cell is in.
+    this.maxStepMs = 0
     while (tiles > 0) {
       if (!this.gen) {
         // the next tile that is really missing
@@ -1079,7 +1082,9 @@ export class Grass {
       for (;;) {
         const s0 = performance.now()
         const r = g.it.next()
-        g.ms += performance.now() - s0
+        const stepMs = performance.now() - s0
+        g.ms += stepMs
+        if (stepMs > this.maxStepMs) this.maxStepMs = stepMs
         if (r.done) { this.tiles.set(g.key, r.value); done = true; break }
         if (performance.now() >= deadline) break
       }
@@ -1600,7 +1605,7 @@ export class Grass {
    * however deep the queue is: the tiles behind it are card-only tiles at the rim, where the size
    * fade has already taken the cards to nothing.
    */
-  get perf(): { genMs: number; asmMs: number; made: number; triangles: number; nearestEmpty: number; nearestUpgrade: number; pendingEmpty: number } {
+  get perf(): { genMs: number; maxStepMs: number; asmMs: number; made: number; triangles: number; nearestEmpty: number; nearestUpgrade: number; pendingEmpty: number } {
     // Two very different things sit in the queue and only one of them can show bare ground:
     //   EMPTY    no tile cached at all — nothing is drawn there
     //   UPGRADE  a card-only tile that has come inside the blade ring and wants blades too; the
@@ -1612,7 +1617,7 @@ export class Grass {
       const d = Math.hypot(p.tx * TILE + TILE / 2 - this.eye.x, p.tz * TILE + TILE / 2 - this.eye.z)
       if (this.tiles.has(p.key)) { if (d < upgrade) upgrade = d } else { nEmpty++; if (d < empty) empty = d }
     }
-    return {
+    return { maxStepMs: +this.maxStepMs.toFixed(2), 
       nearestEmpty: +empty.toFixed(1),
       nearestUpgrade: +upgrade.toFixed(1),
       pendingEmpty: nEmpty,

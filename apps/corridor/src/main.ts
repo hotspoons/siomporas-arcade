@@ -45,6 +45,7 @@ import { DETAILS, applyDetail, type Detail } from './game/session/detail'
 import { TestRig } from './game/session/testrig'
 import { setWakeLock, wakeLockState } from './game/session/wakelock'
 import { setStreamScale, streamScale } from './world/streamscale'
+import { sliceStats } from './world/budget'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
@@ -3925,24 +3926,26 @@ const earDir = new THREE.Vector3()
 const earUp = new THREE.Vector3()
 const UP_LOCAL = new THREE.Vector3(0, 1, 0)
 /**
- * THE FRAME GOVERNOR. The frame's own CPU time, just measured, against STREAM_TARGET_MS: over it,
- * the builders' budgets (world/streamscale.ts) come down fast — in proportion to how far over —
- * and under it they creep back up. Fast down and slow up, because one long frame is a dropped
- * frame and one short one is nothing. `governor` is what a probe reads.
+ * THE FRAME GOVERNOR. The frame's cost, just measured (its own CPU plus the builders' off-frame
+ * slices), against STREAM_TARGET_MS. The builders' budgets (world/streamscale.ts) are scaled to
+ * the HEADROOM: what the frame costs without them, taken from the target, over what they would
+ * spend at full scale. A hunt — halve when over, creep up when under — oscillated: twenty-five good
+ * frames took the scale back to 1, the grass took its 4 ms on top of a 10 ms frame, and the next
+ * frame halved it again. `governor` is what a probe reads.
  */
-const governor = { cpuMs: 0, scale: 1, over: 0 }
+const governor = { cpuMs: 0, scale: 1, over: 0, headroom: 0 }
 /**
  * What the last frame's CPU went on, by section of `frame()`, ms. A dozen clock reads a frame,
  * so it is always on; `apex.framePerf` reads it, and `site.nearPerf` splits `world` further.
  */
-const framePerf: Record<string, number> = { weapons: 0, traffic: 0, game: 0, waypoint: 0, physics: 0, dents: 0, sky: 0, world: 0, map: 0, shading: 0, render: 0 }
+const framePerf: Record<string, number> = { weapons: 0, traffic: 0, game: 0, waypoint: 0, physics: 0, dents: 0, sky: 0, world: 0, map: 0, shading: 0, render: 0, offFrame: 0 }
 let fpLast = 0
 const fpMark = (k: string) => {
   const n = performance.now()
   framePerf[k] = n - fpLast
   fpLast = n
 }
-function governFrame(cpuMs: number): void {
+function governFrame(cpuMs: number, budgetedMs: number): void {
   governor.cpuMs = cpuMs
   if (T.STREAM_GOVERNOR <= 0) {
     if (streamScale !== 1) setStreamScale(1)
@@ -3950,16 +3953,17 @@ function governFrame(cpuMs: number): void {
     return
   }
   const target = Math.max(1, T.STREAM_TARGET_MS)
-  let k = streamScale
-  if (cpuMs > target) {
-    governor.over++
-    k *= Math.max(0.5, 1 - (cpuMs - target) / target)
-  } else {
-    k += 0.02
-  }
-  k = Math.min(1, Math.max(T.STREAM_SCALE_MIN, k))
+  if (cpuMs > target) governor.over++
+  // what the builders could spend at full scale: the grass, the tree pump and one grading slice
+  const full = Math.max(1, T.GRASS_MS_PER_FRAME + T.TREE_PLANT_BUDGET_MS + T.STREAM_BUDGET_MS)
+  const fixed = Math.max(0, cpuMs - budgetedMs)
+  const headroom = target - fixed
+  governor.headroom = headroom
+  const want = Math.min(1, Math.max(T.STREAM_SCALE_MIN, headroom / full))
+  // eased, so one odd frame does not swing it; down faster than up
+  const k = streamScale + (want - streamScale) * (want < streamScale ? 0.5 : 0.15)
   setStreamScale(k)
-  governor.scale = k
+  governor.scale = streamScale
 }
 /** the simulated instant the sky was last built for; 20 s of world time is well under a degree of sun */
 let lastSkyMs = -1e15
@@ -4436,8 +4440,15 @@ function frame() {
    * between `cpuMs` and the frame time is where that shows up.
    */
   fpMark('render')
+  // the budgeted builders' slices since the last frame (world/budget.ts): main-thread time this
+  // frame paid for and this function never saw
+  framePerf.offFrame = sliceStats.ms
+  sliceStats.ms = 0
+  sliceStats.slices = 0
   const cpuMs = performance.now() - cpu0
-  governFrame(cpuMs)
+  // what the builders spent this frame: the grass, the tree pump, the off-frame slices
+  const np = site?.nearPerf
+  governFrame(cpuMs + framePerf.offFrame, framePerf.offFrame + (np ? np.grass + np.treesPump : 0))
   if (perfHud.open) {
     const info = renderer.info
     perfMeter.frame(real * 1000, cpuMs, {

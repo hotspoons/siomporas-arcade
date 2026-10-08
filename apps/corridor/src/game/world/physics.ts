@@ -199,6 +199,8 @@ export interface PhysicsStats {
   /** how many props the site has altogether, and how many have come off */
   catalogued: number
   broken: number
+  /** what the last `update` spent on each part, ms */
+  parts: { terrain: number; trees: number; props: number; decks: number; step: number; detached: number }
   /** merged batches skipped because a box around one is a wall across a neighbourhood */
   merged: number
   /** milliseconds the last tile build cost, which is the one cost this file can hitch a frame with */
@@ -245,6 +247,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
   const R = rapier()
   const breakables = new Breakables(phys)
   let buildMs = 0
+  const parts = { terrain: 0, trees: 0, props: 0, decks: 0, step: 0, detached: 0 }
 
   /*
    * THE TRUNKS YOU CAN HIT.
@@ -278,41 +281,52 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
   const trees = new Map<string, { collider: ReturnType<typeof addTree>; x: number; z: number }>()
   let treesAt = { x: Infinity, z: Infinity }
 
+  /** trunks the last refresh wanted and has not stood up yet, nearest first */
+  let treeQueue: [number, number, number][] = []
+  /**
+   * How many trunks may be stood up in one frame: a body and a collider each. At 175 mph the
+   * refresh fires every quarter second, and standing all 300 at once was 3–5 ms a frame on most of
+   * the frames that went over (2026-10-08). The trunk beside the car stands this frame; the one
+   * sixty metres out can wait a few.
+   */
+  const TREES_PER_FRAME = 24
+
   function refreshTrees(x: number, z: number) {
     const radius = T.PHYS_PROP_RADIUS_M
     if (T.PHYS_TREES <= 0) {
       if (trees.size) { for (const t of trees.values()) phys.world.removeRigidBody(t.collider.parent()!) ; trees.clear() }
+      treeQueue = []
       return
     }
-    // Only when the eye has actually moved. A grid query per frame is affordable; building and
-    // destroying a few hundred bodies per frame is not, and nothing has changed in between.
-    if (Math.hypot(x - treesAt.x, z - treesAt.z) < radius * 0.25) return
-    treesAt = { x, z }
-
-    const near = site.treesNear(x, z, radius)
-    // nearest first, so the budget is spent on the trunks that can actually be hit next
-    near.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z))
-    const want = new Set<string>()
-    for (const [tx, tz, r] of near.slice(0, T.PHYS_TREE_BUDGET)) {
+    if (Math.hypot(x - treesAt.x, z - treesAt.z) >= radius * 0.25) {
+      treesAt = { x, z }
+      const near = site.treesNear(x, z, radius)
+      near.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z))
+      const want = new Set<string>()
+      treeQueue = []
+      for (const t of near.slice(0, T.PHYS_TREE_BUDGET)) {
+        const key = `${t[0].toFixed(2)},${t[1].toFixed(2)}`
+        want.add(key)
+        if (!trees.has(key)) treeQueue.push(t)
+      }
+      for (const [key, t] of trees) {
+        if (want.has(key)) continue
+        if (Math.hypot(t.x - x, t.z - z) < radius * 1.3) continue
+        const body = t.collider.parent()
+        if (body) phys.world.removeRigidBody(body)
+        trees.delete(key)
+      }
+    }
+    let made = 0
+    while (treeQueue.length && made < TREES_PER_FRAME) {
+      const [tx, tz, r] = treeQueue.shift()!
       const key = `${tx.toFixed(2)},${tz.toFixed(2)}`
-      want.add(key)
       if (trees.has(key)) continue
       const g = site.groundAt(tx, tz)
       if (g === null) continue
-      // `canopyAt` is in the SITE frame — x east, y NORTH — and this is the world frame, where north
-      // is -z. Passing `z` straight in samples the canopy mirrored across the road, which puts tall
-      // trunks where the tall trees are not.
       const h = Math.max(3, site.canopyAt(tx, -tz))
       trees.set(key, { collider: addTree(phys, tx, g, tz, Math.max(0.08, r), h), x: tx, z: tz })
-    }
-    for (const [key, t] of trees) {
-      if (want.has(key)) continue
-      // hysteresis, same as the terrain's: a trunk is dropped once it is well outside, so driving
-      // back and forth past one does not rebuild it every frame
-      if (Math.hypot(t.x - x, t.z - z) < radius * 1.3) continue
-      const body = t.collider.parent()
-      if (body) phys.world.removeRigidBody(body)
-      trees.delete(key)
+      made++
     }
   }
 
@@ -772,12 +786,24 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     update(eye, dt) {
       const t0 = performance.now()
       terrain.update(eye.x, eye.z, T.PHYS_TILE_BUDGET, T.PHYS_TILE_MS)
+      const t1 = performance.now()
       refreshTrees(eye.x, eye.z)
+      const t2 = performance.now()
       refreshProps(eye.x, eye.z)
+      const t3 = performance.now()
       refreshDecks(eye.x, eye.z)
-      buildMs = terrain.stats.built ? performance.now() - t0 : 0
+      const t4 = performance.now()
+      buildMs = terrain.stats.built ? t1 - t0 : 0
       phys.step(dt)
+      const t5 = performance.now()
       syncDetached()
+      const t6 = performance.now()
+      parts.terrain = t1 - t0
+      parts.trees = t2 - t1
+      parts.props = t3 - t2
+      parts.decks = t4 - t3
+      parts.step = t5 - t4
+      parts.detached = t6 - t5
     },
 
     groundUnder(x, z) {
@@ -810,6 +836,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
         broken: brokenCount,
         merged: (props as (PropRecord[] & { merged?: number }) | null)?.merged ?? 0,
         buildMs: +buildMs.toFixed(2),
+        parts: { ...parts },
       }
     },
 

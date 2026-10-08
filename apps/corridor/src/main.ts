@@ -894,9 +894,15 @@ function buildPostAA(mode: 'fxaa' | 'smaa' | null) {
   composer = c
 }
 
+/** the RENDER_SCALE the canvas was last sized for; the frame loop resizes when the knob moves */
+let renderScaleApplied = 1
 function resize() {
   const w = innerWidth, h = innerHeight
+  // RENDER_SCALE (Display ▸ Detail): draw fewer pixels and let the canvas stretch them
+  renderScaleApplied = T.RENDER_SCALE
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio) * Math.max(0.25, Math.min(1, T.RENDER_SCALE)))
   renderer.setSize(w, h, false)
+  composer?.setPixelRatio(renderer.getPixelRatio())
   composer?.setSize(w, h)
   camera.aspect = w / h
   camera.updateProjectionMatrix()
@@ -1418,6 +1424,9 @@ async function loadSite(slug: string) {
   // AFTER the panels restored this browser's values so the committed file wins, and still undoing
   // whatever the previous site's file had set.
   const tuned = await applySiteTuning(slug, siteTuneAccess)
+  // the player's Display ▸ Detail outranks the world's own look file on the knobs it governs
+  // (DC's tuning.json sets the hero lamp modes, for one); the panel's own overrides still win
+  applyDetail(tuneUI, settings.data.detail ?? 'ultra', false, true)
   const urlQ = new URLSearchParams(location.search)
   const st = readStanceParam()
   const resume = st && st.site === slug ? null : readResume(slug)
@@ -4301,6 +4310,7 @@ function frame() {
   // where the car is, for whoever is not in it (fly, walk, or a craft). The camera is settled by
   // now, so the on-screen/off-screen test is against the frame about to be drawn.
   beacon.update(camera, !drive.on && drive.car ? drive.car.pos : null, dt)
+  if (T.RENDER_SCALE !== renderScaleApplied) resize()
   // program models that asked to fade near the camera (the money flying at the car)
   fadeProgramModels()
   // the player's car at its detail (LOD_HERO_RATIO): applied when the knob or the car changes

@@ -294,7 +294,7 @@ export class TuneUI {
    * until you move the knob again; unforced — a page load — knobs this browser overrode are left
    * as they are. The tabs that held a changed knob are persisted. Returns how many knobs moved.
    */
-  applyPreset(values: Record<string, number>, force: boolean): number {
+  applyPreset(values: Record<string, number>, force: boolean, notify = force): number {
     let n = 0
     const tabs = new Set<string>()
     for (const [name, v] of Object.entries(values)) {
@@ -303,11 +303,14 @@ export class TuneUI {
       if (!force && this.touched.has(name)) continue
       if (force) this.touched.delete(name)
       if (k.get() !== v) { k.set(v); n++ }
-      this.redraw.get(name)?.()
+      // `sync`, not `redraw`: redraw fires the slider's input event, which runs onTuneChange at once —
+      // at page load that reached `traffic` and `season` before main.ts had declared them and the tab
+      // would not start (2026-10-08, twice). The world is told below, and only when asked to be.
+      this.sync.get(name)?.(v)
       // only a level the player CHOSE re-derives the world: at page load (unforced) nothing is built
       // yet, and the retune it would run reaches things main.ts has not declared ("Cannot access
       // 'traffic' before initialization", the tab would not start — 2026-10-08)
-      if (force) this.o.onChange(name, v)
+      if (notify) this.o.onChange(name, v)
       for (const t of TUNE_TABS) if (t.sections.some((sec) => sec.keys.some((x) => x.name === name))) tabs.add(t.name)
     }
     for (const t of tabs) this.persist(t)

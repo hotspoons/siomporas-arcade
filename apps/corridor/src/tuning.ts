@@ -383,6 +383,8 @@ export let LOD_TRAFFIC_FULL_M = 100000
 export let LOD_HERO_RATIO = 1
 /** placed props and the rewards a level throws (the cash); 1 is the original */
 export let LOD_PROP_RATIO = 1
+/** the render resolution as a fraction of the screen's; the GPU here is pixel-bound (2560×1323), so this is the broadest lever */
+export let RENDER_SCALE = 1
 // --- traffic ------------------------------------------------------------------------------------
 /** never more traffic cars than this, whatever the zones and the level ask for */
 export let TRAFFIC_MAX = 600
@@ -2543,6 +2545,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('LOD_TRAFFIC_FULL_M', () => LOD_TRAFFIC_FULL_M, (v) => (LOD_TRAFFIC_FULL_M = v), [0, 100000], 10, 'full-detail traffic only within this many metres'),
           tune('LOD_HERO_RATIO', () => LOD_HERO_RATIO, (v) => (LOD_HERO_RATIO = v), [0.01, 1], 0.01, 'fraction of its triangles the player’s car draws with (1 = original)'),
           tune('LOD_PROP_RATIO', () => LOD_PROP_RATIO, (v) => (LOD_PROP_RATIO = v), [0.01, 1], 0.01, 'fraction of its triangles a placed prop or a flying reward draws with (1 = original). New ones pick it up'),
+          tune('RENDER_SCALE', () => RENDER_SCALE, (v) => (RENDER_SCALE = v), [0.4, 1], 0.05, 'render resolution × the screen’s. Lower is softer and much cheaper on the GPU'),
         ],
       },
       {

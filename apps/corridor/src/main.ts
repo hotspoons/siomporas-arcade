@@ -39,6 +39,7 @@ import { TrafficLayer, type TrafficSpec } from './game/traffic/trafficlayer'
 import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './game/world/fixtures'
 import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from './game/world/points'
 import { ZoneMarks } from './game/world/markers'
+import { AvatarBeacon } from './game/world/beacon'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
@@ -1859,6 +1860,10 @@ let hudHidden = false
 /** the arrow in the corner: a program's waypoint wins, else the race supplies one */
 const waypointHud = new WaypointHud()
 document.body.append(waypointHud.root)
+// the beacon that finds the car while you are flying: an arrow over it in view, a tick toward it
+// off the edge of the screen (beacon.ts)
+const beacon = new AvatarBeacon()
+scene.add(beacon.object)
 let programWaypoint: Waypoint | null = null
 // the player's settings and the chosen view, applied once everything they touch exists
 applyAudio()
@@ -4132,6 +4137,9 @@ function frame() {
   tickCarProbe(renderer, scene, drive.on && drive.car ? drive.car.pos : camera.position, drive.car?.mesh ?? null)
   // per-body reflection probes, at most one capture a frame and none unless WATER_PROBES > 0
   tickWaterProbes(renderer, scene, camera)
+  // where the car is, for whoever is not in it (fly, walk, or a craft). The camera is settled by
+  // now, so the on-screen/off-screen test is against the frame about to be drawn.
+  beacon.update(camera, !drive.on && drive.car ? drive.car.pos : null, dt)
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0
   if (perfHud.open) {
     // Time each pass as it is submitted. `poll` first collects whatever the GPU finished since last
@@ -4249,6 +4257,10 @@ registerBridgeContext({
   // the car itself, so a probe can check what the HUD says against what the car is doing
   get car() {
     return drive.car
+  },
+  /** the fly-mode beacon that finds the car, so a probe can hold it against the camera */
+  get beacon() {
+    return beacon
   },
   /**
    * The physics world, or null when it is switched off.

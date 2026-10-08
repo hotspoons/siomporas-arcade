@@ -447,3 +447,18 @@ body.chrome-off #attribution { display: none; }
 .waypoint-msg.folded { padding: 0 var(--s2); }
 .waypoint-msg[hidden] { display: none; }
 body.chrome-off .waypoint { display: none; }
+
+/* the avatar beacon: an amber arrow over the car while it is in view, and a rim tick toward it
+   when it is not — the minimap's edge arrow, lifted onto the whole screen */
+.avatar-beacon {
+  position: fixed; inset: 0; z-index: var(--z-hud); pointer-events: none;
+}
+.avatar-beacon[hidden] { display: none; }
+.avatar-beacon-tick {
+  position: absolute; width: 96px; height: 96px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+.avatar-beacon-dist {
+  position: absolute; font: 600 var(--text-sm) var(--num); color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); white-space: nowrap;
+}

@@ -154,6 +154,32 @@ class NaipTiledTest(unittest.TestCase):
             # A pixel from the far corner proves the window for the last-service tile landed right.
             self.assertEqual(tuple(ds.read(window=rasterio.windows.Window(7999, 7999, 1, 1))[:, 0, 0]), (10, 20, 30))
 
+    def test_a_service_hole_is_counted_not_silent(self):
+        # The 2026-10-07 dc-metro shards 1/2/7 wrote 19 KB of pure black and nothing said so. A
+        # planned corridor tile that comes back all-black is a service gap, and must be reported.
+        from shapely.geometry import box
+
+        from corridor import network_tiles
+        from corridor.geo import Frame
+
+        frame = Frame(32618, (300_000.0, 4_300_000.0))
+        bbox = (300_000.0, 4_300_000.0, 308_000.0, 4_308_000.0)
+        naip.covered = lambda frame, bbox: True
+
+        def fake(url, params, timeout, tries=5, session=None):
+            # the top-left service tile is a hole; the rest carry imagery
+            x0, _y0, _x1, y1 = params["bbox"].split(",")
+            colour = (0, 0, 0) if (float(x0) == 300000.0 and float(y1) == 4308000.0) else (10, 20, 30)
+            return _Resp(content=_jpeg(4000, colour))
+
+        naip._get_with_retry = fake
+        out = self.cache / "naip_1m.tif"
+
+        meta = network_tiles.naip_tiled(frame, bbox, corridor=box(*bbox), out=out, cache=self.cache, res=1.0)
+
+        self.assertEqual(meta["tiles_fetched"], 4)
+        self.assertEqual(meta["blank_tiles"], 1)
+
 
 class NaipBlankFillTest(unittest.TestCase):
     """`_fill_naip_blank`: every NAIP read fills exact-(0,0,0) no-data with the window's valid mean.
@@ -208,6 +234,28 @@ class NaipBlankFillTest(unittest.TestCase):
         a, b = rgb.copy(), rgb.copy()
         self.assertEqual(network_tiles._fill_naip_blank(a), pyramid.fill_blank(b)[1])
         self.assertTrue((a == b).all())
+
+    def test_a_near_black_jpeg_hole_reads_as_blank(self):
+        # A hole in a JPEG-compressed shard decodes to a few counts, not exact zero, so the pyramid
+        # must not test equality. NAIP daylight ground is never this dark on all channels.
+        import numpy as np
+
+        from corridor import pyramid
+
+        self.assertTrue(pyramid.naip_blank(np.full((3, 4, 4), 1, dtype=np.uint8)).all())
+        self.assertFalse(pyramid.naip_blank(np.full((3, 4, 4), 6, dtype=np.uint8)).any())
+
+    def test_a_wholly_blank_window_takes_the_site_mean_when_given_one(self):
+        # The pyramid paints a fully no-data tile with the site mean so the ground renders instead
+        # of going black; reported through the returned fraction so the gap is not silent.
+        import numpy as np
+
+        from corridor import pyramid
+
+        rgb = np.zeros((3, 4, 4), dtype=np.uint8)
+        out, frac = pyramid.fill_blank(rgb, fallback=np.array([90, 110, 70], dtype=np.uint8))
+        self.assertEqual(frac, 1.0)
+        self.assertTrue((out[:, 0, 0] == np.array([90, 110, 70])).all())
 
 
 class OverviewNoDataTest(unittest.TestCase):

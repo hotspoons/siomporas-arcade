@@ -492,13 +492,29 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
             }))
     naip_mod.fetch_tiles_parallel([(h, p) for _, _, _, _, h, p in plan])
     fetched = 0
+    blank_tiles: list = []
     with rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=3, dtype="uint8", crs=frame.crs, transform=from_origin(xmin, ymax, res, res), compress="jpeg", photometric="ycbcr", tiled=True, blockxsize=512, blockysize=512, jpeg_quality=88) as dst:
         for r0, c0, tw, th, hit, _params in plan:
             tile = np.asarray(Image.open(BytesIO(hit.read_bytes())).convert("RGB"))
             dst.write(np.moveaxis(tile, -1, 0), window=rasterio.windows.Window(c0, r0, tw, th))
             fetched += 1
+            # A corridor tile that comes back all-black is a SERVICE HOLE, not "no corridor here" —
+            # the plan already dropped the tiles with no corridor. The 2026-10-07 dc-metro shards
+            # 1/2/7 wrote as 19 KB of pure black and nothing said so; the pyramid then painted that
+            # black into the ground. Report every hole by name so a missing area is never silent.
+            if (tile <= naip_mod.NAIP_BLANK_MAX).all():
+                blank_tiles.append((xmin + c0 * res, ymax - r0 * res))
             print(f"  naip    tile {fetched}/{len(plan)}", flush=True)
-    return {"file": out.name, "res_m": res, "size": [width, height], "tiles_fetched": fetched}
+    if blank_tiles:
+        where = ", ".join(f"({x:.0f},{y:.0f})" for x, y in blank_tiles[:6])
+        print(
+            f"  naip    WARNING {len(blank_tiles)}/{len(plan)} planned tiles came back with NO imagery "
+            f"(service gap) at {where}{' …' if len(blank_tiles) > 6 else ''}",
+            flush=True,
+        )
+    elif not plan:
+        print(f"  naip    no service tiles touch the corridor for {out.name}", flush=True)
+    return {"file": out.name, "res_m": res, "size": [width, height], "tiles_fetched": fetched, "blank_tiles": len(blank_tiles)}
 
 
 def _tile_grid(site_dir: Path):

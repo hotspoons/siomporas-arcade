@@ -35,6 +35,11 @@ from . import rastercache
 SERVICE = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
 RES = 0.3
 TILE_PX = 4000
+#: A NAIP hole comes back through a JPEG-compressed shard GeoTIFF, so "no imagery" decodes to a few
+#: counts rather than exact zero. NAIP is flown leaf-on in daylight, so real ground is never this
+#: dark on all three channels at once. Shared by the fetch-side guard (`network_tiles.naip_tiled`)
+#: and the pyramid bake's blank test (`pyramid.naip_blank`) so both agree on what a hole is.
+NAIP_BLANK_MAX = 2
 
 # Sentinel-2 L2A, through the same STAC API `dem.py` uses for Copernicus. `TCI` — the "visual"
 # asset — is a ready-made 3-band 8-bit true-colour COG at 10 m, so there is no band maths, no

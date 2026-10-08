@@ -58,6 +58,8 @@ import json
 import math
 from dataclasses import dataclass
 
+from .naip import NAIP_BLANK_MAX
+
 # --- the quadtree (mirrors packages/engine/src/geo/wgs84.ts) -------------------------------------
 
 
@@ -234,7 +236,32 @@ def _sample_rgb(src_path, w: float, s: float, e: float, n: float, px: int):
     return dst
 
 
-def fill_blank(rgb):
+def naip_blank(rgb):
+    """Boolean (h, w) mask of pixels that are no-data: very dark on every channel."""
+    return (rgb <= NAIP_BLANK_MAX).all(axis=0)
+
+
+def _source_mean(src_path):
+    """A plausible average NAIP tone for the whole site, from a decimated read (uses the .ovr).
+
+    Used to colour a tile whose window is ENTIRELY no-data. There is no local valid mean to borrow
+    there, so the choice is this or black; black ground is the bug we are closing, and a flat mean
+    reads as ground rather than as a hole. Returns a (3,) uint8 array, or None if the source has no
+    valid pixels at all.
+    """
+    import numpy as np
+
+    src = _dataset(src_path)
+    if src is None or src.count < 3:
+        return None
+    a = src.read(indexes=[1, 2, 3], out_shape=(3, 64, 64))
+    m = (a > NAIP_BLANK_MAX).any(axis=0)
+    if not m.any():
+        return None
+    return np.array([int(a[c][m].mean()) for c in range(3)], dtype=np.uint8)
+
+
+def fill_blank(rgb, fallback=None):
     """
     Replace the nodata fill with the tile's own valid mean, and report the fraction.
 
@@ -243,12 +270,21 @@ def fill_blank(rgb):
     had tiles at 13.8 mean luma beside neighbours at 91.4, and the dark ones were 85 % nodata whose
     real imagery averaged 91.9 against the neighbour's 91.8. The photograph was never the problem.
     A pyramid has four times as many edge tiles per level, so this matters more here, not less.
+
+    A window that is ENTIRELY no-data has no valid mean to borrow. With `fallback` (the site mean)
+    it is filled with that instead of left black; without one it is left as it was, which keeps the
+    helper's answer identical to `network_tiles._fill_naip_blank` for the partial-hole case.
     """
     import numpy as np
 
     blank = (rgb == 0).all(axis=0)
     nb = int(blank.sum())
-    if nb and nb < blank.size:
+    if blank.size and nb == blank.size:
+        if fallback is not None:
+            rgb[:] = np.asarray(fallback, dtype=np.uint8)[:, None, None]
+            return rgb, 1.0
+        return rgb, 0.0
+    if nb:
         for c in range(3):
             ch = rgb[c]
             ch[blank] = int(ch[~blank].mean())
@@ -292,6 +328,10 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
     naip_p = site_dir / "naip_1m.tif"
     if not naip_p.exists():
         naip_p = site_dir / "naip.tif"
+    # The tone to paint a window that is ENTIRELY no-data, so the ground never renders black when
+    # imagery is absent. Computed once per worker from a decimated read.
+    naip_mean = _source_mean(naip_p) if naip_p.exists() else None
+    blank_tiles: list = []
 
     out = web / "pyr"
     entries = []
@@ -333,8 +373,21 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
         entry["pack"] = write_pack(d / f"{t.x}_{t.y}.pack", parts, rev=rev)
 
         rgb = _sample_rgb(naip_p, w, s, e, n, TILE_PX)
-        if rgb is not None and rgb.any():
-            rgb, frac = fill_blank(rgb)
+        if rgb is not None:
+            # The no-data test is a threshold (a hole arrives through a JPEG shard, so it decodes
+            # to a few counts, not exact zero). fill_blank fills a partial hole from its own valid
+            # mean; an ENTIRELY blank window has none, so paint the site mean and report it.
+            blank_frac = float(naip_blank(rgb).mean()) if rgb.size else 0.0
+            rgb, frac = fill_blank(rgb, fallback=naip_mean)
+            if frac:
+                entry["naip_fill"] = round(frac, 3)
+            if blank_frac > 0.98:
+                if naip_mean is not None:
+                    rgb = np.tile(naip_mean[:, None, None], (1, TILE_PX, TILE_PX))
+                else:
+                    rgb = np.full((3, TILE_PX, TILE_PX), 128, dtype=np.uint8)  # neutral earth tone
+                entry["naip_blank"] = round(blank_frac, 3)
+                blank_tiles.append((t.z, t.x, t.y, round(blank_frac, 3)))
             img = Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB")
             if vivid is not None:
                 img = vivid(img, 1.3, 1.1)
@@ -342,10 +395,20 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
                 img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
             img.save(d / f"{t.x}_{t.y}.jpg", quality=85, optimize=True)
             entry["naip"] = True
-            if frac:
-                entry["naip_fill"] = round(frac, 3)
         entries.append(entry)
     p.close()
+
+    if blank_tiles:
+        byz: dict[int, int] = {}
+        for z, _x, _y, _f in blank_tiles:
+            byz[z] = byz.get(z, 0) + 1
+        sample = ", ".join(f"z{z}:{x}_{y}" for z, x, y, _f in blank_tiles[:4])
+        tone = tuple(int(v) for v in naip_mean) if naip_mean is not None else (128, 128, 128)
+        print(
+            f"  pyramid WARNING {len(blank_tiles)} tiles had NO NAIP imagery (painted the site mean "
+            f"{tone}): {dict(sorted(byz.items()))} e.g. {sample}",
+            flush=True,
+        )
 
     return {
         "scheme": "geo-quadtree",   # 2^(z+1) lon cols, 2^z lat rows — same ids as trailworks

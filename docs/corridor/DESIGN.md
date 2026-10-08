@@ -391,11 +391,22 @@ within 7 m of a real mapped sidewalk is skipped (61 of 809 on Crofton). 748 side
   in the ground. The per-tile path and the pyramid each replaced it with the window's own valid
   mean, but `overview()` did not — and because the overview is ONE mosaic of the whole site, its
   holes were full-height bands straight across the ground (on dc-metro-take-2, 38 % of
-  `naip_overview.jpg`; 2026-10-07). All three now share `network_tiles._fill_naip_blank`. A window
-  that is entirely no-data is left alone: no valid mean exists to borrow, and NAIP absent for the
-  whole view is a different failure than an edge running past coverage. Watch for the same shape
-  wherever a coarse fallback layer is assembled differently from the fine one — the fine path will
-  be fixed and the fallback silently won't.
+  `naip_overview.jpg`; 2026-10-07). All three now share `network_tiles._fill_naip_blank`. Watch for
+  the same shape wherever a coarse fallback layer is assembled differently from the fine one — the
+  fine path will be fixed and the fallback silently won't.
+- **A hole reaches the pyramid through a JPEG-compressed shard, so "no imagery" is a threshold, not
+  equality.** A hole that decodes to 1 or 2 counts is not `== 0`, so an exact-zero test passed it
+  straight through as near-black ground. `naip.NAIP_BLANK_MAX` (2) is the shared test — NAIP is
+  flown leaf-on in daylight and real ground is never that dark on all three channels at once. A
+  window that is entirely no-data has no valid mean to borrow, so the pyramid paints it with the
+  whole site's mean (`pyramid._source_mean`, a decimated read that rides the `.ovr`) and the ground
+  renders instead of going black; the count is stamped on the tile (`entry["naip_blank"]`) and
+  printed as a `pyramid WARNING`. The world bakes without satellite imagery, it just stops being a
+  black hole.
+- **A silent service gap is the same bug at the fetch end.** The 19 KB all-black shards (below) were
+  invisible because nothing checked the content. `naip_tiled` now flags every planned corridor tile
+  that comes back all-black and reports the count and location before the shard is written, so a
+  missing area is loud whether it entered through the service or through a stale shard.
 - **A sharded bake fetches NAIP only along each shard's OWN chains' corridor (`buffer(300 m)`).** If
   a shard's naip stage came out empty or partial, the merged VRT has a ~1 km black patch with a dead
   straight edge — dc-metro-take-2 had shards 1,2,7 empty (19 KB) and 8,10 partial (10–13 MB) against

@@ -1737,6 +1737,9 @@ async function buildTraffic(want: TrafficSpec): Promise<void> {
   if (!site) return
   traffic = new TrafficLayer(site, actors, physics)
   scene.add(traffic.group)
+  // each car model's shaders, compiled in the background as the model loads rather than on the
+  // frame its first car is drawn (KHR_parallel_shader_compile where the driver has it)
+  traffic.warm = (o) => { void renderer.compileAsync(o, camera, scene).catch(() => {}) }
   // every hit on a car goes to whatever program is listening, in the program's frame (site metres)
   traffic.onHit((ev) => {
     if (!trafficHitFns.size) return
@@ -2122,7 +2125,9 @@ function showWorldPoints(): void {
 const programModelGroup = new THREE.Group()
 programModelGroup.name = 'program-models'
 scene.add(programModelGroup)
-const programModels = new Map<string, { holder: THREE.Group; entry: CatalogEntry; pose: ModelPose; fade?: THREE.Material[] }>()
+const programModels = new Map<string, { holder: THREE.Group; entry: CatalogEntry; pose: ModelPose; fade?: THREE.Material[]; shown: boolean; compiling: boolean }>()
+/** the assets whose shaders have been compiled once: the next spawn of one draws at once */
+const warmedAssets = new Set<string>()
 
 /**
  * A model that fades near the camera gets materials of its own — the catalog's are shared by every
@@ -2234,7 +2239,7 @@ const modelsHost: ModelHost = {
     holder.name = id
     poseModel(holder, pose, entry)
     programModelGroup.add(holder)
-    programModels.set(id, { holder, entry, pose: { ...pose } })
+    programModels.set(id, { holder, entry, pose: { ...pose }, shown: true, compiling: false })
     void loadAssetModel(entry).then((m) => {
       // removed while it was loading: nothing to add it to
       const rec = programModels.get(id)
@@ -2246,6 +2251,20 @@ const modelsHost: ModelHost = {
         // LOD_PROP_RATIO) draws it from a simplified copy made once per asset in a worker. The cash
         // wad is 116,680 triangles; its cost is vertex work (5 near the camera: 1.1 ms of GPU).
         setDetail(holder, T.LOD_PROP_RATIO)
+      }
+      // THE FIRST OF ITS KIND COMPILES OFF THE FRAME. A model's programs used to compile on the
+      // frame it was first drawn: the first cash wad after a load was four programs and 29 ms
+      // (2026-10-08). It stays hidden for the frame or two the background compile takes; every
+      // later spawn of the same asset finds the programs and draws at once.
+      const key = `${entry.id}:${rec.fade ? 'fade' : 'plain'}`
+      if (!warmedAssets.has(key)) {
+        rec.compiling = true
+        holder.visible = false
+        void renderer.compileAsync(holder, camera, scene).catch(() => {}).then(() => {
+          warmedAssets.add(key)
+          rec.compiling = false
+          holder.visible = rec.shown
+        })
       }
     })
     return id
@@ -2260,7 +2279,8 @@ const modelsHost: ModelHost = {
   show: (id, on) => {
     const m = programModels.get(id)
     if (!m) return false
-    m.holder.visible = on
+    m.shown = on
+    m.holder.visible = on && !m.compiling
     return true
   },
   remove: (id) => {

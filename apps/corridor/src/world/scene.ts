@@ -246,7 +246,7 @@ export interface Site {
   /** the lowest elevation (m) among the terrain tiles now held; the sea plane's visibility gate */
   lowestGround: () => number
   /** the lazy grading: how much of the site's strips and buildings exist yet, and what they cost */
-  graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string }
+  graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string; long: { key: string; ms: number }[] }
   /**
    * The road/branch streaming queue as the pump sees it: what it is building now, what is queued
    * within `STREAM_BUILD_M` of the eye (broken down by kind), and how much wall time the junction
@@ -1711,7 +1711,7 @@ if (uLodOn > 0.5) {
   }
   // worstMs is the longest unsliced stretch inside a unit — the hitch a frame can feel. A unit's
   // wall time is not a hitch: the fill yields every STREAM_BUDGET_MS.
-  const gradeStats = { built: 0, strips: 0, buildings: 0, ms: 0, worstMs: 0, worst: '' }
+  const gradeStats = { built: 0, strips: 0, buildings: 0, ms: 0, worstMs: 0, worst: '', long: [] as { key: string; ms: number }[] }
   // the style's road paint, applied to a road mesh that arrives after the style was set
   let paintNow: { centre: THREE.Color; edge: THREE.Color } | null = null
   const gradeEye = new THREE.Vector3(NaN, NaN, NaN)
@@ -1766,6 +1766,8 @@ if (uLodOn > 0.5) {
         gradeStats.built++
         gradeStats.ms += performance.now() - u0
         if (slice > gradeStats.worstMs) { gradeStats.worstMs = slice; gradeStats.worst = u.key }
+        // the last few units whose longest unsliced stretch would have cost a frame, for a probe
+        if (slice >= 12) { gradeStats.long.push({ key: u.key, ms: Math.round(slice) }); if (gradeStats.long.length > 12) gradeStats.long.shift() }
         if (visible()) await new Promise<void>((r) => setTimeout(r, 0))
       }
     } finally {
@@ -4443,7 +4445,7 @@ if (uLodOn > 0.5) {
     buildingsTiming: () => buildTiming,
     heightAt,
     lowestGround,
-    graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst }),
+    graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst, long: [...gradeStats.long] }),
     roadStream: () => {
       const near: { key: string; d: number }[] = []
       let nearBranch = 0, nearStreet = 0, nearBuildings = 0

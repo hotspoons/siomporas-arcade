@@ -237,6 +237,13 @@ export class TrafficLayer {
   private roads: Road[] = []
   private shown: Shown[] = []
   private models = new Map<string, { object: THREE.Object3D; doc: VehicleDoc }>()
+  /**
+   * Called with each car model as it is loaded, before any car wears it: the app compiles its
+   * shaders in the background (`renderer.compileAsync`). Left to the first draw, a model's
+   * programs compiled on the frame its first car came into range — four programs, ~30 ms, once
+   * per model as the drive met each of them (2026-10-08).
+   */
+  warm: ((object: THREE.Object3D) => void) | null = null
   private drive: ((world: ActorWorld['world'], dt: number) => void) | null = null
   private slots: TrafficSlot[] = []
   /** the zone file as authored, before the world floor; a live reseed rebuilds from these */
@@ -376,6 +383,7 @@ export class TrafficLayer {
       const doc = b.doc ?? defaultVehicle('traffic')
       const model = b.asset ? await loadCarModel(b.asset, doc.spec, doc.mesh, doc.finish).catch(() => null) : null
       this.models.set(m.vehicle, { object: model?.object ?? placeholderCar(doc), doc })
+      if (model) this.warm?.(model.object)
       if (!model) this.problems.push(`"${m.vehicle}" has no usable model — drawn as a box`)
     }
     const usable = { mix: set.mix.filter((m) => this.models.has(m.vehicle)), obeyRate: set.obeyRate, speedFactor: set.speedFactor }

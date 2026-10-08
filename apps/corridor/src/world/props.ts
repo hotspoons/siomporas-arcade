@@ -725,11 +725,22 @@ export function treesFromCanopy(
     // planted, so the next move has to be allowed to queue them. An uncapped plant covered the disk.
     settledR = capped && max2 > 0 ? Math.sqrt(max2) : contextR
   }
+  /**
+   * The cache trim, a few thousand entries a call. It used to walk all 350k entries the moment the
+   * scan finished — 13 ms on the frame the crescent completed (2026-10-08). A Map may be iterated
+   * while entries are deleted from it, so the walk is resumed across pump calls and the eye's
+   * position is read fresh each time.
+   */
+  let trimIter: Iterator<[string, { x: number; y: number; rec: Rec | null }]> | null = null
   const trimCache = (cx: number, cy: number, contextR: number, cellM: number) => {
-    if (cellCache.size <= 350000) return
+    if (!trimIter && cellCache.size <= 350000) return
     const lim = contextR + Math.max(50, T.TREE_REPLANT_M) + cellM
     const lim2 = lim * lim
-    for (const [k, v] of cellCache) {
+    trimIter ??= cellCache.entries()
+    for (let n = 0; n < 4000; n++) {
+      const r = trimIter.next()
+      if (r.done) { trimIter = null; return }
+      const [k, v] = r.value
       const dx = v.x - cx, dy = v.y - cy
       if (dx * dx + dy * dy > lim2) cellCache.delete(k)
     }
@@ -917,13 +928,13 @@ export function treesFromCanopy(
     pumpStats.ms = performance.now() - pumpT0
     if (!scan && !hold && settled) {
       settled = [centre[0], centre[1]]
-      const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
       const spareM = T.TREE_PATCH > 0.5 ? Math.max(0, T.TREE_SPARE_M) : 0
       const contextR = drawR + spareM
       settledR = contextR
-      trimCache(centre[0], centre[1], contextR, cellM)
       capped = false
     }
+    // the trim runs on every call while there is one in progress, and starts when the cache is big
+    trimCache(centre[0], centre[1], (T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : drawR) + (T.TREE_PATCH > 0.5 ? Math.max(0, T.TREE_SPARE_M) : 0), Math.max(1, T.TREE_CELL_M || opts.cellM || 6))
     if (!changed.length) return false
     patchNote = { rebuilt: false, changed, removed: [], removedAt: [], shown: [], hidden: [] }
     lastChanged = changed.length
@@ -940,6 +951,7 @@ export function treesFromCanopy(
     const stamp = `${cellM}|${T.TREE_MIN_H}|${T.TREE_DENSITY}|${T.TREE_HEIGHT_SCALE}|${T.TREE_ROAD_CLEAR_M}`
     if (stamp !== cacheStamp) {
       cellCache.clear()
+    trimIter = null
       cacheStamp = stamp
       records.length = 0
       free.length = 0
@@ -978,6 +990,7 @@ export function treesFromCanopy(
     const take = Math.min(cand.length, capacity)
     if (!patch) {
       cellCache.clear()
+    trimIter = null
       records.length = 0
       free.length = 0
       for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: false })
@@ -1035,6 +1048,7 @@ export function treesFromCanopy(
    */
   const forget = () => {
     cellCache.clear()
+    trimIter = null
     settledR = 0
   }
   /**
@@ -1084,6 +1098,7 @@ export function treesFromCanopy(
   /** A width knob moved: re-measure every cell, not just one road's box. */
   const invalidateAll = () => {
     cellCache.clear()
+    trimIter = null
     for (let i = 0; i < records.length; i++) {
       const r = records[i]
       if (!Number.isFinite(r.x)) continue

@@ -273,11 +273,21 @@ export class GunLayer {
     }
   }
 
+  /**
+   * Spent tracer and flash materials, kept for the next round. Disposing one released its shader
+   * program whenever it was the last of its kind alive — between bursts, every time — and the next
+   * shot compiled the program again on the frame it fired (2026-10-08).
+   */
+  private tracerPool: THREE.ShaderMaterial[] = []
+  private flashPool: THREE.SpriteMaterial[] = []
+
   private tracer(from: THREE.Vector3, to: THREE.Vector3): void {
     const d = to.clone().sub(from)
     const len = d.length()
     if (len < 0.5) return
-    const mesh = new THREE.Mesh(TRACER_GEOM, tracerMaterial())
+    const mat = this.tracerPool.pop() ?? tracerMaterial()
+    mat.uniforms.uFade.value = 1
+    const mesh = new THREE.Mesh(TRACER_GEOM, mat)
     mesh.position.copy(from)
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), d.divideScalar(len))
     mesh.scale.set(len, 1, 1)
@@ -287,7 +297,9 @@ export class GunLayer {
   }
 
   private flash(at: THREE.Vector3, size: number): void {
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashMap() ?? undefined, color: 0xffcc77, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }))
+    const mat = this.flashPool.pop() ?? new THREE.SpriteMaterial({ map: flashMap() ?? undefined, color: 0xffcc77, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })
+    mat.opacity = 1
+    const sprite = new THREE.Sprite(mat)
     sprite.position.copy(at)
     sprite.scale.setScalar(size * (0.8 + Math.random() * 0.5))
     sprite.material.rotation = Math.random() * Math.PI
@@ -301,7 +313,7 @@ export class GunLayer {
       const k = t.age / t.life
       if (k >= 1) {
         this.group.remove(t.mesh)
-        ;(t.mesh.material as THREE.Material).dispose()
+        this.tracerPool.push(t.mesh.material as THREE.ShaderMaterial)
         this.tracers.splice(this.tracers.indexOf(t), 1)
         continue
       }
@@ -312,7 +324,7 @@ export class GunLayer {
       const k = f.age / 0.06
       if (k >= 1) {
         this.group.remove(f.sprite)
-        f.sprite.material.dispose()
+        this.flashPool.push(f.sprite.material)
         this.flashes.splice(this.flashes.indexOf(f), 1)
         continue
       }

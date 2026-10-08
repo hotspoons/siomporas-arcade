@@ -48,6 +48,7 @@ interface Flash {
 const FLASH_LIGHTS = 1
 
 /** the fallback missile's cone, made once (see weaponfx.ts `builtinMissile` for why) */
+let flashGeo: THREE.SphereGeometry | null = null
 let coneGeo: THREE.ConeGeometry | null = null
 let coneMat: THREE.MeshStandardMaterial | null = null
 
@@ -160,8 +161,7 @@ export class MissileLayer {
       const t = f.age / 0.45
       if (t >= 1) {
         this.group.remove(f.mesh)
-        f.mesh.geometry.dispose()
-        ;(f.mesh.material as THREE.Material).dispose()
+        this.flashPool.push(f.mesh.material as THREE.MeshBasicMaterial)
         if (f.light) f.light.intensity = 0 // back to the pool: dim, never removed
         this.flashes.splice(this.flashes.indexOf(f), 1)
         continue
@@ -172,8 +172,13 @@ export class MissileLayer {
     }
   }
 
+  /** spent flash materials, kept: disposing the last one released its program and the next landing compiled it again */
+  private flashPool: THREE.MeshBasicMaterial[] = []
+
   private flash(at: THREE.Vector3): void {
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.9, depthWrite: false }))
+    const mat = this.flashPool.pop() ?? new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.9, depthWrite: false })
+    mat.opacity = 0.9
+    const mesh = new THREE.Mesh((flashGeo ??= new THREE.SphereGeometry(1, 16, 12)), mat)
     mesh.position.copy(at)
     // A light from the pool, round-robin. If every one is busy the oldest is taken over; the count
     // is what matters and it never changes.

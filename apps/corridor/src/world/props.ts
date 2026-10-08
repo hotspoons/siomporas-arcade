@@ -1032,10 +1032,19 @@ export function treesFromCanopy(
     const m = Math.max(0, T.TREE_ROAD_CLEAR_M)
     const ax0 = Math.min(x0, x1) - m, ax1 = Math.max(x0, x1) + m
     const az0 = Math.min(z0, z1) - m, az1 = Math.max(z0, z1) + m
-    for (const [k] of cellCache) {
-      const [ki, kj] = k.split(',')
-      const cx = (Number(ki) + 0.5) * cellM, cz = (Number(kj) + 0.5) * cellM
-      if (cx >= ax0 && cx <= ax1 && cz >= az0 && cz <= az1) cellCache.delete(k)
+    // Cells are keyed on (i, j) in planter space, x east and y NORTH, so the box's z is -y. Visit
+    // whichever is smaller: the box's cells by key, or the cache by its stored centres. This used
+    // to split all ~350k cache keys on every arriving branch (11.8 % of the main thread on
+    // dc-metro at Low, 2026-10-08), and it compared north against z, so it cleared the mirror
+    // image of the box and left the cells under the new road cached.
+    const i0 = Math.ceil(ax0 / cellM - 0.5), i1 = Math.floor(ax1 / cellM - 0.5)
+    const j0 = Math.ceil(-az1 / cellM - 0.5), j1 = Math.floor(-az0 / cellM - 0.5)
+    if (i1 >= i0 && j1 >= j0) {
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) <= cellCache.size) {
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) cellCache.delete(`${i},${j}`)
+      } else {
+        for (const [k, v] of cellCache) if (v.x >= ax0 && v.x <= ax1 && -v.y >= az0 && -v.y <= az1) cellCache.delete(k)
+      }
     }
     for (let i = 0; i < records.length; i++) {
       const r = records[i]

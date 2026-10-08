@@ -16,7 +16,7 @@
 //      which is a run: its log is the progress, and the last line is the URL.
 
 import { api, type DeployCloudflare, type DeployPlan, type DeployRecord, type DeployStatus } from './api'
-import { button, el, toast } from '../../ui/shell'
+import { button, confirm, el, toast } from '../../ui/shell'
 import { bodyOf, empty, group, readout, select, textField, toggle } from '../../ui/controls'
 import type { LogView } from './runs'
 
@@ -197,6 +197,35 @@ export class DeployPanel {
     await this.start(false)
   }
 
+  /**
+   * Delete a past deployment: its objects in R2, its ledger line, and this record — after asking.
+   * If it is the newest finished deploy of its Worker, that is what the Worker serves right now, and
+   * the question says the site will stop working (Rich, 2026-10-08: "a trash icon and have a
+   * confirmation dialog").
+   */
+  private async remove(d: DeployRecord) {
+    const newest = this.history.find((x) => x.state === 'done' && x.worker.name === d.worker.name)
+    const live = newest?.id === d.id
+    const where = d.worker.hostname ?? d.urls?.[0] ?? d.worker.name
+    const ok = await confirm({
+      title: 'Delete this deployment?',
+      message: `${d.worlds.join(', ')} → ${d.worker.name}, ${d.at.slice(0, 16).replace('T', ' ')} (${d.state}${d.bytes ? `, ${MiB(d.bytes)}` : ''}). Every object under r2://${d.bucket}/${d.prefix}/ is deleted and cannot be brought back.` +
+        (live ? ` This is what ${where} is serving now: the site stops working until you deploy again.` : ' The Worker is not touched.'),
+      ok: 'Delete',
+      danger: true,
+      icon: 'trash',
+    })
+    if (!ok) return
+    try {
+      await api.deployDelete(d.id)
+      this.history = this.history.filter((x) => x.id !== d.id)
+      this.render()
+      toast(`deleting ${d.prefix} — it runs in the background (Runs shows the log)`, 'ok', 6000)
+    } catch (e) {
+      toast((e as Error).message, 'danger', 8000)
+    }
+  }
+
   /** Put a past deploy's choices back in the form: the worlds, the worker, its address, the bucket, pruning. */
   private loadRecord(d: DeployRecord) {
     const f = this.form
@@ -241,6 +270,7 @@ export class DeployPanel {
           button({ label: 'Redeploy', icon: 'cloud-arrow-up', variant: 'ghost', disabled: this.busy || !st.token.present, onClick: () => void this.redeploy(d) }),
         )
         if (d.urls?.[0]) acts.append(button({ label: 'Open', icon: 'arrow-top-right-on-square', variant: 'ghost', onClick: () => window.open(d.urls![0], '_blank', 'noopener') }))
+        acts.append(button({ label: 'Delete', icon: 'trash', variant: 'ghost', disabled: d.state === 'running' || !st.token.present, onClick: () => void this.remove(d) }))
         row.append(acts)
         pb.append(row)
       }

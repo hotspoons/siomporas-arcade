@@ -565,6 +565,8 @@ export const api = {
   deployPlan: (worlds: string[], sources = false) => call<DeployPlan>('/api/deploy/plan', { method: 'POST', body: JSON.stringify({ worlds, sources }) }),
   deployRevisions: (account: string, bucket: string) => call<{ deployments: DeployRevision[] }>(`/api/deploy/revisions?account=${encodeURIComponent(account)}&bucket=${encodeURIComponent(bucket)}`),
   deployHistory: () => call<{ deploys: DeployRecord[] }>('/api/deploy/history'),
+  /** delete a past deployment's objects from R2 and forget it — a run */
+  deployDelete: (id: string) => call<{ run: Run }>(`/api/deploy/history/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   deployStart: (body: DeployRequest) => call<{ run: Run; prefix: string; worker: string }>('/api/deploy/start', { method: 'POST', body: JSON.stringify(body) }),
   cancel: (id: string) => call<{ run: Run }>(`/api/runs/${id}/cancel`, { method: 'POST' }),
   /** Drop one finished run and its log. A run that is still going is refused. */

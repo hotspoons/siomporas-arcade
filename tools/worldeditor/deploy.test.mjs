@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store } from './store.mjs'
-import { plan, run, defaultPrefix, workerName, stringsOf, literalsOf, LEDGER_KEY, GAME_TOP } from './deploy.mjs'
+import { plan, run, defaultPrefix, workerName, stringsOf, literalsOf, LEDGER_KEY, GAME_TOP, removeDeployment } from './deploy.mjs'
 import { keyFor } from './deploy/worker.mjs'
 import { MULTIPART_OVER } from './cloudflare.mjs'
 
@@ -403,5 +403,25 @@ test('a pyramid world leaves the flat tiles home — the viewer never loads them
   assert.ok(keys(await plan({ store, worlds: ['alpha'], transpile })).includes('sites/alpha/web/tiles/0/0_0.pack'))
   await writeFile(path.join(web, 'manifest.json'), man(true, false))
   assert.ok(keys(await plan({ store, worlds: ['alpha'], transpile })).includes('sites/alpha/web/tiles/0/0_0.pack'))
+})
+
+test('deleting a deployment takes every object under its prefix and its ledger line, and nothing else', async () => {
+  const cf = fakeCloudflare()
+  const put = (k, v = 'x') => cf.objects.set(k, { body: Buffer.from(v), type: 'application/octet-stream' })
+  // a failed deploy: objects, no deploy.json — found by listing
+  for (const k of ['sites/a/web/tiles/0/0_0.pack', 'sites/a/manifest.json', 'levels/l.json']) put(`corridor/dc-1/${k}`)
+  // a finished one beside it, which must survive
+  put('corridor/dc-2/sites/a/manifest.json')
+  put('corridor/dc-2/deploy.json', JSON.stringify({ keys: ['sites/a/manifest.json'] }))
+  put(LEDGER_KEY, JSON.stringify({ deployments: [{ prefix: 'corridor/dc-1', worlds: ['a'] }, { prefix: 'corridor/dc-2', worlds: ['a'] }] }))
+  const lines = []
+  const out = await removeDeployment({ cf, accountId: 'acc', bucket: 'b', prefix: 'corridor/dc-1/', log: (l) => lines.push(l) })
+  assert.equal(out.objects, 4) // three objects and the (absent) deploy.json
+  assert.deepEqual([...cf.objects.keys()].filter((k) => k.startsWith('corridor/dc-1/')), [])
+  assert.ok(cf.objects.has('corridor/dc-2/sites/a/manifest.json'), 'the other deployment is untouched')
+  assert.deepEqual(JSON.parse(cf.objects.get(LEDGER_KEY).body).deployments.map((d) => d.prefix), ['corridor/dc-2'])
+  assert.ok(lines.some((l) => /removed from the bucket ledger/.test(l)))
+  await assert.rejects(removeDeployment({ cf, accountId: 'acc', bucket: 'b', prefix: '/' }), /refusing/)
+  await assert.rejects(removeDeployment({ cf, accountId: 'acc', bucket: 'b', prefix: 'corridor' }), /refusing/)
 })
 

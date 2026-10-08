@@ -269,6 +269,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
       (a) => post('/api/deploy/start', a),
     ),
     T('deploy_history', 'Every deploy this editor has started: what was asked, and the URL it got.', {}, [], () => get('/api/deploy/history')),
+    T('deploy_delete', 'Delete one past deployment (an id from deploy_history): every object under its prefix in R2 and its line in the bucket ledger, then the record. The Worker is left as it is. Returns a run; follow it with run_log. Irreversible.', { id: str('the deployment id from deploy_history') }, ['id'], (a) => del(`/api/deploy/history/${encodeURIComponent(a.id)}`)),
 
     /* ---- gaussian splat training -------------------------------------------------------------- */
     T('splat_plan', 'What this cluster can actually run: which trainer, which GPUs, and whether the platform wrapper is available.', {}, [], () => get('/api/training/plan')),

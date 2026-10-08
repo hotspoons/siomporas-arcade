@@ -523,6 +523,27 @@ async function deletePrefix(cf, accountId, bucket, prefix, concurrency) {
 }
 
 /**
+ * DELETE ONE DEPLOYMENT: every object under its prefix (from its own deploy.json, else by listing —
+ * a failed deploy never wrote one), and its line in the bucket's ledger. The Worker is left alone:
+ * it may be serving a newer prefix, and deleting a Worker is a different decision. Rich, 2026-10-08:
+ * "We need the ability to clear/delete old deployments."
+ */
+export async function removeDeployment({ cf, accountId, bucket, prefix, log = () => {}, concurrency = 8 }) {
+  prefix = String(prefix).replace(/^\/+|\/+$/g, '')
+  if (!prefix || prefix === 'corridor') throw Object.assign(new Error('refusing to delete without a deployment prefix'), { status: 400 })
+  log(`deleting r2://${bucket}/${prefix}/`)
+  const objects = await deletePrefix(cf, accountId, bucket, prefix, concurrency)
+  log(`deleted ${objects} objects`)
+  const ledger = await cf.getJson(accountId, bucket, LEDGER_KEY)
+  if (ledger?.deployments?.some((d) => d.prefix === prefix)) {
+    ledger.deployments = ledger.deployments.filter((d) => d.prefix !== prefix)
+    await cf.putObject(accountId, bucket, LEDGER_KEY, JSON.stringify(ledger, null, 1), 'application/json')
+    log('removed from the bucket ledger')
+  }
+  return { prefix, objects }
+}
+
+/**
  * Execute a plan.
  *
  * @param {object} o

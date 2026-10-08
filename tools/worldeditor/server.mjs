@@ -1444,6 +1444,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
  *   POST   /api/deploy/start  {...}      a run; its log is the deploy's progress
  *   GET    /api/deploy/revisions?account=&bucket=   the ledger of deploys in a bucket
  *   GET    /api/deploy/history           every deploy started from this editor: what was asked, and the URL it got
+ *   DELETE /api/deploy/history/<id>      delete that deployment's objects from R2 and forget it (a run)
  */
 const DEPLOY_HISTORY = () => path.join(store.root, 'deploys.json')
 async function readDeployHistory() {
@@ -1452,6 +1453,11 @@ async function readDeployHistory() {
 async function recordDeploy(entry) {
   const h = await readDeployHistory()
   h.deploys = [entry, ...h.deploys.filter((d) => d.id !== entry.id)].slice(0, 200)
+  await store.writeAtomic(DEPLOY_HISTORY(), Buffer.from(JSON.stringify(h, null, 1)))
+}
+async function forgetDeploy(id) {
+  const h = await readDeployHistory()
+  h.deploys = h.deploys.filter((d) => d.id !== id)
   await store.writeAtomic(DEPLOY_HISTORY(), Buffer.from(JSON.stringify(h, null, 1)))
 }
 async function amendDeploy(id, patch) {
@@ -1513,6 +1519,27 @@ async function deployApi(req, res, seg, q) {
       return json(res, 200, { ...p, objects: body?.objects ? p.objects.map((o) => ({ key: o.key, bytes: o.bytes, group: o.group })) : undefined, count: p.objects.length })
     }
     if (seg[0] === 'history' && req.method === 'GET') return json(res, 200, await readDeployHistory())
+    // a past deployment, deleted: its objects in R2, its ledger line, then its record here. A run,
+    // because a dc-metro deploy is thousands of objects and an HTTP request should not wait on them
+    if (seg[0] === 'history' && seg[1] && req.method === 'DELETE') {
+      const id = decodeURIComponent(seg[1])
+      const rec = (await readDeployHistory()).deploys.find((d) => d.id === id)
+      if (!rec) return json(res, 404, { error: `no deployment ${id}` })
+      if (rec.state === 'running') return json(res, 409, { error: 'that deployment is still running' })
+      if (!rec.account || !rec.bucket || !rec.prefix) return json(res, 400, { error: 'that record does not say where it went' })
+      cfTokens.use() // fail now, not in the log
+      const run = await runs.startTask({
+        kind: 'deploy-delete',
+        slug: (rec.worlds ?? []).join('+') || 'deploy',
+        label: `delete ${rec.prefix} from ${rec.bucket}`,
+        task: async ({ log }) => {
+          const out = await deploy.removeDeployment({ cf: cfFor(), accountId: rec.account, bucket: rec.bucket, prefix: rec.prefix, log })
+          await forgetDeploy(id)
+          return `deleted ${out.objects} objects from r2://${rec.bucket}/${rec.prefix}`
+        },
+      })
+      return json(res, 202, { run })
+    }
     if (seg[0] === 'revisions' && req.method === 'GET') {
       const ledger = await cfFor().getJson(q.get('account'), q.get('bucket'), deploy.LEDGER_KEY)
       return json(res, 200, { deployments: ledger?.deployments ?? [] })

@@ -183,6 +183,19 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
     // what the web export's own manifest names: a loose file in web/ it does not name is a bake
     // leftover (dc-metro's web/chm_2m.png, 133 MiB, read by nothing — the 2 m canopy is in the tiles)
     const webManifest = await readFile(path.join(dir, 'web', 'manifest.json'), 'utf8').catch(() => null)
+    /*
+     * A PYRAMID SUPERSEDES THE FLAT TILES. The viewer loads `layers.tiles` only when there is no
+     * pyramid (scene.ts: `if (L.tiles && anchor && !pyrSet)`, and the pyramid needs the frame's
+     * anchor), and the imagery stream and the veg cover hang off that tile set. dc-metro carries both:
+     * web/tiles/0, 3,464 files and 1,565 MiB — 43% of the deploy — that the game never opens.
+     */
+    let flatTilesDir = null
+    try {
+      const wm = webManifest ? JSON.parse(webManifest) : null
+      if (wm?.layers?.pyramid && wm?.frame?.anchor && typeof wm?.layers?.tiles?.dir === 'string') flatTilesDir = `web/${wm.layers.tiles.dir.replace(/^\/+|\/+$/g, '')}/`
+    } catch {
+      /* not JSON: ship what is there */
+    }
     const namedInWeb = (name) => webManifest === null || name === 'manifest.json' || new RegExp(`["/]${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`).test(webManifest)
     let skipped = 0
     let skippedBytes = 0
@@ -191,7 +204,8 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
       if (top ? !SITE_TOP.has(path.extname(rel)) : !rel.startsWith('web/')) continue
       // a bake source the game never opens stays home unless asked for (`sources`)
       const looseWeb = /^web\/[^/]+$/.test(rel)
-      if (!sources && ((top && !GAME_TOP.has(rel) && !(GAME_FALLBACK[rel] && !have.has(GAME_FALLBACK[rel]))) || (looseWeb && !namedInWeb(rel.slice(4))))) {
+      const superseded = flatTilesDir !== null && rel.startsWith(flatTilesDir)
+      if (!sources && (superseded || (top && !GAME_TOP.has(rel) && !(GAME_FALLBACK[rel] && !have.has(GAME_FALLBACK[rel]))) || (looseWeb && !namedInWeb(rel.slice(4))))) {
         skipped++
         skippedBytes += (await stat(path.join(dir, rel))).size
         continue

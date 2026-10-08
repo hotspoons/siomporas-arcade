@@ -386,3 +386,22 @@ test('a loose file in web/ that the web manifest does not name stays home (dc-me
   assert.ok(keys(all).includes('sites/alpha/web/chm_2m.png'), 'sources ships it')
 })
 
+test('a pyramid world leaves the flat tiles home — the viewer never loads them beside a pyramid', async () => {
+  const { store } = await volume()
+  const web = path.join(store.sites, 'alpha', 'web')
+  await mkdir(path.join(web, 'pyr', '11'), { recursive: true })
+  await writeFile(path.join(web, 'pyr', '11', '1_1.pack'), Buffer.alloc(8))
+  const man = (pyramid, anchor) => JSON.stringify({ frame: anchor ? { kind: 'enu', anchor: { lon: -77, lat: 38.9 } } : { kind: 'utm' }, layers: { tiles: { dir: 'tiles/0', size_m: 1000 }, ...(pyramid ? { pyramid: { dir: 'pyr', zmin: 11, zmax: 14 } } : {}) } })
+  const keys = (p) => p.objects.map((o) => o.key).filter((k) => k.startsWith('sites/alpha/web/'))
+  await writeFile(path.join(web, 'manifest.json'), man(true, true))
+  const game = await plan({ store, worlds: ['alpha'], transpile })
+  assert.ok(!keys(game).some((k) => k.startsWith('sites/alpha/web/tiles/0/')), 'the flat tiles stayed home')
+  assert.ok(keys(game).includes('sites/alpha/web/pyr/11/1_1.pack'), 'the pyramid went')
+  assert.ok(keys(await plan({ store, worlds: ['alpha'], transpile, sources: true })).includes('sites/alpha/web/tiles/0/0_0.pack'), 'sources ships them')
+  // no pyramid, or no anchor for one: the flat tiles ARE the terrain, and they go
+  await writeFile(path.join(web, 'manifest.json'), man(false, true))
+  assert.ok(keys(await plan({ store, worlds: ['alpha'], transpile })).includes('sites/alpha/web/tiles/0/0_0.pack'))
+  await writeFile(path.join(web, 'manifest.json'), man(true, false))
+  assert.ok(keys(await plan({ store, worlds: ['alpha'], transpile })).includes('sites/alpha/web/tiles/0/0_0.pack'))
+})
+

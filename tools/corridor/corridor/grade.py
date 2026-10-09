@@ -81,6 +81,9 @@ SURFACE_DROP = 0.02     # ... and the ground under the pavement is e.y - 0.02
 BLEND_LO, BLEND_HI = 0.6, 7.0
 MEET_NEAR_M = 6.0       # a junction node must be within 6 m of a raw vertex to meet there
 HOME_M = 1000.0
+#: a deck is at least this many stations (5 m each) long; a gap in one up to this many is not a gap
+DECK_MIN_STATIONS = 3
+DECK_GAP_STATIONS = 2
 
 #: props.ts: road classes kerbed in an American suburb — a gutter, no shoulder, no edge line
 KERBED = frozenset({"residential", "living_street", "unclassified", "service", "tertiary", "tertiary_link"})
@@ -90,6 +93,38 @@ ONE_WAY_CLASSES = ("motorway", "motorway_link", "trunk_link", "primary_link")
 RANK = {"motorway": 0, "trunk": 1, "primary": 2, "secondary": 3, "tertiary": 4, "unclassified": 5, "residential": 6, "living_street": 7, "service": 8}
 #: edgeDistance's `who` for a driveway or stub station (not a carriageway, carries its own height)
 WHO_DRIVEWAY = -2
+
+
+def _smooth_runs(flags: np.ndarray, max_gap: int, min_run: int) -> np.ndarray:
+    """Close gaps of at most `max_gap` False between Trues, then drop runs of fewer than
+    `min_run` Trues — a morphological closing and opening along one carriageway's stations."""
+    f = np.asarray(flags, dtype=bool).copy()
+    n = len(f)
+    # closing: a False run bounded by Trues on both sides, no longer than max_gap, becomes True
+    i = 0
+    while i < n:
+        if not f[i]:
+            j = i
+            while j < n and not f[j]:
+                j += 1
+            if i > 0 and j < n and (j - i) <= max_gap:
+                f[i:j] = True
+            i = j
+        else:
+            i += 1
+    # opening: a True run shorter than min_run becomes False
+    i = 0
+    while i < n:
+        if f[i]:
+            j = i
+            while j < n and f[j]:
+                j += 1
+            if (j - i) < min_run:
+                f[i:j] = False
+            i = j
+        else:
+            i += 1
+    return f
 
 
 def smoothstep(x, lo: float, hi: float):
@@ -623,6 +658,18 @@ class RoadModel:
             setattr(st, n, np.concatenate(arrs) if arrs else np.zeros(0))
         st.who = st.who.astype(int)
         st.elev = st.elev.astype(bool)
+        # A DECK IS A RUN, NOT A COIN TOSS. Route 3 rides a 3 m embankment for kilometres, and
+        # OVERPASS_CLEAR_M is 3 m: against the 1 m DEM the flag flips station by station along it
+        # (measured 2026-10-09: the stations behind the old bake's disagreements sat 2.9–4.0 m up),
+        # and the viewer's own boot-time guess flipped them differently again. Since the bake now
+        # decides for both, it decides in runs — a deck is at least DECK_MIN_STATIONS long, and a
+        # gap in one no longer than DECK_GAP_STATIONS is still the deck. The stations' `s` are in
+        # order within a road, so this is a 1-D closing then opening along each carriageway.
+        for w in np.unique(st.who):
+            m = np.flatnonzero(st.who == w)
+            if len(m) < 2:
+                continue
+            st.elev[m] = _smooth_runs(st.elev[m], DECK_GAP_STATIONS, DECK_MIN_STATIONS)
         st.order = np.arange(len(st.x))
         self.st = st
         self.road_station_count = len(st.x)
@@ -719,8 +766,16 @@ class RoadModel:
             flare_at = -1 if not flare else (0 if e["d"][0] <= e["d"][1] else len(pts) - 1)
             run = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 2])))])
             total = run[-1]
-            # y = (groundAtWorld(pt) ?? pt.y) + 0.03 — at load groundAtWorld is still the bare DEM
-            g = self.dem_up_at(pts[:, 0], pts[:, 2]) + 0.03
+            # THE BAKE'S OWN z, not a fresh sample. `_service_ways` / `_stub_roads` wrote each point's
+            # height from the 1 m DEM, and that number is in the manifest; the viewer on a graded
+            # bake lays its driveway stations on it too (scene.ts addDriveways), so the formula
+            # and the raster agree to the count. The viewer used to lay them on whatever earth it
+            # held at boot — the 8 m overview for most of a site — and a stub on Route 3 landed
+            # 3.5 m above the ground it stands on, with a 40 m verge graded up to it (measured,
+            # 2026-10-09: 546 of the 743 points over 10 cm were that). A point with no z falls
+            # back to the DEM, as the viewer's `?? pt.y` intends.
+            z_own = pts[:, 1]
+            g = np.where(np.isfinite(z_own), z_own, self.dem_up_at(pts[:, 0], pts[:, 2])) + 0.03
             for i in range(len(pts)):
                 a = pts[max(0, i - 1)]
                 b = pts[min(len(pts) - 1, i + 1)]
@@ -886,6 +941,60 @@ class RoadModel:
         val = np.where(d < BLEND_LO, road, road * (1 - t) + dem * t) + lift
         out[ok] = val[ok]
         return out
+
+    # --- what the bake decided is a deck ------------------------------------------------------
+    def deck_runs(self) -> dict[int, list[list[float]]]:
+        """Per carriageway (`who`), the along-track runs `[s0, s1]` of stations the grading
+        treated as ELEVATED — a deck, not ground — measured against the 1 m DEM."""
+        st = self.st
+        out: dict[int, list[list[float]]] = {}
+        n = self.road_station_count
+        who = st.who[:n]
+        for w in np.unique(who):
+            m = who == w
+            ss = st.s[:n][m]
+            el = st.elev[:n][m]
+            order = np.argsort(ss)
+            ss, el = ss[order], el[order]
+            runs: list[list[float]] = []
+            start = None
+            prev = None
+            for sv, ev in zip(ss, el):
+                if ev and start is None:
+                    start = sv
+                if not ev and start is not None:
+                    runs.append([round(float(start), 1), round(float(prev), 1)])
+                    start = None
+                prev = sv
+            if start is not None:
+                runs.append([round(float(start), 1), round(float(prev), 1)])
+            if runs:
+                out[int(w)] = runs
+        return out
+
+    def annotate_decks(self, manifest: dict) -> int:
+        """
+        Write the deck runs INTO the manifest the viewer will read: `spine.elev_s` and each
+        branch's `elev_s`, as `[[s0, s1], ...]` in the road's own station metres.
+
+        The viewer used to decide "is this station up in the air?" at boot against whatever earth
+        it held — the 8 m overview or a z10 tile for everything but the home kilometre — and the
+        physics ground, the deck colliders and the strips all followed that one guess. On a
+        graded bake the raster under an elevated station is the EARTH (the bake skipped it), so
+        the viewer's guess and the bake's decision have to be the same decision or a bridge
+        approach has ground under it in neither: the raster says earth, the deck collider says
+        "not a deck". This is the bake saying which, from the 1 m DEM, once. Returns the count.
+        """
+        runs = self.deck_runs()
+        n = 0
+        if 0 in runs:
+            manifest["spine"]["elev_s"] = runs[0]
+            n += len(runs[0])
+        for i, b in enumerate(self.branches):
+            r = runs.get(self.branch_who0 + i, [])
+            b["br"]["elev_s"] = r
+            n += len(r)
+        return n
 
     def __getstate__(self) -> dict:
         """Picklable for the pyramid workers (forkserver hands the model over through `initargs`):

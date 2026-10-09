@@ -504,7 +504,10 @@ def road_model(site_dir, frame, manifest: dict):
         return None
     t0 = time.perf_counter()
     model = grade.RoadModel(manifest, grade.site_dem_up(frame, dem_p))
+    # the manifest is the caller's `out`: the deck runs land in it before it is written
+    decks = model.annotate_decks(manifest)
     sm = model.summary()
+    print(f"  grade   {decks} elevated runs written as elev_s (the viewer's deck tests follow the bake)", flush=True)
     print(f"  grade   {sm['roads']} carriageways, {sm['stations']} stations + {sm['bulbs']} bulbs + {sm['driveway_stations']} driveway stations; "
           f"junctions {sm['junctions']['junctions']} met, {sm['junctions']['warped']} warped (max {sm['junctions']['maxStep']} m), "
           f"{sm['junctions']['noTarget']} without a target — {time.perf_counter() - t0:.1f} s", flush=True)

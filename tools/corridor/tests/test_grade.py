@@ -170,6 +170,25 @@ class DeckTest(unittest.TestCase):
         g2 = model.graded_height(x[:1], z[:1], dem(x[:1], z[:1]), grade=False)
         self.assertAlmostEqual(float(g2[0]), ROAD_Z + grade.ROAD_LIFT - grade.SURFACE_DROP, places=6)
 
+    def test_the_bake_writes_its_deck_decision_into_the_manifest(self):
+        dem = slope_dem(0.0, base=ROAD_Z - 8.0)
+        br = {"id": "b1", "highway": "residential", "lanes": 2, "oneway": None, "length_m": 300.0,
+              "coords": [[300.0, float(y), ROAD_Z + (0.0 if abs(y) < 60 else -8.0)] for y in np.arange(-150.0, 150.1, 10.0)],
+              "junctions": [], "dead_ends": []}
+        w = world(spine_east(), branches=[br], bbox=[-10, -160, 610, 160])
+        model = grade.RoadModel(w, dem)
+        n = model.annotate_decks(w)
+        self.assertGreater(n, 0)
+        # the whole spine stands 8 m up: one run, the full length
+        self.assertEqual(len(w["spine"]["elev_s"]), 1)
+        self.assertAlmostEqual(w["spine"]["elev_s"][0][0], 0.0)
+        self.assertGreater(w["spine"]["elev_s"][0][1], 590.0)
+        # the branch is up only over its middle 120 m: one run, about that long
+        runs = w["branches"][0]["elev_s"]
+        self.assertEqual(len(runs), 1)
+        self.assertGreater(runs[0][1] - runs[0][0], 90.0)
+        self.assertLess(runs[0][1] - runs[0][0], 140.0)
+
     def test_a_branch_verge_does_not_climb_onto_a_crossing_deck(self):
         # a residential branch running north over a valley: on its deck the pavement is kept and
         # the verge beside it drops to the DEM
@@ -265,6 +284,17 @@ class CulDeSacTest(unittest.TestCase):
         # ... and nothing in a world where the knob is off
         off = grade.RoadModel(world(spine_east(), branches=[br], bbox=[-10, -400, 610, 400]), self.dem, knobs=grade.Knobs(CULDESAC_RADIUS=0))
         self.assertEqual(off.bulb_count, 0)
+
+
+class DeckRunTest(unittest.TestCase):
+    def test_a_deck_is_a_run_not_a_coin_toss(self):
+        f = np.array([0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0], dtype=bool)
+        out = grade._smooth_runs(f, grade.DECK_GAP_STATIONS, grade.DECK_MIN_STATIONS)
+        # the gaps of 1 and 2 close, so stations 1..9 are one deck; the lone flag at 13 is dropped
+        self.assertEqual(out.tolist(), [False] + [True] * 9 + [False] * 5)
+        # nothing to close or open: untouched
+        self.assertEqual(grade._smooth_runs(np.zeros(6, bool), 2, 3).tolist(), [False] * 6)
+        self.assertEqual(grade._smooth_runs(np.ones(6, bool), 2, 3).tolist(), [True] * 6)
 
 
 class WidthTest(unittest.TestCase):

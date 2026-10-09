@@ -227,6 +227,12 @@ export interface VehicleDoc {
    */
   mounts?: MountedWeapon[]
   /**
+   * How far the mounted weapons may turn to follow the camera, degrees each way: yaw across, pitch
+   * up and down. 0 fixes a weapon along its mount; absent defers to the tuning panel's
+   * GUN_TURRET_* / MISSILE_TURRET_* knobs, which also cap whatever a document says.
+   */
+  turret?: { gun_yaw_deg?: number; gun_pitch_deg?: number; missile_yaw_deg?: number; missile_pitch_deg?: number }
+  /**
    * Finished is the simplified mesh. Raw is the reconstruction, with many more triangles.
    * Absent, the world draws finished when that file exists.
    */
@@ -499,6 +505,10 @@ export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWhe
     else if (opts.weapons && !opts.weapons.includes(m.weapon)) errors.push(`mounts[${i}] names ${JSON.stringify(m.weapon)}, which is not a built weapon`)
     if (!(VEHICLE_MOUNTS as readonly string[]).includes(m.at)) errors.push(`mounts[${i}].at is ${JSON.stringify(m.at)}; it must be one of ${VEHICLE_MOUNTS.join(', ')}`)
     if (m.yaw_deg !== undefined && !Number.isFinite(m.yaw_deg)) errors.push(`mounts[${i}].yaw_deg must be a number`)
+  }
+  for (const k of ['gun_yaw_deg', 'gun_pitch_deg', 'missile_yaw_deg', 'missile_pitch_deg'] as const) {
+    const val = v.turret?.[k]
+    if (val !== undefined && !(Number.isFinite(val) && val >= 0 && val <= 180)) errors.push(`turret.${k} must be a number from 0 (fixed) to 180`)
   }
 
   return { ok: errors.length === 0, errors, warnings }

@@ -498,6 +498,18 @@ export let MISSILE_LIFT = 1.1
 /** the dent at the centre of a missile's blast, 0…1, falling off with distance */
 export let MISSILE_DAMAGE = 0.9
 /**
+ * THE TURRET. The gun and the launcher turn to follow the camera's look-around (the right stick,
+ * a drag); these are how far they may turn, degrees each way. 0 fixes a weapon along the nose; a
+ * vehicle document's `turret` block may be tighter than these but never wider (Rich, 2026-10-09:
+ * "an option in the tuning panel and per vehicle for max degrees v and h").
+ */
+export let GUN_TURRET_YAW_DEG = 180
+export let GUN_TURRET_PITCH_DEG = 45
+export let MISSILE_TURRET_YAW_DEG = 180
+export let MISSILE_TURRET_PITCH_DEG = 45
+/** how fast a mount swings to its aim, radians per second */
+export let TURRET_SLEW = 9
+/**
  * REWARDS FLYING AT THE CAMERA — any model a level spawned with `nearFade` (the Beltway's cash).
  * Rich, 2026-10-08: "still very in my face … is there a tuning panel setting for this". FADE_M,
  * when above 0, replaces the level's own fade distance; the model is solid beyond it and at
@@ -2684,6 +2696,11 @@ export const TUNE_TABS: TuneTab[] = [
           tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 80], 1, 'm/s a car at the centre of the blast is given'),
           tune('MISSILE_LIFT', () => MISSILE_LIFT, (v) => (MISSILE_LIFT = v), [0, 3], 0.05, 'how much of the throw points up'),
           tune('MISSILE_DAMAGE', () => MISSILE_DAMAGE, (v) => (MISSILE_DAMAGE = v), [0, 1], 0.05, 'the dent at the centre of a missile blast'),
+          tune('GUN_TURRET_YAW_DEG', () => GUN_TURRET_YAW_DEG, (v) => (GUN_TURRET_YAW_DEG = v), [0, 180], 5, 'how far the guns turn to follow the camera, degrees each way. 0 = fixed along the nose'),
+          tune('GUN_TURRET_PITCH_DEG', () => GUN_TURRET_PITCH_DEG, (v) => (GUN_TURRET_PITCH_DEG = v), [0, 180], 5, 'how far the guns tilt up and down, degrees'),
+          tune('MISSILE_TURRET_YAW_DEG', () => MISSILE_TURRET_YAW_DEG, (v) => (MISSILE_TURRET_YAW_DEG = v), [0, 180], 5, 'how far the launcher turns to follow the camera, degrees each way. 0 = fixed'),
+          tune('MISSILE_TURRET_PITCH_DEG', () => MISSILE_TURRET_PITCH_DEG, (v) => (MISSILE_TURRET_PITCH_DEG = v), [0, 180], 5, 'how far the launcher tilts, degrees'),
+          tune('TURRET_SLEW', () => TURRET_SLEW, (v) => (TURRET_SLEW = v), [1, 30], 0.5, 'how fast a mount swings to its aim, rad/s'),
           tune('TRAFFIC_KNOCK_MS', () => TRAFFIC_KNOCK_MS, (v) => (TRAFFIC_KNOCK_MS = v), [1, 120], 1, 'a hit under this (m/s) makes a car swerve; over it, knocked loose'),
           tune('TRAFFIC_LAUNCH_MS', () => TRAFFIC_LAUNCH_MS, (v) => (TRAFFIC_LAUNCH_MS = v), [1, 60], 0.5, 'a loose car climbing faster than this (m/s) was launched'),
           tune('TRAFFIC_HEAT_S', () => TRAFFIC_HEAT_S, (v) => (TRAFFIC_HEAT_S = v), [0.05, 5], 0.05, 'how long gunfire on one car keeps adding up (s)'),

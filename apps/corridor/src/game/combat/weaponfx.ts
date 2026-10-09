@@ -349,8 +349,10 @@ export class GunLayer {
 
 export interface Mounted {
   root: THREE.Group
-  /** the gun muzzles, in the car mesh's own frame (+X forward, +Y up, +Z right) */
-  muzzles: THREE.Vector3[]
+  /** the gun muzzles: a point in its pivot's frame (+X forward), so a turned gun fires where it points */
+  muzzles: { pivot: THREE.Object3D; offset: THREE.Vector3 }[]
+  /** the turrets: a pivot per mount, at the mount point, the model hung under it; `aimTurrets` turns them */
+  turrets: { pivot: THREE.Object3D; kind: 'gun' | 'missile' }[]
 }
 
 /**
@@ -361,15 +363,26 @@ export interface Mounted {
 export function mountWeapons(spec: { length: number; width: number; height: number }, models: { launcher: THREE.Object3D | null; gun: THREE.Object3D | null }): Mounted {
   const root = new THREE.Group()
   root.name = 'weapons'
+  // EACH MOUNT IS A PIVOT with the model hung under it, so the weapon can turn on its mount to
+  // follow the camera (the turret, Rich 2026-10-09) while the mount itself stays put on the car
+  const turrets: Mounted['turrets'] = []
   const launcher = models.launcher?.clone(true) ?? builtinLauncher()
-  launcher.position.set(-spec.length * 0.08, spec.height * 0.95, 0)
-  root.add(launcher)
-  const muzzles: THREE.Vector3[] = []
+  const launcherPivot = new THREE.Group()
+  launcherPivot.name = 'turret:missile'
+  launcherPivot.position.set(-spec.length * 0.08, spec.height * 0.95, 0)
+  launcherPivot.add(launcher)
+  root.add(launcherPivot)
+  turrets.push({ pivot: launcherPivot, kind: 'missile' })
+  const muzzles: Mounted['muzzles'] = []
   for (const side of [-1, 1]) {
     const gun = models.gun?.clone(true) ?? builtinGun()
-    gun.position.set(spec.length * 0.28, spec.height * 0.62, side * spec.width * 0.3)
-    root.add(gun)
-    muzzles.push(gun.position.clone().add(new THREE.Vector3(0.85, 0.12, 0)))
+    const pivot = new THREE.Group()
+    pivot.name = 'turret:gun'
+    pivot.position.set(spec.length * 0.28, spec.height * 0.62, side * spec.width * 0.3)
+    pivot.add(gun)
+    root.add(pivot)
+    turrets.push({ pivot, kind: 'gun' })
+    muzzles.push({ pivot, offset: new THREE.Vector3(0.85, 0.12, 0) })
   }
-  return { root, muzzles }
+  return { root, muzzles, turrets }
 }

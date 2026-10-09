@@ -1854,10 +1854,61 @@ async function armCar(car: DrivableCar): Promise<void> {
   car.mesh.add(mounted.root)
 }
 
-/** The gun's world muzzles this frame, from the car mesh's frame. */
+/** The gun's world muzzles this frame, from each gun's own pivot: a turned gun fires where it points. */
 function muzzlesNow(): THREE.Vector3[] {
   if (!mounted || !drive.car) return []
-  return mounted.muzzles.map((m) => drive.car!.mesh.localToWorld(m.clone()))
+  return mounted.muzzles.map((m) => { m.pivot.updateWorldMatrix(true, false); return m.pivot.localToWorld(m.offset.clone()) })
+}
+
+/**
+ * How far a kind of mount may turn: the panel's knob, capped further by the vehicle document's
+ * `turret` block when it has one. 0 is a fixed mount.
+ */
+function turretLimits(kind: 'gun' | 'missile'): { yaw: number; pitch: number } {
+  const doc = (playerVehicle ?? defaultVehicle('hero-car')).turret
+  const yawKnob = kind === 'gun' ? T.GUN_TURRET_YAW_DEG : T.MISSILE_TURRET_YAW_DEG
+  const pitchKnob = kind === 'gun' ? T.GUN_TURRET_PITCH_DEG : T.MISSILE_TURRET_PITCH_DEG
+  const yawDoc = kind === 'gun' ? doc?.gun_yaw_deg : doc?.missile_yaw_deg
+  const pitchDoc = kind === 'gun' ? doc?.gun_pitch_deg : doc?.missile_pitch_deg
+  const yaw = Math.min(yawKnob, yawDoc ?? 180), pitch = Math.min(pitchKnob, pitchDoc ?? 180)
+  return { yaw: (Math.max(0, yaw) * Math.PI) / 180, pitch: (Math.max(0, pitch) * Math.PI) / 180 }
+}
+
+/**
+ * The turret's angles for a kind of mount, in the car's frame (yaw right-positive, pitch
+ * up-positive), from the camera's look-around and clamped to the mount's limits. At neutral both
+ * are zero: the nose.
+ */
+function turretAngles(kind: 'gun' | 'missile'): { yaw: number; pitch: number } {
+  const lim = turretLimits(kind)
+  // the camera's look-around yaw is positive to the LEFT (a rotation about up takes the nose that
+  // way) and its pitch positive DOWN; the turret counts right and up
+  const yaw = THREE.MathUtils.clamp(-(drive.yaw + drive.stickYaw), -lim.yaw, lim.yaw)
+  const pitch = THREE.MathUtils.clamp(-Math.max(-0.8, Math.min(0.8, drive.pitch + drive.stickPitch)), -lim.pitch, lim.pitch)
+  return { yaw, pitch }
+}
+
+/** where a mount's rounds go this frame: its turret angles, in the world */
+function aimOf(car: DrivableCar, kind: 'gun' | 'missile'): THREE.Vector3 {
+  const { yaw, pitch } = turretAngles(kind)
+  const cp = Math.cos(pitch)
+  // the car mesh's frame: +X forward, +Y up, +Z right
+  return new THREE.Vector3(cp * Math.cos(yaw), Math.sin(pitch), cp * Math.sin(yaw)).applyQuaternion(car.mesh.quaternion).normalize()
+}
+
+/** Swing the mounts toward their aim, TURRET_SLEW radians a second. Every frame the car is driven. */
+function aimTurrets(dt: number): void {
+  if (!mounted) return
+  const k = 1 - Math.exp(-T.TURRET_SLEW * dt)
+  for (const t of mounted.turrets) {
+    const want = turretAngles(t.kind)
+    // yaw about the mount's up (a positive three rotation about +Y turns +X toward -Z, our left),
+    // then pitch about the turned right axis: order YZX
+    const e = t.pivot.rotation
+    e.order = 'YZX'
+    e.y += (-want.yaw - e.y) * k
+    e.z += (want.pitch - e.z) * k
+  }
 }
 
 /** Hold the trigger: the gun fires at its rate from alternating muzzles, along the nose. */
@@ -1885,7 +1936,7 @@ function fireGun(dt: number): void {
   }
   const muzzles = muzzlesNow()
   const from = muzzles.length ? muzzles : [drive.car.pos.clone().add(drive.car.forward.clone().multiplyScalar(2.2)).add(new THREE.Vector3(0, 0.6, 0))]
-  gun.fire(from, playerAim(drive.car), dt)
+  gun.fire(from, playerAim(drive.car, 'gun'), dt)
 }
 let offPlayerImpact: (() => void) | null = null
 
@@ -1965,16 +2016,8 @@ function ensureMissiles(): MissileLayer | null {
  * look-around yaw, pitched by its look-around pitch (positive is down, as the camera reads it); at
  * neutral it is exactly the nose.
  */
-function playerAim(car: DrivableCar): THREE.Vector3 {
-  const lookYaw = drive.yaw + drive.stickYaw
-  const lookPitch = Math.max(-0.8, Math.min(0.8, drive.pitch + drive.stickPitch))
-  const carUp = car.right.clone().cross(car.forward).normalize()
-  const dir = car.forward.clone().applyAxisAngle(carUp, lookYaw)
-  if (Math.abs(lookPitch) > 1e-4) {
-    const right = dir.clone().cross(carUp).normalize()
-    dir.applyAxisAngle(right, lookPitch) // positive pitch looks down; +pitch about the right axis takes the nose down
-  }
-  return dir.normalize()
+function playerAim(car: DrivableCar, kind: 'gun' | 'missile'): THREE.Vector3 {
+  return aimOf(car, kind)
 }
 
 /**
@@ -1988,8 +2031,13 @@ function fireMissile(aim?: THREE.Vector3): boolean {
   const car = drive.car
   // from the bonnet, not the roof: the body origin is already a metre up, and a traffic car's box
   // tops out at a metre and a half — a missile launched from two metres sailed over every one
-  const from = car.pos.clone().add(car.forward.clone().multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.15, 0))
-  const dir = aim ? aim.clone().normalize() : playerAim(car)
+  const dir = aim ? aim.clone().normalize() : playerAim(car, 'missile')
+  // from the launcher's pivot a metre along the aim when the car has one, else the bonnet: the body
+  // origin is already a metre up, and a traffic car's box tops out at a metre and a half
+  const launcher = mounted?.turrets.find((t) => t.kind === 'missile')?.pivot
+  let from: THREE.Vector3
+  if (launcher) { launcher.updateWorldMatrix(true, false); from = launcher.getWorldPosition(new THREE.Vector3()).addScaledVector(dir, 1.0) }
+  else from = car.pos.clone().add(car.forward.clone().multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.15, 0))
   layer.fire(from, dir, Math.max(0, car.speed))
   return true
 }
@@ -4201,6 +4249,8 @@ function frame() {
     }
     // the test rig's hands on the wheel, over whatever the keys said
     if (rig.on && !paused) rig.drive(car, drive.input, dt)
+    // the mounts follow the camera's look-around, within their limits
+    if (!paused) aimTurrets(dt)
     // fixed-step sim at 120 Hz like stuntin, so speed does not depend on the frame rate
     if (!paused) for (let acc = dt; acc > 0; acc -= 1 / 120) car.tick(Math.min(acc, 1 / 120), drive.input)
     /*

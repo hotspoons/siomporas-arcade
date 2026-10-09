@@ -11,6 +11,12 @@
     "shots",
     "**/dist",
     "**/vendor",
-    "packages/enginesim/wasm"
+    "packages/enginesim/wasm",
+    "**/public/basis",
+    "**/public/assets/draco",
+    "**/public/draco",
+    "ext",
+    "**/*.min.js",
+    "scratchpad"
   ]
 }

@@ -504,6 +504,11 @@ def road_model(site_dir, frame, manifest: dict):
         return None
     t0 = time.perf_counter()
     model = grade.RoadModel(manifest, grade.site_dem_up(frame, dem_p))
+    # the grades against the earth they are about to be graded into: a GradeFault here is the
+    # whole export's (export.py re-raises it), because the deck runs below would be wrong
+    go = model.assert_grades_on_the_dem()
+    print(f"  grade   carriageways off the DEM by a median {go['median']:+.3f} m over {go['n']:,} non-deck stations "
+          f"(|p90| {go['p90']:.2f} m, {100 * go['deck_share']:.1f} % deck) — within {grade.GRADE_OFF_MAX_M} m", flush=True)
     # the manifest is the caller's `out`: the deck runs land in it before it is written
     decks = model.annotate_decks(manifest)
     sm = model.summary()

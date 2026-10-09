@@ -396,6 +396,14 @@ export class ImageryStream {
 
 export interface PyrTile extends Tile {
   z: number
+  /**
+   * The earth as sampled, beside a GRADED `dem` (the bake folded the road grading into `dem`;
+   * see tools/corridor/corridor/grade.py). Null on a bare tile — an older bake, or a coarse level
+   * the bake left ungraded — where `dem` itself is the earth. The deck tests read this: a
+   * carriageway is a deck when it stands OVERPASS_CLEAR_M above the EARTH, and a graded raster
+   * under a bridge approach is the road, not the earth.
+   */
+  bare: TileField | null
   /** bytes this tile holds, so eviction can bound the real resource rather than a proxy for it */
   bytes: number
   /**
@@ -501,6 +509,19 @@ export class PyramidSet {
     return hit.t.dem.rf.toEnuUp(hit.u, hit.v, h)
   }
 
+  /**
+   * The BARE earth at this ENU point: `bare.png` where the tile is graded, the tile's own `dem`
+   * where it is not (then the dem IS the earth), the overview beyond every tile. Same lookup and
+   * the same curvature as `heightAt`, so on an ungraded bake the two are one function.
+   */
+  bareAt = (x: number, y: number): number => {
+    const hit = this.at(x, y)
+    if (!hit) return this.baseHeight(x, y)
+    const f = hit.t.bare ?? hit.t.dem
+    const h = bilinear(f.data, f.layer.size[0], f.layer.size[1], hit.u, hit.v)
+    return hit.t.dem.rf.toEnuUp(hit.u, hit.v, h)
+  }
+
   canopyAt = (x: number, y: number): number => {
     const hit = this.at(x, y)
     if (!hit?.t.chm) return this.baseCanopy ? this.baseCanopy(x, y) : 0
@@ -538,6 +559,8 @@ function copyBytes(view: Uint8Array): ArrayBuffer {
 interface DecodedRasters {
   dem: Float32Array
   demSize: [number, number]
+  /** the bare-earth twin of `dem` on a graded tile; same size */
+  bare: Float32Array | null
   chm: Float32Array | null
   chmSize: [number, number]
   /** terrain grid from the worker; absent on the main-thread fallback */
@@ -568,6 +591,7 @@ function tileWorker(): Worker | null {
       else pending.ok({
         dem: ev.data.dem as Float32Array,
         demSize: [ev.data.demW as number, ev.data.demH as number],
+        bare: (ev.data.bare as Float32Array | null) ?? null,
         chm: (ev.data.chm as Float32Array | null) ?? null,
         chmSize: [ev.data.chmW as number, ev.data.chmH as number],
         grid: ev.data.grid as GridArrays | undefined,
@@ -593,14 +617,18 @@ function decodeOffThread(
   anchor: Anchor,
   level: [number, number, number],
   maxVerts: number,
+  bareBytes?: Uint8Array,
+  bareEnc?: { zmin: number; zscale: number },
 ): Promise<DecodedRasters> {
   const worker = tileWorker()
   if (!worker) return Promise.reject(new Error('no worker'))
   const id = ++decodeSeq
   const dem = copyBytes(demBytes)
   const chm = chmBytes ? copyBytes(chmBytes) : null
+  const bare = bareBytes && bareEnc ? copyBytes(bareBytes) : null
   const transfer: Transferable[] = [dem]
   if (chm) transfer.push(chm)
+  if (bare) transfer.push(bare)
   return new Promise((ok, fail) => {
     const timer = setTimeout(() => {
       if (!decodePending.has(id)) return
@@ -612,13 +640,15 @@ function decodeOffThread(
       fail: (e) => { clearTimeout(timer); fail(e) },
     })
     const r = relief()
-    worker.postMessage({ id, dem, zmin, zscale, chm, chmScale: 0.25, anchor: [anchor.lon, anchor.lat, anchor.h] as [number, number, number], level, maxVerts, relief: [r.k, r.z0] as [number, number] }, transfer)
+    worker.postMessage({ id, dem, zmin, zscale, chm, chmScale: 0.25, bare, bareZmin: bareEnc?.zmin ?? 0, bareZscale: bareEnc?.zscale ?? 0.01, anchor: [anchor.lon, anchor.lat, anchor.h] as [number, number, number], level, maxVerts, relief: [r.k, r.z0] as [number, number] }, transfer)
   })
 }
 
-async function decodeOnMain(demBytes: Uint8Array, demLayer: Layer, chmBytes: Uint8Array | undefined): Promise<DecodedRasters> {
+async function decodeOnMain(demBytes: Uint8Array, demLayer: Layer, chmBytes: Uint8Array | undefined, bareBytes?: Uint8Array, bareLayer?: Layer): Promise<DecodedRasters> {
   const demImg = await imageFrom(demBytes, 'image/png')
   const dem = decodeHeights(demImg, demLayer)
+  let bare: Float32Array | null = null
+  if (bareBytes && bareLayer) bare = decodeHeights(await imageFrom(bareBytes, 'image/png'), bareLayer)
   let chm: Float32Array | null = null
   let chmSize: [number, number] = [0, 0]
   if (chmBytes) {
@@ -626,7 +656,7 @@ async function decodeOnMain(demBytes: Uint8Array, demLayer: Layer, chmBytes: Uin
     chmSize = [chmImg.naturalWidth, chmImg.naturalHeight]
     chm = decodeScalar(chmImg, 0.25)
   }
-  return { dem, demSize: [demImg.naturalWidth, demImg.naturalHeight], chm, chmSize }
+  return { dem, demSize: [demImg.naturalWidth, demImg.naturalHeight], bare, chm, chmSize }
 }
 
 function pyrTileFrom(
@@ -647,6 +677,10 @@ function pyrTileFrom(
   }
   const rf = new RasterFrame({ size: decoded.demSize, geo }, anchor)
   const dem: TileField = { layer: demLayer, data: decoded.dem, rf }
+  // the bare twin shares the dem's frame and size: one lookup serves both
+  const bare: TileField | null = decoded.bare && e.bare
+    ? { layer: { ...demLayer, file: `${e.z}/${e.x}_${e.y}.bare.png`, zmin: e.bare.zmin, zscale: e.bare.zscale }, data: decoded.bare, rf }
+    : null
   let chm: TileField | null = null
   if (decoded.chm && decoded.chmSize[0] > 0) {
     const chmLayer: Layer = { file: `${e.z}/${e.x}_${e.y}.chm.png`, res: 0, size: decoded.chmSize, bbox: [0, 0, 0, 0], scale: 0.25, geo }
@@ -660,6 +694,7 @@ function pyrTileFrom(
     x: e.x,
     y: e.y,
     dem,
+    bare,
     chm,
     bounds,
     cx: (bounds[0] + bounds[2]) / 2,
@@ -668,7 +703,7 @@ function pyrTileFrom(
     // The decoded rasters, not the wire bytes: this is what eviction has to bound, and a PNG that
     // gzips to 40 kB is 512*512*4 in memory either way. The terrain grid rides along too — several
     // hundred kB of typed arrays per tile — so the byte budget that evicts must count it.
-    bytes: wireBytes + dem.data.byteLength + (chm ? chm.data.byteLength : 0) + gridBytes,
+    bytes: wireBytes + dem.data.byteLength + (bare ? bare.data.byteLength : 0) + (chm ? chm.data.byteLength : 0) + gridBytes,
     grid: decoded.grid,
   }
 }
@@ -700,6 +735,8 @@ export async function loadPyrTile(
   const demBytes = files.get('dem.png')
   if (!demBytes) throw new Error('pack has no dem.png')
   const chmBytes = files.get('chm.png')
+  // a graded tile carries the earth beside the graded dem; an older pack simply has no bare.png
+  const bareBytes = e.bare ? files.get('bare.png') : undefined
   const geo = latticeFor(e.z, e.x, e.y)
   const demLayer: Layer = {
     file: `${e.z}/${e.x}_${e.y}.dem.png`,
@@ -710,17 +747,19 @@ export async function loadPyrTile(
     zscale: e.dem.zscale,
     geo,
   }
+  const bareLayer: Layer | undefined = e.bare ? { ...demLayer, file: `${e.z}/${e.x}_${e.y}.bare.png`, zmin: e.bare.zmin, zscale: e.bare.zscale } : undefined
   let decoded: DecodedRasters
   if (tileWorker()) {
     try {
-      decoded = await decodeOffThread(demBytes, e.dem.zmin, e.dem.zscale, chmBytes, anchor, [e.z, e.x, e.y], maxVerts)
+      decoded = await decodeOffThread(demBytes, e.dem.zmin, e.dem.zscale, chmBytes, anchor, [e.z, e.x, e.y], maxVerts, bareBytes, e.bare)
       reliefHeights(decoded.dem)
+      if (decoded.bare) reliefHeights(decoded.bare)
     } catch (err) {
       console.warn('tile worker decode failed; decoding on the main thread', err)
-      decoded = await decodeOnMain(demBytes, demLayer, chmBytes)
+      decoded = await decodeOnMain(demBytes, demLayer, chmBytes, bareBytes, bareLayer)
     }
   } else {
-    decoded = await decodeOnMain(demBytes, demLayer, chmBytes)
+    decoded = await decodeOnMain(demBytes, demLayer, chmBytes, bareBytes, bareLayer)
   }
   return pyrTileFrom(e, anchor, buf.byteLength, decoded)
 }

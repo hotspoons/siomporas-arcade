@@ -53,7 +53,12 @@ export interface PyrEntry {
   x: number
   y: number
   empty?: boolean
+  /** the height raster — GRADED (the road folded in) when the index says `graded` and `bare` is set */
   dem?: { zmin: number; zscale: number }
+  /** the earth as sampled, beside a graded `dem` — for the deck tests, which must not see the road */
+  bare?: { zmin: number; zscale: number }
+  /** how many pixels the bake's grading touched in this tile (bookkeeping) */
+  graded_px?: number
   chm?: boolean
   naip?: boolean
   naip_fill?: number
@@ -66,6 +71,14 @@ export interface PyrIndex {
   px: number
   dir: string
   format: string
+  /**
+   * The fine levels carry the GRADED ground (tools/corridor/corridor/grade.py — the viewer's own
+   * `gradedHeight`, run at bake time), so `physGroundAt` and the strips read the raster instead of
+   * grading every sample. Absent on an older bake, which grades at run time exactly as before.
+   */
+  graded?: boolean
+  /** which levels were graded; coarser ones are bare (a 10–40 m pixel cannot hold a 7 m verge) */
+  graded_levels?: number[]
   list: PyrEntry[]
 }
 

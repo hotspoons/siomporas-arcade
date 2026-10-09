@@ -1642,24 +1642,9 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     # colour the eye expects from a Maryland ridge; the GeoTIFF stays untouched for measurement.
     # `vivid` is module-level now (see its definition) so the forked tile workers can pickle it.
 
-    # The LOD pyramid, beside the flat tiles rather than instead of them: a viewer that does not
-    # know about `pyramid` keeps working off `tiles`, and one that does ignores `tiles` entirely.
-    # This is the bake. It used to be opt-in (`CORRIDOR_PYRAMID=1`), and a job that forgot the
-    # variable shipped a monolith. Unset means on. `0` / `false` / `no` / `off` is the only opt-out,
-    # and the editor never sends one.
-    pyr = os.environ.get("CORRIDOR_PYRAMID", "1").strip().lower()
-    if tiled and pyr not in ("0", "false", "no", "off"):
-        try:
-            from . import pyramid as _pyr
-
-            pl = _pyr.bake(site_dir, web, frame, vivid=vivid)
-            if pl:
-                layers["pyramid"] = pl
-                n = len(pl["list"])
-                empt = sum(1 for e in pl["list"] if e.get("empty"))
-                print(f"  pyramid z{pl['zmin']}..z{pl['zmax']}, {n} tiles ({empt} empty) -> web/pyr", flush=True)
-        except Exception as exc:
-            print(f"  pyramid SKIPPED: {exc.__class__.__name__}: {exc}", flush=True)
+    # The LOD pyramid is baked further down, once `out` holds the branches and the intersections:
+    # its fine levels carry the GRADED ground (pyramid.bake, grade.py), and that grading is the
+    # whole network's — every carriageway's spline, the junction meet, the bulbs.
 
     if tiled:
         try:
@@ -1946,6 +1931,29 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             out["branches"] = br
     except Exception as exc:
         print(f"  branches failed: {exc}")
+    # The LOD pyramid, beside the flat tiles rather than instead of them: a viewer that does not
+    # know about `pyramid` keeps working off `tiles`, and one that does ignores `tiles` entirely.
+    # This is the bake. It used to be opt-in (`CORRIDOR_PYRAMID=1`), and a job that forgot the
+    # variable shipped a monolith. Unset means on. `0` / `false` / `no` / `off` is the only opt-out,
+    # and the editor never sends one.
+    #
+    # It runs HERE, after the branches and the intersections are in `out`, because the fine levels
+    # are written with the road grading folded in (`pyramid.GRADE_MAX_PX_M`, grade.py) and the
+    # grading is the viewer's: the same manifest the viewer will read is what it is built from.
+    # `layers` is the dict `out["layers"]` already refers to, so the block lands in the manifest.
+    pyr = os.environ.get("CORRIDOR_PYRAMID", "1").strip().lower()
+    if tiled and pyr not in ("0", "false", "no", "off"):
+        try:
+            from . import pyramid as _pyr
+
+            pl = _pyr.bake(site_dir, web, frame, vivid=vivid, manifest=out)
+            if pl:
+                layers["pyramid"] = pl
+                n = len(pl["list"])
+                empt = sum(1 for e in pl["list"] if e.get("empty"))
+                print(f"  pyramid z{pl['zmin']}..z{pl['zmax']}, {n} tiles ({empt} empty){', graded ' + str(pl.get('graded_levels')) if pl.get('graded') else ''} -> web/pyr", flush=True)
+        except Exception as exc:
+            print(f"  pyramid SKIPPED: {exc.__class__.__name__}: {exc}", flush=True)
     # --- vector tiling --------------------------------------------------------------------------
     # Every heavy spatial array that is consumed only by the builders the viewer runs per cell moves
     # to per-1 km-tile files: footprints (142 MB of dc-metro), then the street furniture

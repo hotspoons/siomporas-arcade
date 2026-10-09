@@ -47,6 +47,33 @@ tools/corridor/.venv/bin/python -m corridor flora all     # backfill flora.json 
 | `lidar/tiles/`, `lidar/*.vrt` | network sites over 6 km: 1 km raster tiles and VRTs over them (`corridor/network_tiles.py`) | derived |
 | `manifest.json` | what was fetched, from where, when, how long | — |
 
+## The graded ground (web/pyr, 2026-10-09)
+
+The viewer used to grade the ground at run time — `scene.ts`'s `gradedHeight` folding every road's
+profile into the DEM, ~4 µs a sample, and the physics heightfield asks it 1,089 times a tile. The
+bake knows every grade, so `pyramid.bake` now writes the fine levels of the pyramid (z13 and z14
+at this latitude — a pixel under 6 m; coarser ones stay bare, a 10–40 m pixel cannot hold a 7 m
+verge) with the road grading folded into `dem.png`, and the earth as sampled beside it as
+`bare.png` (`entry.bare = {zmin, zscale}`), under a `layers.pyramid.graded = true` flag. The
+grading is `corridor/grade.py`: a line-for-line port of the viewer's formula — the station field,
+`edgeDistance`, the Catmull-Rom splines (checked against three.js to 1e-9), the junction meet,
+the cul-de-sac bulbs, the driveways — built from the manifest the viewer will read, so the
+pyramid bake runs after the branches and the intersections are in it. A viewer that sees the
+flag reads the raster for `physGroundAt` and the strips and asks `bareAt` for the deck tests; an
+older bake grades at run time exactly as before. `?grade=runtime` forces the old path on a graded
+bake, which is how `probes/corridor-gradedraster.mjs` measures one against the other.
+
+Grading costs the pyramid stage roughly a third again (crofton-triangle: 40 s → 54 s of the 1.5
+minute export, of which 8 s builds the station field once and ~2 minutes of worker CPU grades
+241 tiles). `CORRIDOR_GRADE=0` turns it off. The knobs the grading reads are tuning.ts's
+DEFAULTS (`grade.Knobs`): a browser whose F6 panel moved LANE_WIDTH or BRANCH_VERGE is standing
+on ground the bake graded for the defaults. Two things the raster cannot carry: the editor's
+`ground_offset_m` adjustments (the viewer keeps run-time grading on a site whose adjustments are
+active) and the `GRASS_LIFT_M` turf lip (a knob, default 0).
+
+    tools/corridor/.venv/bin/python -m corridor export <slug>          # re-bake web/, graded
+    tools/corridor/.venv/bin/python -m pytest tools/corridor/tests/test_grade.py
+
 ## Network sites
 
 A `sites.json` entry with `kind: "network"`, a `roads` list (OSM names or refs), a `primary` road,

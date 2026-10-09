@@ -161,7 +161,7 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
 | cost | where | what to do |
 |---|---|---|
 | 16 ms, on a cell with water arriving | `nearPerf.water`: the water layer merges a whole per-look bucket (every stream seen so far) when a cell adds to it | bucket per (look, 1 km cell) so a merge is one cell's geometry |
-| 4–6 ms, every ~350 m (every 5 s at speed) | `nearPerf.treesPlant`: the replant's `plantMoved` walks all 60k records (2 ms) and drops the leavers from two grids (1–2 ms) | slice `plantMoved` over frames; keep records per 1 km cell so a replant is a cell swap |
+| 2–7 ms, on a replant that evicts a kilometre of woods | `nearPerf.treesPlant`: the leavers' drops from the collision grid (`grid`, 7 ms for 19k) and the impostor reseat; the walk itself is per block now (below) | drop a whole block from the grids at once instead of a tree at a time |
 | 2–3 ms/frame at speed | `physics.stats().parts.terrain`: the sliced tile sampling at `PHYS_TILE_MS` — by design, the ring must keep ahead of 75 m/s | the graded-ground raster from the bake (below) makes a tile a copy |
 | 4.5 ms/frame CPU at Ultra | `fp.render`: 500–780 draw calls submitted (traffic at full detail is a draw per part per car) | instanced traffic; merge street furniture per cell |
 | reversed depth | 24-bit canvas depth when post AA is off; shadow, mirror and probe targets untested for z-fighting at distance | a RenderPass + OutputPass composer with a FloatType depth texture whenever reversed is on; then make it the default |
@@ -183,6 +183,8 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
   the same five questions of the same ground every time a tile is planted. A per-tile bitmask from
   the bake leaves only the per-blade jitter at run time.
 - **Tree records per 1 km cell** so a replant is a cell swap, not a walk over every record.
+  Done 2026-10-10, viewer-side (below): the bake never held tree records, the viewer grows them
+  from the canopy raster, so the cell is the planter's.
 
 ### What landed: the graded ground raster (2026-10-09, branch `agent/graded-dem`)
 
@@ -285,3 +287,38 @@ repair converts an already-ENU `branches.json` a second time, putting every re-e
 junction ~1 km off its road (0 junctions met). And every probe in `probes/` that aborts
 `/@vite/client` no longer boots under Vite 8.2 — the page never evaluates `main.ts`, with no
 error. The new probe does not abort it.
+
+### What landed: the tree records per block (2026-10-10, branch `agent/bake-phases`)
+
+The fourth item, and it was never a bake change: the bake exports no tree records — `flora.py`
+writes species and climate, and the viewer grows every tree from the canopy raster at run time
+(`props.treesFromCanopy`) — so "records per 1 km cell" is the planter's own index. The planter
+now keeps its records per world-aligned 100 m block (`BLOCK_M`), and `plantMoved` decides per
+BLOCK: a block whose answers did not change is not visited, a block that fell wholly outside the
+context ring is emptied in one go, a block that crossed the draw radius flips its trees' spare
+flag together. The draw rim is blocky by ±70 m at 1,400 m out, where a tree is a pixel and the far
+cards carry the woods; the context rim keeps a tree until its whole block is outside, never
+sooner. The slot a tree holds, the near set, the collision grid and the impostor slots are
+untouched — the patch note is the same shape, only shorter.
+
+Two things the measurement found on the way. A streamed world replants far more often than
+every `TREE_REPLANT_M`: every branch cell that arrives asks for one (`adoptArriving`), 65–86 in
+forty seconds at 78 m/s on crofton-triangle, most of them with the centre barely moved — those
+now walk nothing. And `plant()` itself still walked the array once more, `records.some(...)`
+looking for a record without a cell, 0.5–1 ms over 42k that the block index had just saved;
+a flag now.
+
+Measured (`probes/corridor-bakephases.mjs crofton-triangle --phase cpu`, 78 m/s, 40 s, the
+renderer stubbed so the loop runs at ~58 Hz on this box, 960 px wide so the site is the full
+120k-tree budget):
+
+| replant's `plant` part | n | p50 | p90 | p99 | max | records walked / held |
+|---|---|---|---|---|---|---|
+| before | 68 | 4.7 ms | 12.8 | 21.1 | 21.1 | 1.00 |
+| after | 75 | **0.3 ms** | 1.6 | 4.0 | 4.0 | p50 0.01, p90 0.06, max 0.26 |
+
+The walk itself (`treePlanting().movedMs`) is 1–2 ms only on the replants that cross a full
+kilometre of woods (10–33k records in a block sweep after a jump); what remains of a heavy
+replant is the leavers' drops from the collision grid (`grid`: 7 ms for 19k leavers, one tree at
+a time) and the impostor reseat — the first row of "what is left". The probe's negative
+(`--prove`, `TREE_REPLANT_M` at a billion metres) must fail its own checks; it does.

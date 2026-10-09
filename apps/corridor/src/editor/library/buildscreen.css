@@ -264,3 +264,14 @@
 .sndb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 2px 16px; }
 .sndb-save { margin-top: 8px; }
 .sndb-dialog { min-width: min(900px, 90vw); }
+
+/*
+ * the Sounds tab: the same flex column + own scroller as .bld-screen, for the same reason — and on
+ * the PANEL, not a wrapper inside it: the panel is `display: block` and a flex child under a block
+ * grows to its content (measured 2135 px tall in a 764 px panel), so the chain has to start there.
+ * And the `[hidden]` partner, as above.
+ */
+.tab-body:has(> .snd-screen) { display: flex; flex-direction: column; }
+.snd-screen { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.snd-screen[hidden] { display: none; }
+.snd-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: var(--s2); }

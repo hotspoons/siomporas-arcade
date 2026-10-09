@@ -12,8 +12,17 @@ export function soundsExtension(): { tabs: Tab[] } {
   return { tabs: [{ id: 'sounds', label: 'Sounds', icon: 'speaker-wave', build: buildSoundsTab }] }
 }
 
-function buildSoundsTab(host: HTMLElement): void {
-  host.replaceChildren()
+function buildSoundsTab(panel: HTMLElement): void {
+  /*
+   * THE TAB SCROLLS. `.tab-body` says overflow-y: auto, but in the library pane nothing above it
+   * fixes a height, so a panel taller than the screen just ran off the bottom (Rich, 2026-10-09:
+   * "That doesn't scroll"). The build screens solve it with a flex column and their own scroller
+   * (`.bld-scroll`, buildscreen.css, and the WHY beside it); this is the same shape.
+   */
+  panel.replaceChildren()
+  panel.classList.add('snd-screen')
+  const host = el('div', 'snd-scroll')
+  panel.append(host)
   const p = previewSfx()
   const render = () => {
     host.replaceChildren()

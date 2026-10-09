@@ -1,6 +1,6 @@
 # Sounds
 
-Every clip under this directory is cut from a CC0 (public domain) recording by `tools/sounds/build.py`; the cuts are CC0 too. Attribution is not required by any of them and is given here because it is deserved.
+Every clip under this directory is cut by `tools/sounds/build.py` from either a CC0 (public domain) recording — those cuts are CC0 too, and attribution is given because it is deserved — or from a recording Rich Siomporas made and holds the rights to (the tyres: `tire-*`), which ships with this game and is not free for anything else.
 
 - **Impact Sounds** — Kenney, CC0 1.0. <https://kenney.nl/assets/impact-sounds>
 - **Sci-fi Sounds** — Kenney, CC0 1.0. <https://kenney.nl/assets/sci-fi-sounds>
@@ -23,5 +23,6 @@ Every clip under this directory is cut from a CC0 (public domain) recording by `
 - **Rocket launch (made in Audacity from noise — the only CC0 launch that sounds like one)** — qubodup, CC0 1.0. <https://opengameart.org/content/rocket-launch>
 - **SSE Library: SWOOSHES (archive.org item SSE_Library_SWOOSHES)** — Sound Studio Effects / USC Optical Sound Effects Library, uploaded to the Internet Archive, CC0 1.0 (the item's licenseurl). <https://archive.org/details/SSE_Library_SWOOSHES>
   - #fireworks-launch WHSH-FIREWORKS Fireworks launching swooshes <https://archive.org/download/SSE_Library_SWOOSHES/WHOOSH/WHSH-FIREWORKS_Fireworks%20launching%20swooshes_CS_USC.wav>
+- **Rich's own recordings (tools/sounds/own/README.md): the Lotus pirouette at an autocross, the Subaru's speed scrub and squeal** — Rich Siomporas, all rights held by the author; used in this project with his permission (not CC0 — do not lift these for anything else). <https://www.youtube.com/watch?v=qUrz6KlLzkc>
 
 The slot each clip serves is in `bank.json`; a world, vehicle or actor may replace any slot with its own clips (see docs/corridor/SOUNDS.md).

@@ -228,7 +228,8 @@ export function squealMix(level: number, levels: number): { gains: number[]; rat
       gains.push(open * Math.max(0, 1 - d))
     }
   }
-  return { gains, rate: 0.92 + 0.2 * t }
+  // a narrow rate range: a real squeal is a tone, and a tone bent a fifth is a cartoon (Rich: "sound like a mouse")
+  return { gains, rate: 0.97 + 0.08 * t }
 }
 
 function smooth(x: number): number {

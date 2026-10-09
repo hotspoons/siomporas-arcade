@@ -122,6 +122,14 @@
       },
       "download": "https://archive.org/download/SSE_Library_SWOOSHES/WHOOSH/WHSH-FIREWORKS_Fireworks%20launching%20swooshes_CS_USC.wav",
       "mirror": "https://ia801602.us.archive.org/25/items/SSE_Library_SWOOSHES/WHOOSH/WHSH-FIREWORKS_Fireworks%20launching%20swooshes_CS_USC.wav"
+    },
+    "own": {
+      "title": "Rich's own recordings (tools/sounds/own/README.md): the Lotus pirouette at an autocross, the Subaru's speed scrub and squeal",
+      "author": "Rich Siomporas",
+      "url": "https://www.youtube.com/watch?v=qUrz6KlLzkc",
+      "licence": "all rights held by the author; used in this project with his permission (not CC0 \u2014 do not lift these for anything else)",
+      "kind": "local",
+      "root": "own"
     }
   }
 }

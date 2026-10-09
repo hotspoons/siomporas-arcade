@@ -4,6 +4,7 @@
     tools/sounds/.venv/bin/python -I tools/sounds/build.py            # everything
     tools/sounds/.venv/bin/python -I tools/sounds/build.py gun.fire   # one slot
     tools/sounds/.venv/bin/python -I tools/sounds/build.py --list     # the slots and what feeds them
+    tools/sounds/.venv/bin/python -I tools/sounds/build.py --spectrograms  # a PNG per slot in .cache, to look at the cuts
 
 Sources (tools/sounds/sources.json) are downloaded once into tools/sounds/.cache/ and cut into
 apps/corridor/public/sounds/<slot>/<name>.ogg (+ .mp3 for browsers without Vorbis), each mono,
@@ -22,8 +23,9 @@ CUTTING. Kenney's one-shots are used as they are. The BigSoundBank shots (0437 B
 .357, 0397 Winchester, 0532 shotgun) and Tabasco's range recordings hold several shots per file;
 they are split on onsets (energy envelope jumping 8× over the preceding 200 ms, 300 ms apart) and
 each shot is cut to 450 ms with an exponential tail so a 10 Hz machine gun does not pile up tails.
-The squeal loops are windows of the 30 s BigSoundBank squeal chosen by level (RMS quantile) and
-steadiness (lowest envelope variance), closed with a 150 ms equal-power crossfade. The missile
+The tyres are Rich's own recordings (tools/sounds/own/README.md), his engines gated out of them
+by `isolate_squeal`, cut into three loop levels and six skid passages — the BigSoundBank parking
+squeak this started with was "a mouse" (Rich, 2026-10-09). The missile
 launch is qubodup's CC0 rocket launch (OpenGameArt) under the SSE library's launching swooshes
 (archive.org, CC0), one swoosh per variant, with Kenney's thruster as a sixth voice.
 """
@@ -38,6 +40,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy import signal
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -93,6 +96,11 @@ def source_file(src: str, name: str) -> Path:
         if not hits:
             raise SystemExit(f'{src}: no {name!r} in {s["download"]}')
         return hits[0]
+    if s['kind'] == 'local':
+        f = HERE / s['root'] / name
+        if not f.exists():
+            raise SystemExit(f'{src}: no {f}')
+        return f
     if s['kind'] == 'files':
         if name not in s['files']:
             raise SystemExit(f'{src}: {name} is not in sources.json')
@@ -157,6 +165,57 @@ def fades(x: np.ndarray, in_s: float = 0.003, out_s: float = 0.02) -> np.ndarray
 def normalise(x: np.ndarray, peak: float = PEAK) -> np.ndarray:
     m = float(np.abs(x).max())
     return x * (peak / m) if m > 1e-6 else x
+
+
+def level(x: np.ndarray, rms_db: float, ceiling: float = PEAK) -> np.ndarray:
+    """Set the clip's loudness, not its peak: RMS to `rms_db` dBFS, then the peak held under the
+    ceiling. Peak-normalising everything put a glass tinkle and a wreck at the same height
+    (Rich, 2026-10-09: "way too loud")."""
+    r = float(np.sqrt((x.astype(np.float64) ** 2).mean()))
+    if r < 1e-6:
+        return x
+    y = x * (10 ** (rms_db / 20) / r)
+    m = float(np.abs(y).max())
+    return (y * (ceiling / m) if m > ceiling else y).astype(np.float32)
+
+
+def isolate_squeal(x: np.ndarray, noise_s: tuple[float, float] = (0.0, 0.4), hp_hz: float = 650.0, lp_hz: float = 9000.0, keep: float = 2.2) -> np.ndarray:
+    """Tyre out of a car recording. The engine, the wind and the road sit under ~600 Hz; the
+    squeal is a tone at 1–1.5 kHz with harmonics to 4 kHz. So: a 4th-order high-pass, a low-pass
+    over the codec hiss, then a spectral gate whose noise floor is learned from `noise_s` of the
+    same clip (the run-in before the tyres let go) — every STFT bin under `keep` × its own floor
+    is pulled down, softly, so what is left is what was not there before the squeal."""
+    sos = signal.butter(4, [hp_hz, min(lp_hz, SR / 2 - 100)], btype='bandpass', fs=SR, output='sos')
+    y = signal.sosfiltfilt(sos, x.astype(np.float64))
+    n_fft, hop = 2048, 512
+    f, t, Z = signal.stft(y, fs=SR, nperseg=n_fft, noverlap=n_fft - hop, padded=True)
+    mag = np.abs(Z)
+    a, b = int(noise_s[0] * SR / hop), max(int(noise_s[0] * SR / hop) + 2, int(noise_s[1] * SR / hop))
+    floor = np.percentile(mag[:, a:b], 90, axis=1, keepdims=True) + 1e-9
+    ratio = mag / (floor * keep)
+    mask = np.clip((ratio - 0.5) / 1.0, 0, 1) ** 1.5  # 0 under half the threshold, 1 past 1.5×
+    # smooth the mask a little in time and frequency so the gate does not chatter
+    mask = signal.convolve2d(mask, np.ones((3, 5)) / 15, mode='same')
+    _, out = signal.istft(Z * mask, fs=SR, nperseg=n_fft, noverlap=n_fft - hop)
+    out = out[: len(x)]
+    if len(out) < len(x):
+        out = np.pad(out, (0, len(x) - len(out)))
+    return out.astype(np.float32)
+
+
+def seconds(x: np.ndarray, a: float, b: float) -> np.ndarray:
+    return x[int(a * SR):int(b * SR)]
+
+
+def make_loop(seg: np.ndarray, xfade_s: float = 0.15) -> np.ndarray:
+    """Close a segment into a seamless loop: the last `xfade_s` is folded over the first with an
+    equal-power crossfade and dropped from the end."""
+    X = int(xfade_s * SR)
+    n = len(seg) - X
+    loop = seg[:n].copy()
+    ramp = np.sin(np.linspace(0, np.pi / 2, X)) ** 2
+    loop[:X] = seg[:X] * ramp + seg[n:n + X] * (1 - ramp)
+    return loop
 
 
 def mix(*layers: tuple[np.ndarray, float]) -> np.ndarray:
@@ -231,17 +290,35 @@ def one_shots(files: list[tuple[str, Path]], max_s: float, tail_s: float) -> lis
     return [(name, cut(trim_end(trim_start(load(p))), max_s, tail_s)) for name, p in files]
 
 
+def own(name: str) -> np.ndarray:
+    return load(source_file('own', name))
+
+
 def slot_tire_squeal_loop():
-    x = load(source_file('bsb', '0500'))
-    loops = loop_windows(x, 2.5, [0.25, 0.55, 0.92])
-    return [(f'squeal-{lvl}', l) for lvl, l in zip(('light', 'medium', 'heavy'), loops)], {'loop': True, 'ordered': True}
+    """Rich's own tyres, isolated from his engines (tools/sounds/own). The BigSoundBank parking
+    squeak this started with was, in his words, a mouse. Light is the Subaru scrubbing from
+    outside the car, medium its tonal squeal, heavy the Lotus at the top of its pirouette."""
+    light = make_loop(seconds(isolate_squeal(own('subaru-outside-a.wav'), (0.0, 0.5)), 1.0, 1.95))
+    medium = make_loop(seconds(isolate_squeal(own('subaru-outside-b.wav'), (0.0, 0.5)), 0.95, 2.3))
+    heavy = make_loop(seconds(isolate_squeal(own('lotus-pirouette.wav'), (0.0, 0.4)), 2.1, 3.5))
+    return [('squeal-light', light), ('squeal-medium', medium), ('squeal-heavy', heavy)], {'loop': True, 'ordered': True}
 
 
 def slot_tire_skid():
-    files = [(f'skid-{i}', source_file('bsb', i)) for i in ('2368', '2369', '2370')]
-    clips = one_shots(files, 2.5, 0.4)
-    clips.append(('skid-long', cut(trim_end(trim_start(load(source_file('bsb', '2371')))), 7.0, 1.0)))
-    return clips, {}
+    """Whole passages, for a skid that starts and stops: the Lotus losing it twice, the Subaru
+    scrubbing through a corner."""
+    lotus = isolate_squeal(own('lotus-pirouette.wav'), (0.0, 0.4))
+    sub_b = isolate_squeal(own('subaru-outside-b.wav'), (0.0, 0.5))
+    sub_a = isolate_squeal(own('subaru-outside-a.wav'), (0.0, 0.5))
+    scrub = isolate_squeal(own('subaru-scrub-c.wav'), (0.0, 0.4), hp_hz=800)
+    return [
+        ('lotus-pirouette', cut(seconds(lotus, 0.45, 3.7), 3.3, 0.5)),
+        ('lotus-oversteer', cut(seconds(lotus, 0.45, 2.0), 1.6, 0.35)),
+        ('lotus-correction', cut(seconds(lotus, 2.0, 3.7), 1.7, 0.4)),
+        ('subaru-squeal', cut(seconds(sub_b, 0.8, 2.6), 1.8, 0.4)),
+        ('subaru-scrub', cut(seconds(sub_a, 0.8, 2.1), 1.3, 0.35)),
+        ('subaru-scrub-inside', cut(seconds(scrub, 0.6, 1.6), 1.0, 0.3)),
+    ], {}
 
 
 def slot_crash(level: str):
@@ -334,6 +411,16 @@ def slot_gun_hit_ground():
     return one_shots(files, 0.5, 0.1), {}
 
 
+# loudness per slot, RMS dBFS (the peak is held under -1 dBFS whatever this says). A wreck is
+# louder than a tap, a gun louder than a hit, the squeal loops quiet because the game opens them
+# by level and three play at once.
+LEVELS = {
+    'tire.squeal.loop': -22, 'tire.skid': -18,
+    'crash.light': -20, 'crash.medium': -16, 'crash.heavy': -12, 'crash.glass': -20, 'crash.soft': -20,
+    'explosion': -10, 'explosion.far': -18, 'missile.launch': -15,
+    'gun.fire': -14, 'gun.fire.shotgun': -12, 'gun.hit': -20, 'gun.hit.glass': -20, 'gun.hit.ground': -22,
+}
+
 SLOTS = {
     'tire.squeal.loop': ('light → heavy squeal loops, crossfaded by slip', slot_tire_squeal_loop),
     'tire.skid': ('a skid that starts and stops: lock-ups, handbrake turns', slot_tire_skid),
@@ -381,12 +468,12 @@ def build(names: list[str], mp3: bool) -> None:
                 old.unlink()
         entries = []
         for name, x in clips:
-            x = normalise(fades(x.astype(np.float32)))
+            x = level(fades(x.astype(np.float32)), LEVELS[slot])
             if not np.isfinite(x).all():
                 raise SystemExit(f'{slot}/{name}: NaN in the cut')
             rel = f'{folder.name}/{name}.ogg'
             write_clip(OUT / rel, x, mp3)
-            entries.append({'file': rel, 's': round(len(x) / SR, 3), 'rms': round(float(np.sqrt((x ** 2).mean())), 4)})
+            entries.append({'file': rel, 's': round(len(x) / SR, 3), 'rms': round(float(np.sqrt((x ** 2).mean())), 4), 'peak': round(float(np.abs(x).max()), 3)})
             print(f'   {rel:48s} {len(x) / SR:5.2f}s')
         manifest['slots'][slot] = {'desc': desc, **opts, 'clips': entries}
     manifest['slots'] = dict(sorted(manifest['slots'].items()))
@@ -396,9 +483,10 @@ def build(names: list[str], mp3: bool) -> None:
 
 
 def write_credits() -> None:
-    lines = ['# Sounds', '', 'Every clip under this directory is cut from a CC0 (public domain) recording by '
-             '`tools/sounds/build.py`; the cuts are CC0 too. Attribution is not required by any of them and is '
-             'given here because it is deserved.', '']
+    lines = ['# Sounds', '', 'Every clip under this directory is cut by `tools/sounds/build.py` from either a CC0 '
+             '(public domain) recording — those cuts are CC0 too, and attribution is given because it is deserved — '
+             'or from a recording Rich Siomporas made and holds the rights to (the tyres: `tire-*`), which ships with '
+             'this game and is not free for anything else.', '']
     for key, s in SOURCES.items():
         lines.append(f'- **{s["title"]}** — {s["author"]}, {s["licence"]}. <{s["url"]}>')
         for fid, f in s.get('files', {}).items():
@@ -414,6 +502,27 @@ if __name__ == '__main__':
     if '--list' in flags:
         for k, (d, _) in SLOTS.items():
             print(f'{k:20s} {d}')
+        sys.exit(0)
+    if '--spectrograms' in flags:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        for slot in args or list(SLOTS):
+            folder = OUT / slot.replace('.', '-')
+            files = sorted(folder.glob('*.ogg'))
+            if not files:
+                continue
+            fig, axes = plt.subplots(len(files), 1, figsize=(12, 2.2 * len(files)), squeeze=False)
+            for ax, f in zip(axes[:, 0], files):
+                x, sr = sf.read(str(f))
+                ax.specgram(x, NFFT=1024, Fs=sr, noverlap=768, cmap='magma', vmin=-110, vmax=-20)
+                ax.set_ylim(0, 8000)
+                ax.set_title(f'{slot} / {f.stem}  {len(x) / sr:.2f}s', fontsize=9)
+            plt.tight_layout()
+            CACHE.mkdir(exist_ok=True)
+            fig.savefig(CACHE / f'spec-{slot}.png', dpi=60)
+            plt.close(fig)
+            print(f'{CACHE / f"spec-{slot}.png"}')
         sys.exit(0)
     bad = [a for a in args if a not in SLOTS]
     if bad:

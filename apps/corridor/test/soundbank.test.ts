@@ -103,7 +103,7 @@ describe('the squeal mix', () => {
     expect(squealMix(0.6, 0).gains).toEqual([])
     expect(squealMix(NaN, 3).gains).toEqual([0, 0, 0])
     expect(squealMix(7, 2).gains).toEqual([0, 1])
-    expect(squealMix(1, 3).rate).toBeCloseTo(1.12, 5)
+    expect(squealMix(1, 3).rate).toBeCloseTo(1.05, 5)
   })
 })
 

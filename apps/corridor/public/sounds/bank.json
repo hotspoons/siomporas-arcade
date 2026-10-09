@@ -7,77 +7,92 @@
     {
      "file": "crash-glass/impactGlass_light_000.ogg",
      "s": 0.21,
-     "rms": 0.1006
+     "rms": 0.1,
+     "peak": 0.886
     },
     {
      "file": "crash-glass/impactGlass_light_001.ogg",
      "s": 0.21,
-     "rms": 0.0962
+     "rms": 0.0962,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_light_002.ogg",
      "s": 0.21,
-     "rms": 0.1004
+     "rms": 0.1,
+     "peak": 0.888
     },
     {
      "file": "crash-glass/impactGlass_light_003.ogg",
      "s": 0.21,
-     "rms": 0.0942
+     "rms": 0.0942,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_light_004.ogg",
      "s": 0.21,
-     "rms": 0.1086
+     "rms": 0.1,
+     "peak": 0.821
     },
     {
      "file": "crash-glass/impactGlass_medium_000.ogg",
      "s": 0.543,
-     "rms": 0.0659
+     "rms": 0.0659,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_medium_001.ogg",
      "s": 0.543,
-     "rms": 0.0633
+     "rms": 0.0633,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_medium_002.ogg",
      "s": 0.543,
-     "rms": 0.0614
+     "rms": 0.0614,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_medium_003.ogg",
      "s": 0.543,
-     "rms": 0.0695
+     "rms": 0.0695,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_medium_004.ogg",
      "s": 0.543,
-     "rms": 0.0801
+     "rms": 0.0801,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_heavy_000.ogg",
      "s": 0.241,
-     "rms": 0.072
+     "rms": 0.072,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_heavy_001.ogg",
      "s": 0.429,
-     "rms": 0.0581
+     "rms": 0.0581,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_heavy_002.ogg",
      "s": 0.247,
-     "rms": 0.0712
+     "rms": 0.0712,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_heavy_003.ogg",
      "s": 0.172,
-     "rms": 0.0993
+     "rms": 0.0993,
+     "peak": 0.891
     },
     {
      "file": "crash-glass/impactGlass_heavy_004.ogg",
      "s": 0.399,
-     "rms": 0.0583
+     "rms": 0.0583,
+     "peak": 0.891
     }
    ]
   },
@@ -87,92 +102,110 @@
     {
      "file": "crash-heavy/impactMetal_heavy_000.ogg",
      "s": 0.168,
-     "rms": 0.0797
+     "rms": 0.0797,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactMetal_heavy_001.ogg",
      "s": 0.359,
-     "rms": 0.0625
+     "rms": 0.0625,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactMetal_heavy_002.ogg",
      "s": 0.117,
-     "rms": 0.0983
+     "rms": 0.0983,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactMetal_heavy_003.ogg",
      "s": 0.207,
-     "rms": 0.0756
+     "rms": 0.0756,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactMetal_heavy_004.ogg",
      "s": 0.134,
-     "rms": 0.0918
+     "rms": 0.0918,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactPlate_heavy_000.ogg",
      "s": 0.489,
-     "rms": 0.0737
+     "rms": 0.0737,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactPlate_heavy_001.ogg",
      "s": 0.352,
-     "rms": 0.1283
+     "rms": 0.1283,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactPlate_heavy_002.ogg",
      "s": 0.494,
-     "rms": 0.0828
+     "rms": 0.0828,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactPlate_heavy_003.ogg",
      "s": 0.347,
-     "rms": 0.1289
+     "rms": 0.1289,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/impactPlate_heavy_004.ogg",
      "s": 0.559,
-     "rms": 0.0769
+     "rms": 0.0769,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-14.ogg",
      "s": 1.6,
-     "rms": 0.189
+     "rms": 0.189,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-3.ogg",
      "s": 1.6,
-     "rms": 0.1873
+     "rms": 0.1873,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-15.ogg",
      "s": 1.143,
-     "rms": 0.1489
+     "rms": 0.1489,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-8.ogg",
      "s": 1.306,
-     "rms": 0.0892
+     "rms": 0.0892,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-1.ogg",
      "s": 1.6,
-     "rms": 0.085
+     "rms": 0.085,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-6.ogg",
      "s": 1.58,
-     "rms": 0.0789
+     "rms": 0.0789,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-4.ogg",
      "s": 1.6,
-     "rms": 0.0782
+     "rms": 0.0782,
+     "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-12.ogg",
      "s": 1.6,
-     "rms": 0.1441
+     "rms": 0.1441,
+     "peak": 0.891
     }
    ]
   },
@@ -182,52 +215,62 @@
     {
      "file": "crash-light/impactMetal_light_000.ogg",
      "s": 0.351,
-     "rms": 0.1003
+     "rms": 0.1,
+     "peak": 0.888
     },
     {
      "file": "crash-light/impactMetal_light_001.ogg",
      "s": 0.252,
-     "rms": 0.0995
+     "rms": 0.0995,
+     "peak": 0.891
     },
     {
      "file": "crash-light/impactMetal_light_002.ogg",
      "s": 0.236,
-     "rms": 0.1005
+     "rms": 0.1,
+     "peak": 0.887
     },
     {
      "file": "crash-light/impactMetal_light_003.ogg",
      "s": 0.482,
-     "rms": 0.1049
+     "rms": 0.1,
+     "peak": 0.849
     },
     {
      "file": "crash-light/impactMetal_light_004.ogg",
      "s": 0.213,
-     "rms": 0.0926
+     "rms": 0.0926,
+     "peak": 0.891
     },
     {
      "file": "crash-light/impactPlate_light_000.ogg",
      "s": 0.532,
-     "rms": 0.0631
+     "rms": 0.0631,
+     "peak": 0.891
     },
     {
      "file": "crash-light/impactPlate_light_001.ogg",
      "s": 0.655,
-     "rms": 0.0484
+     "rms": 0.0484,
+     "peak": 0.891
     },
     {
      "file": "crash-light/impactPlate_light_002.ogg",
      "s": 0.489,
-     "rms": 0.0522
+     "rms": 0.0522,
+     "peak": 0.891
     },
     {
      "file": "crash-light/impactPlate_light_003.ogg",
      "s": 0.528,
-     "rms": 0.0599
+     "rms": 0.0599,
+     "peak": 0.891
     },
     {
      "file": "crash-light/impactPlate_light_004.ogg",
      "s": 0.608,
-     "rms": 0.0501
+     "rms": 0.0501,
+     "peak": 0.891
     }
    ]
   },
@@ -237,77 +280,92 @@
     {
      "file": "crash-medium/impactMetal_medium_000.ogg",
      "s": 0.272,
-     "rms": 0.1253
+     "rms": 0.1253,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactMetal_medium_001.ogg",
      "s": 0.143,
-     "rms": 0.1101
+     "rms": 0.1101,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactMetal_medium_002.ogg",
      "s": 0.119,
-     "rms": 0.1189
+     "rms": 0.1189,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactMetal_medium_003.ogg",
      "s": 0.254,
-     "rms": 0.1129
+     "rms": 0.1129,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactMetal_medium_004.ogg",
      "s": 0.109,
-     "rms": 0.1216
+     "rms": 0.1216,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactPlate_medium_000.ogg",
      "s": 0.609,
-     "rms": 0.0661
+     "rms": 0.0661,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactPlate_medium_001.ogg",
      "s": 0.616,
-     "rms": 0.0574
+     "rms": 0.0574,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactPlate_medium_002.ogg",
      "s": 0.515,
-     "rms": 0.0795
+     "rms": 0.0795,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactPlate_medium_003.ogg",
      "s": 0.599,
-     "rms": 0.08
+     "rms": 0.08,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactPlate_medium_004.ogg",
      "s": 0.534,
-     "rms": 0.0795
+     "rms": 0.0795,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactTin_medium_000.ogg",
      "s": 0.159,
-     "rms": 0.0752
+     "rms": 0.0752,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactTin_medium_001.ogg",
      "s": 0.174,
-     "rms": 0.1076
+     "rms": 0.1076,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactTin_medium_002.ogg",
      "s": 0.134,
-     "rms": 0.1049
+     "rms": 0.1049,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactTin_medium_003.ogg",
      "s": 0.215,
-     "rms": 0.0832
+     "rms": 0.0832,
+     "peak": 0.891
     },
     {
      "file": "crash-medium/impactTin_medium_004.ogg",
      "s": 0.179,
-     "rms": 0.1033
+     "rms": 0.1033,
+     "peak": 0.891
     }
    ]
   },
@@ -317,102 +375,122 @@
     {
      "file": "crash-soft/impactSoft_medium_000.ogg",
      "s": 0.118,
-     "rms": 0.1664
+     "rms": 0.1,
+     "peak": 0.536
     },
     {
      "file": "crash-soft/impactSoft_medium_001.ogg",
      "s": 0.183,
-     "rms": 0.1721
+     "rms": 0.1,
+     "peak": 0.518
     },
     {
      "file": "crash-soft/impactSoft_medium_002.ogg",
      "s": 0.135,
-     "rms": 0.1688
+     "rms": 0.1,
+     "peak": 0.528
     },
     {
      "file": "crash-soft/impactSoft_medium_003.ogg",
      "s": 0.14,
-     "rms": 0.1645
+     "rms": 0.1,
+     "peak": 0.542
     },
     {
      "file": "crash-soft/impactSoft_medium_004.ogg",
      "s": 0.147,
-     "rms": 0.1601
+     "rms": 0.1,
+     "peak": 0.557
     },
     {
      "file": "crash-soft/impactSoft_heavy_000.ogg",
      "s": 0.505,
-     "rms": 0.1332
+     "rms": 0.1,
+     "peak": 0.669
     },
     {
      "file": "crash-soft/impactSoft_heavy_001.ogg",
      "s": 0.572,
-     "rms": 0.1309
+     "rms": 0.1,
+     "peak": 0.681
     },
     {
      "file": "crash-soft/impactSoft_heavy_002.ogg",
      "s": 0.572,
-     "rms": 0.1343
+     "rms": 0.1,
+     "peak": 0.664
     },
     {
      "file": "crash-soft/impactSoft_heavy_003.ogg",
      "s": 0.544,
-     "rms": 0.1461
+     "rms": 0.1,
+     "peak": 0.61
     },
     {
      "file": "crash-soft/impactSoft_heavy_004.ogg",
      "s": 0.501,
-     "rms": 0.1412
+     "rms": 0.1,
+     "peak": 0.631
     },
     {
      "file": "crash-soft/impactPunch_medium_000.ogg",
      "s": 0.326,
-     "rms": 0.161
+     "rms": 0.1,
+     "peak": 0.553
     },
     {
      "file": "crash-soft/impactPunch_medium_001.ogg",
      "s": 0.314,
-     "rms": 0.1647
+     "rms": 0.1,
+     "peak": 0.541
     },
     {
      "file": "crash-soft/impactPunch_medium_002.ogg",
      "s": 0.378,
-     "rms": 0.1363
+     "rms": 0.1,
+     "peak": 0.654
     },
     {
      "file": "crash-soft/impactPunch_medium_003.ogg",
      "s": 0.321,
-     "rms": 0.1451
+     "rms": 0.1,
+     "peak": 0.614
     },
     {
      "file": "crash-soft/impactPunch_medium_004.ogg",
      "s": 0.379,
-     "rms": 0.141
+     "rms": 0.1,
+     "peak": 0.632
     },
     {
      "file": "crash-soft/impactPunch_heavy_000.ogg",
      "s": 0.621,
-     "rms": 0.1284
+     "rms": 0.1,
+     "peak": 0.694
     },
     {
      "file": "crash-soft/impactPunch_heavy_001.ogg",
      "s": 0.522,
-     "rms": 0.1383
+     "rms": 0.1,
+     "peak": 0.645
     },
     {
      "file": "crash-soft/impactPunch_heavy_002.ogg",
      "s": 0.453,
-     "rms": 0.1482
+     "rms": 0.1,
+     "peak": 0.601
     },
     {
      "file": "crash-soft/impactPunch_heavy_003.ogg",
      "s": 0.464,
-     "rms": 0.1385
+     "rms": 0.1,
+     "peak": 0.644
     },
     {
      "file": "crash-soft/impactPunch_heavy_004.ogg",
      "s": 0.522,
-     "rms": 0.1368
+     "rms": 0.1,
+     "peak": 0.652
     }
    ]
   },
@@ -422,42 +500,50 @@
     {
      "file": "explosion/blast-0.ogg",
      "s": 1.997,
-     "rms": 0.1249
+     "rms": 0.1249,
+     "peak": 0.891
     },
     {
      "file": "explosion/blast-1.ogg",
      "s": 1.357,
-     "rms": 0.2171
+     "rms": 0.2171,
+     "peak": 0.891
     },
     {
      "file": "explosion/blast-2.ogg",
      "s": 1.997,
-     "rms": 0.1211
+     "rms": 0.1211,
+     "peak": 0.891
     },
     {
      "file": "explosion/blast-3.ogg",
      "s": 1.553,
-     "rms": 0.173
+     "rms": 0.173,
+     "peak": 0.891
     },
     {
      "file": "explosion/blast-4.ogg",
      "s": 1.997,
-     "rms": 0.2024
+     "rms": 0.2024,
+     "peak": 0.891
     },
     {
      "file": "explosion/bang-1807.ogg",
      "s": 1.997,
-     "rms": 0.0687
+     "rms": 0.0687,
+     "peak": 0.891
     },
     {
      "file": "explosion/bang-1808.ogg",
      "s": 1.997,
-     "rms": 0.0693
+     "rms": 0.0693,
+     "peak": 0.891
     },
     {
      "file": "explosion/bang-1806.ogg",
      "s": 1.997,
-     "rms": 0.0687
+     "rms": 0.0687,
+     "peak": 0.891
     }
    ]
   },
@@ -467,17 +553,20 @@
     {
      "file": "explosion-far/far-1023.ogg",
      "s": 2.125,
-     "rms": 0.0317
+     "rms": 0.0317,
+     "peak": 0.891
     },
     {
      "file": "explosion-far/lowFrequency_explosion_000.ogg",
      "s": 1.997,
-     "rms": 0.1246
+     "rms": 0.1246,
+     "peak": 0.891
     },
     {
      "file": "explosion-far/lowFrequency_explosion_001.ogg",
      "s": 0.997,
-     "rms": 0.1627
+     "rms": 0.1259,
+     "peak": 0.69
     }
    ]
   },
@@ -487,72 +576,86 @@
     {
      "file": "gun-fire/bsb0437-0.ogg",
      "s": 0.45,
-     "rms": 0.2092
+     "rms": 0.1995,
+     "peak": 0.85
     },
     {
      "file": "gun-fire/bsb0438-0.ogg",
      "s": 0.45,
-     "rms": 0.1296
+     "rms": 0.1296,
+     "peak": 0.891
     },
     {
      "file": "gun-fire/bsb0397-0.ogg",
      "s": 0.45,
-     "rms": 0.1625
+     "rms": 0.1625,
+     "peak": 0.891
     },
     {
      "file": "gun-fire/cz-0.ogg",
      "s": 0.45,
-     "rms": 0.166
+     "rms": 0.166,
+     "peak": 0.891
     },
     {
      "file": "gun-fire/cz-1.ogg",
      "s": 0.45,
-     "rms": 0.2262
+     "rms": 0.1995,
+     "peak": 0.786
     },
     {
      "file": "gun-fire/cz-2.ogg",
      "s": 0.45,
-     "rms": 0.2359
+     "rms": 0.1995,
+     "peak": 0.754
     },
     {
      "file": "gun-fire/cz-3.ogg",
      "s": 0.45,
-     "rms": 0.2366
+     "rms": 0.1995,
+     "peak": 0.751
     },
     {
      "file": "gun-fire/sks-0.ogg",
      "s": 0.45,
-     "rms": 0.178
+     "rms": 0.178,
+     "peak": 0.891
     },
     {
      "file": "gun-fire/sks-1.ogg",
      "s": 0.45,
-     "rms": 0.1822
+     "rms": 0.1822,
+     "peak": 0.891
     },
     {
      "file": "gun-fire/sks-2.ogg",
      "s": 0.45,
-     "rms": 0.1832
+     "rms": 0.1832,
+     "peak": 0.891
     },
     {
      "file": "gun-fire/sks-3.ogg",
      "s": 0.45,
-     "rms": 0.1866
+     "rms": 0.1866,
+     "peak": 0.891
     },
     {
      "file": "gun-fire/mosin-0.ogg",
      "s": 0.45,
-     "rms": 0.2225
+     "rms": 0.1995,
+     "peak": 0.799
     },
     {
      "file": "gun-fire/mosin-1.ogg",
      "s": 0.45,
-     "rms": 0.2184
+     "rms": 0.1995,
+     "peak": 0.814
     },
     {
      "file": "gun-fire/mosin-2.ogg",
      "s": 0.45,
-     "rms": 0.2308
+     "rms": 0.1995,
+     "peak": 0.771
     }
    ]
   },
@@ -562,27 +665,32 @@
     {
      "file": "gun-fire-shotgun/shotgun-0.ogg",
      "s": 0.8,
-     "rms": 0.0347
+     "rms": 0.0347,
+     "peak": 0.891
     },
     {
      "file": "gun-fire-shotgun/shotgun-1.ogg",
      "s": 0.8,
-     "rms": 0.0313
+     "rms": 0.0313,
+     "peak": 0.891
     },
     {
      "file": "gun-fire-shotgun/shotgun-2.ogg",
      "s": 0.8,
-     "rms": 0.0315
+     "rms": 0.0315,
+     "peak": 0.891
     },
     {
      "file": "gun-fire-shotgun/shotgun-3.ogg",
      "s": 0.8,
-     "rms": 0.0293
+     "rms": 0.0293,
+     "peak": 0.891
     },
     {
      "file": "gun-fire-shotgun/shotty.ogg",
      "s": 0.698,
-     "rms": 0.2196
+     "rms": 0.2196,
+     "peak": 0.891
     }
    ]
   },
@@ -592,77 +700,92 @@
     {
      "file": "gun-hit/impactMetal_light_000.ogg",
      "s": 0.351,
-     "rms": 0.1004
+     "rms": 0.1,
+     "peak": 0.888
     },
     {
      "file": "gun-hit/impactMetal_light_001.ogg",
      "s": 0.252,
-     "rms": 0.1003
+     "rms": 0.1,
+     "peak": 0.889
     },
     {
      "file": "gun-hit/impactMetal_light_002.ogg",
      "s": 0.236,
-     "rms": 0.1023
+     "rms": 0.1,
+     "peak": 0.871
     },
     {
      "file": "gun-hit/impactMetal_light_003.ogg",
      "s": 0.482,
-     "rms": 0.105
+     "rms": 0.1,
+     "peak": 0.849
     },
     {
      "file": "gun-hit/impactMetal_light_004.ogg",
      "s": 0.213,
-     "rms": 0.1012
+     "rms": 0.1,
+     "peak": 0.88
     },
     {
      "file": "gun-hit/impactGeneric_light_000.ogg",
      "s": 0.139,
-     "rms": 0.1131
+     "rms": 0.1,
+     "peak": 0.788
     },
     {
      "file": "gun-hit/impactGeneric_light_001.ogg",
      "s": 0.118,
-     "rms": 0.097
+     "rms": 0.097,
+     "peak": 0.891
     },
     {
      "file": "gun-hit/impactGeneric_light_002.ogg",
      "s": 0.14,
-     "rms": 0.1151
+     "rms": 0.1,
+     "peak": 0.774
     },
     {
      "file": "gun-hit/impactGeneric_light_003.ogg",
      "s": 0.138,
-     "rms": 0.097
+     "rms": 0.097,
+     "peak": 0.891
     },
     {
      "file": "gun-hit/impactGeneric_light_004.ogg",
      "s": 0.14,
-     "rms": 0.0952
+     "rms": 0.0952,
+     "peak": 0.891
     },
     {
      "file": "gun-hit/impactgun-1.ogg",
      "s": 0.6,
-     "rms": 0.1103
+     "rms": 0.1,
+     "peak": 0.808
     },
     {
      "file": "gun-hit/impactgun-2.ogg",
      "s": 0.6,
-     "rms": 0.1044
+     "rms": 0.1,
+     "peak": 0.854
     },
     {
      "file": "gun-hit/impactgun-3.ogg",
      "s": 0.6,
-     "rms": 0.1195
+     "rms": 0.1,
+     "peak": 0.746
     },
     {
      "file": "gun-hit/impactgun-4.ogg",
      "s": 0.6,
-     "rms": 0.1046
+     "rms": 0.1,
+     "peak": 0.852
     },
     {
      "file": "gun-hit/impactgun-5.ogg",
      "s": 0.6,
-     "rms": 0.1282
+     "rms": 0.1,
+     "peak": 0.695
     }
    ]
   },
@@ -672,27 +795,32 @@
     {
      "file": "gun-hit-glass/impactGlass_light_000.ogg",
      "s": 0.21,
-     "rms": 0.1147
+     "rms": 0.1,
+     "peak": 0.777
     },
     {
      "file": "gun-hit-glass/impactGlass_light_001.ogg",
      "s": 0.21,
-     "rms": 0.1102
+     "rms": 0.1,
+     "peak": 0.809
     },
     {
      "file": "gun-hit-glass/impactGlass_light_002.ogg",
      "s": 0.21,
-     "rms": 0.1105
+     "rms": 0.1,
+     "peak": 0.806
     },
     {
      "file": "gun-hit-glass/impactGlass_light_003.ogg",
      "s": 0.21,
-     "rms": 0.1064
+     "rms": 0.1,
+     "peak": 0.837
     },
     {
      "file": "gun-hit-glass/impactGlass_light_004.ogg",
      "s": 0.21,
-     "rms": 0.1227
+     "rms": 0.1,
+     "peak": 0.726
     }
    ]
   },
@@ -702,52 +830,62 @@
     {
      "file": "gun-hit-ground/impactMining_000.ogg",
      "s": 0.5,
-     "rms": 0.1254
+     "rms": 0.0794,
+     "peak": 0.564
     },
     {
      "file": "gun-hit-ground/impactMining_001.ogg",
      "s": 0.5,
-     "rms": 0.1157
+     "rms": 0.0794,
+     "peak": 0.612
     },
     {
      "file": "gun-hit-ground/impactMining_002.ogg",
      "s": 0.5,
-     "rms": 0.0889
+     "rms": 0.0794,
+     "peak": 0.797
     },
     {
      "file": "gun-hit-ground/impactMining_003.ogg",
      "s": 0.5,
-     "rms": 0.0928
+     "rms": 0.0794,
+     "peak": 0.763
     },
     {
      "file": "gun-hit-ground/impactMining_004.ogg",
      "s": 0.5,
-     "rms": 0.1308
+     "rms": 0.0794,
+     "peak": 0.541
     },
     {
      "file": "gun-hit-ground/footstep_concrete_000.ogg",
      "s": 0.106,
-     "rms": 0.1039
+     "rms": 0.0794,
+     "peak": 0.682
     },
     {
      "file": "gun-hit-ground/footstep_concrete_001.ogg",
      "s": 0.108,
-     "rms": 0.1019
+     "rms": 0.0794,
+     "peak": 0.695
     },
     {
      "file": "gun-hit-ground/footstep_concrete_002.ogg",
      "s": 0.113,
-     "rms": 0.092
+     "rms": 0.0794,
+     "peak": 0.769
     },
     {
      "file": "gun-hit-ground/footstep_concrete_003.ogg",
      "s": 0.11,
-     "rms": 0.1034
+     "rms": 0.0794,
+     "peak": 0.685
     },
     {
      "file": "gun-hit-ground/footstep_concrete_004.ogg",
      "s": 0.114,
-     "rms": 0.1067
+     "rms": 0.0794,
+     "peak": 0.664
     }
    ]
   },
@@ -757,17 +895,20 @@
     {
      "file": "missile-launch/launch-0.ogg",
      "s": 1.6,
-     "rms": 0.1036
+     "rms": 0.1036,
+     "peak": 0.891
     },
     {
      "file": "missile-launch/launch-1.ogg",
      "s": 1.6,
-     "rms": 0.1504
+     "rms": 0.1504,
+     "peak": 0.891
     },
     {
      "file": "missile-launch/launch-thruster.ogg",
      "s": 1.6,
-     "rms": 0.1331
+     "rms": 0.1331,
+     "peak": 0.891
     }
    ]
   },
@@ -775,24 +916,40 @@
    "desc": "a skid that starts and stops: lock-ups, handbrake turns",
    "clips": [
     {
-     "file": "tire-skid/skid-2368.ogg",
-     "s": 2.137,
-     "rms": 0.1981
+     "file": "tire-skid/lotus-pirouette.ogg",
+     "s": 3.25,
+     "rms": 0.1259,
+     "peak": 0.715
     },
     {
-     "file": "tire-skid/skid-2369.ogg",
-     "s": 2.226,
-     "rms": 0.1727
+     "file": "tire-skid/lotus-oversteer.ogg",
+     "s": 1.55,
+     "rms": 0.1259,
+     "peak": 0.554
     },
     {
-     "file": "tire-skid/skid-2370.ogg",
-     "s": 2.062,
-     "rms": 0.2012
+     "file": "tire-skid/lotus-correction.ogg",
+     "s": 1.7,
+     "rms": 0.1259,
+     "peak": 0.78
     },
     {
-     "file": "tire-skid/skid-long.ogg",
-     "s": 6.0,
-     "rms": 0.1172
+     "file": "tire-skid/subaru-squeal.ogg",
+     "s": 1.8,
+     "rms": 0.1254,
+     "peak": 0.891
+    },
+    {
+     "file": "tire-skid/subaru-scrub.ogg",
+     "s": 1.3,
+     "rms": 0.1259,
+     "peak": 0.747
+    },
+    {
+     "file": "tire-skid/subaru-scrub-inside.ogg",
+     "s": 1.0,
+     "rms": 0.1259,
+     "peak": 0.842
     }
    ]
   },
@@ -803,18 +960,21 @@
    "clips": [
     {
      "file": "tire-squeal-loop/squeal-light.ogg",
-     "s": 2.5,
-     "rms": 0.0923
+     "s": 0.8,
+     "rms": 0.0794,
+     "peak": 0.37
     },
     {
      "file": "tire-squeal-loop/squeal-medium.ogg",
-     "s": 2.5,
-     "rms": 0.1177
+     "s": 1.2,
+     "rms": 0.0794,
+     "peak": 0.495
     },
     {
      "file": "tire-squeal-loop/squeal-heavy.ogg",
-     "s": 2.5,
-     "rms": 0.1385
+     "s": 1.25,
+     "rms": 0.0794,
+     "peak": 0.473
     }
    ]
   }

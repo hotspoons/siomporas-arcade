@@ -96,7 +96,8 @@ import { GameHud } from './ui/gamehud'
 import { GameMenu } from './ui/gamemenu'
 import { UiSound } from './ui/uisound'
 import { Sfx } from './game/audio/sfx'
-import { crashSlot } from './game/audio/soundbank'
+import type { WeaponDoc } from './game/combat/weapons'
+import { crashSlot, type SoundOverrides } from './game/audio/soundbank'
 import { downloadJSON, readJSONFile } from './ui/files'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -293,6 +294,15 @@ const sfx = new Sfx()
 void sfx.loadBank('/sounds/bank.json', (id, file) => assetsvc.fileUrl(id, `sounds/${file}`))
 /** the player's tyre squeal, a levelled loop; made when the car first moves, dropped with the car */
 let squeal: ReturnType<Sfx['loop']> | null = null
+/** a skid's onset: when the squeal last jumped from nothing to most of the way, and what it read before */
+let skidAt = 0
+let squealWas = 0
+/**
+ * The mounted weapons' own voices: a weapon build's `audio.fire` (the Weapons tab's Fire sound)
+ * laid AHEAD of the vehicle's `sounds` for `gun.fire`, so a car that mounts a shotgun sounds like
+ * one without the vehicle document having to say so twice. Filled when the player's vehicle is.
+ */
+let playerWeaponSounds: SoundOverrides | null = null
 const uiParam = new URLSearchParams(location.search).get('ui')
 let uiMode: UiMode = resolveUiMode({ param: uiParam, stored: settings.data.ui, prod: import.meta.env.PROD })
 /**
@@ -1685,6 +1695,13 @@ async function openLevel(id: string) {
         playerVehicle = (item?.vehicle as VehicleDoc | undefined) ?? null
       }
       if (!playerVehicle) toast(`${lvl.player.vehicle} has no dynamics saved — driving the default chassis`, 'warn', 5000)
+      playerWeaponSounds = null
+      if (playerVehicle?.mounts?.length) {
+        const ids = new Set(playerVehicle.mounts.map((m) => m.weapon))
+        const fires = (await assetsvc.builds<{ id: string; doc?: WeaponDoc }>('weapons').catch(() => []))
+          .filter((w) => ids.has(w.id) && w.doc?.audio?.fire).map((w) => w.doc!.audio.fire!)
+        if (fires.length) playerWeaponSounds = { 'gun.fire': fires }
+      }
     } catch {
       toast(`could not read ${lvl.player.vehicle} — driving the default chassis`, 'warn', 5000)
     }
@@ -1991,7 +2008,7 @@ function fireGun(dt: number): void {
         }
       },
       // the report is the player's own: unplaced, at the gain the knob says, in this car's voice
-      onFire: () => sfx.play('gun.fire', { gain: T.SFX_GUN_GAIN, scopes: [playerVehicle?.sounds] }),
+      onFire: () => sfx.play('gun.fire', { gain: T.SFX_GUN_GAIN, scopes: [playerWeaponSounds, playerVehicle?.sounds] }),
     })
     scene.add(gun.group)
   }
@@ -4377,6 +4394,15 @@ function frame() {
       const span = Math.max(0.01, T.SQUEAL_SLIP_FULL - T.SQUEAL_SLIP_ON)
       const level = paused || car.onGrass || Math.abs(car.speed) < T.SQUEAL_MIN_MPS ? 0 : Math.min(1, Math.max(0, (slip - T.SQUEAL_SLIP_ON) / span))
       if (level > 0 || squeal) (squeal ??= sfx.loop('tire.squeal.loop', [playerVehicle?.sounds])).set(level, car.pos)
+      // a SKID is the squeal arriving all at once: from under a quarter to over six tenths within
+      // the frame — a lock-up, a yank on the handbrake, a corner taken too hot. One passage plays
+      // over the loop, placed at the car, not more than one every two seconds.
+      const now = performance.now()
+      if (level > 0.6 && squealWas < 0.25 && now - skidAt > 2000) {
+        skidAt = now
+        sfx.play('tire.skid', { at: car.pos, gain: 0.6 + 0.4 * level, scopes: [playerVehicle?.sounds] })
+      }
+      squealWas = level
     }
     /*
      * WHICH WAY IS UP FOR THE CAMERA. Rich, 2026-09-29, first time round the loop: *"when the car

@@ -38,7 +38,7 @@ have every one of them (`test/soundbank.test.ts` checks the shipped manifest).
 | slot | when |
 | --- | --- |
 | `tire.squeal.loop` | the player's tyres, every frame: three loops light → heavy, crossfaded by slip (`squealMix`) |
-| `tire.skid` | a skid that starts and stops (not wired yet — the loop covers it) |
+| `tire.skid` | a skid's onset: the squeal level jumping from under 0.25 to over 0.6 in one frame |
 | `crash.light` / `crash.medium` / `crash.heavy` | a contact, graded off its peak impulse by `crashSlot` with `CRASH_LIGHT_NS` / `CRASH_HEAVY_NS`; `crash.glass` is laid over a heavy one past 1.5× |
 | `crash.soft` | hitting something that is not metal (actors; not wired yet) |
 | `explosion`, `explosion.far` | every `boom()` — a missile landing, a program's `api.physics.explode` — two layers with different reach |
@@ -155,11 +155,11 @@ bank itself is under `public/`, so it ships with the app.
 
 ## Not done
 
-- `tire.skid`, `crash.soft` and `gun.hit.glass` have clips and no trigger yet: a skid one-shot on
-  a sharp slip onset, a soft thud when a car meets an actor, glass when a round meets a window
-  (the hit test does not say what it hit).
-- A weapon's `audio.fire` is stored and not played; the player's mounted weapons should put it
-  ahead of the vehicle's `gun.fire`.
+- `crash.soft` and `gun.hit.glass` have clips and no trigger yet: a soft thud when a car meets an
+  actor, glass when a round meets a window (the hit test does not say what it hit).
+- `tire.skid` plays on a skid's onset — the squeal level jumping from under 0.25 to over 0.6 in a
+  frame, at most one every two seconds. A mounted weapon build's `audio.fire` is laid ahead of
+  the vehicle's `gun.fire` (`playerWeaponSounds`); `audio.reload` still plays nothing.
 - A missile launch recording. The bank's is Kenney's thruster under a thump — there is no CC0
   missile launch worth the name; Freesound has CC0 candidates (e.g. 211617, 854476) but downloading
   needs an account, which is Rich's to log into.

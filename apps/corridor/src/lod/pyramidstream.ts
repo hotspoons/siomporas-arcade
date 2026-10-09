@@ -116,7 +116,7 @@ export class PyramidStream {
   /** the performance panel's tile tint: each level wears one colour so a seam is readable */
   private tintOn = false
   /** camera height and look, so a view from altitude does not refine every tile under the nadir */
-  private view: { agl: number; fx: number; fy: number; fz: number } | null = null
+  private view: { agl: number; fx: number; fy: number; fz: number; focusX?: number; focusNorth?: number } | null = null
   /** the height and look the last walk used. A newer look is stored every frame and does not, by itself, walk again */
   private aimed: { agl: number; fx: number; fy: number; fz: number } | null = null
   private tunedDrop = Number.NaN
@@ -255,7 +255,7 @@ export class PyramidStream {
    * `view.agl` is metres above the ground; `fx, fy, fz` is the look direction in world space
    * (x east, y up, z south). Both are what the cone and the slant range read.
    */
-  update(eyeX: number, eyeZ: number, force = false, view?: { agl: number; fx: number; fy: number; fz: number }) {
+  update(eyeX: number, eyeZ: number, force = false, view?: { agl: number; fx: number; fy: number; fz: number; focusX?: number; focusNorth?: number }) {
     if (this.disposed) return
     // The top-down camera (and a climb straight up) keeps the same east/north. The walk used to
     // wait for an 8 m move on the ground, so the cone stayed aimed down the road you had been
@@ -326,10 +326,13 @@ export class PyramidStream {
     // its parent stood there for good, and a parent samples every ~100 m, so on a slope it rose
     // metres above the road, rail and grass laid on the 2 m surface (Rich, 2026-10-07). Order by
     // distance so the ground under the eye is fetched first and the far coarse ring waits.
+    // nearest to the FOCUS first — ahead of the car by a few seconds of travel when it is moving
+    // (scene.ts updateNear) — so the tiles the car is about to reach land before the ones beside it
+    const fx = this.view?.focusX ?? eyeX, fz = this.view?.focusNorth ?? eyeZ
     const order = load
       .map((t) => {
         const p = this.place(t)
-        return { t, d: Math.hypot(p.x - eyeX, p.z - eyeZ) }
+        return { t, d: Math.hypot(p.x - fx, p.z - fz) }
       })
       .sort((a, b) => a.d - b.d)
     for (const { t } of order) {

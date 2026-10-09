@@ -1083,9 +1083,20 @@ export let STREAM_LOCAL = 1
  */
 export let STREAM_GOVERNOR = 1
 /** the frame CPU time the governor steers the builders toward, ms: 60 fps is 16.7 and the browser wants some of that */
-export let STREAM_TARGET_MS = 11
-/** the smallest share of their budgets the builders keep while the frame is over */
-export let STREAM_SCALE_MIN = 0.15
+export let STREAM_TARGET_MS = 13
+/**
+ * The smallest share of their budgets the builders keep while the frame is over. 0.15 starved the
+ * world at 175 mph: the car outran the cells ahead and they finished behind it (Rich, 2026-10-09).
+ */
+export let STREAM_SCALE_MIN = 0.3
+/**
+ * THE BUILDERS LOOK WHERE THE CAR IS GOING. Everything that streams ranks its work by distance to a
+ * FOCUS this many seconds of travel ahead of the eye (the grading pump, the pyramid's loads, the
+ * physics tiles), not to the eye itself: at 175 mph the cell the car is about to enter used to
+ * compete with the ones beside and behind it, and lost (Rich, 2026-10-09: "render budgets need to
+ * be focused in the direction of travel"). At rest the focus is the eye.
+ */
+export let STREAM_LEAD_S = 3
 // trees (props.treesFromCanopy): a FIXED cell so density does not depend on how big the site is,
 // the budget spent within TREE_PLANT_RADIUS_M of the eye, replanted when the eye leaves that
 // centre by TREE_REPLANT_M
@@ -2593,6 +2604,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('STREAM_GOVERNOR', () => STREAM_GOVERNOR, (v) => (STREAM_GOVERNOR = v), [0, 1], 1, 'scale the builders’ per-frame budgets (grass, trees, grading) to the CPU time the frame has left; 0 = every budget is the full knob'),
           tune('STREAM_TARGET_MS', () => STREAM_TARGET_MS, (v) => (STREAM_TARGET_MS = v), [4, 16], 0.5, 'the frame CPU time the governor steers toward, ms'),
           tune('STREAM_SCALE_MIN', () => STREAM_SCALE_MIN, (v) => (STREAM_SCALE_MIN = v), [0.05, 1], 0.05, 'the smallest share of their budgets the builders keep while the frame is over'),
+          tune('STREAM_LEAD_S', () => STREAM_LEAD_S, (v) => (STREAM_LEAD_S = v), [0, 8], 0.5, 'the builders rank their work by distance to a point this many seconds of travel ahead of the car'),
         ],
       },
       {

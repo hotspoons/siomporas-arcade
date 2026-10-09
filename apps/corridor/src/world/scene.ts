@@ -235,6 +235,7 @@ export interface Site {
   tileStream: ImageryStream | null
   /** LOD pyramid residency — held/pending/bytes and a count per level, null on a flat bake */
   pyramid: (() => PyramidStream['counts']) | null
+  pyramidSet: PyramidSet | null
   /** the pyramid stream itself, so a probe can force an update at a chosen eye */
   pyramidStream: PyramidStream | null
   /** how many parsed vector tiles are cached; the LRU cap bounds this on a long drive */
@@ -246,7 +247,7 @@ export interface Site {
   /** the lowest elevation (m) among the terrain tiles now held; the sea plane's visibility gate */
   lowestGround: () => number
   /** the lazy grading: how much of the site's strips and buildings exist yet, and what they cost */
-  graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string; long: { key: string; ms: number }[] }
+  graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string; long: { key: string; ms: number }[]; unfinishedHere: number; focus: { x: number; z: number } }
   /**
    * The road/branch streaming queue as the pump sees it: what it is building now, what is queued
    * within `STREAM_BUILD_M` of the eye (broken down by kind), and how much wall time the junction
@@ -1717,6 +1718,8 @@ if (uLodOn > 0.5) {
   // the style's road paint, applied to a road mesh that arrives after the style was set
   let paintNow: { centre: THREE.Color; edge: THREE.Color } | null = null
   const gradeEye = new THREE.Vector3(NaN, NaN, NaN)
+  /** where the eye really is, for the readiness readout (gradeEye is the focus ahead of it) */
+  const lastEyeSeen = new THREE.Vector3(NaN, NaN, NaN)
   let gradePumping = false
   let currentUnitKey = ''
   /**
@@ -1776,8 +1779,10 @@ if (uLodOn > 0.5) {
       gradePumping = false
     }
   }
-  const gradeNear = (eye: THREE.Vector3) => {
-    gradeEye.copy(eye)
+  const gradeNear = (eye: THREE.Vector3, focus: THREE.Vector3 = eye) => {
+    // the pump ranks by the FOCUS — ahead of the car by STREAM_LEAD_S of travel — so the cell the
+    // car is about to enter is the nearest, and the one it just left is not
+    gradeEye.copy(focus)
     if (windowedSpine) {
       const n = nearestSpine(eye.x, eye.z)
       const slide = gradeUnits.find((u) => u.key === 'spine-window')
@@ -4196,8 +4201,26 @@ if (uLodOn > 0.5) {
     // every 40 m at speed (2026-10-08) — a dropped frame each time. A cursor walks ~200 a frame.
     const lodCursor = { roads: 0, houses: 0, active: false, here: null as number | null, zAt: null as ((x: number, north: number) => number | null) | null }
     const LOD_PER_FRAME = 200
+    // the eye's velocity, from its own motion between calls, and the focus the builders rank by
+    const prevEye = new THREE.Vector3(NaN, NaN, NaN)
+    let prevTime = NaN
+    const focus = new THREE.Vector3()
+    const velocity = new THREE.Vector3()
     updateNear = (eye, time, fwd, pitch) => {
       const m0 = performance.now()
+      {
+        const dt = time - prevTime
+        if (Number.isFinite(prevEye.x) && dt > 1e-3 && dt < 1) {
+          velocity.subVectors(eye, prevEye).divideScalar(dt)
+          velocity.y = 0
+          // a teleport is not a speed
+          if (velocity.length() > 150) velocity.set(0, 0, 0)
+        } else velocity.set(0, 0, 0)
+        prevEye.copy(eye)
+        prevTime = time
+        focus.copy(eye).addScaledVector(velocity, Math.max(0, T.STREAM_LEAD_S))
+      }
+      lastEyeSeen.copy(eye)
       roadCover?.refresh(road, eye)
       const m1 = performance.now()
       inner(eye, time, fwd, pitch)
@@ -4208,7 +4231,7 @@ if (uLodOn > 0.5) {
       const m4 = performance.now()
       const ground = heightAt(eye.x, -eye.z)
       const agl = Number.isFinite(ground) ? Math.max(0, eye.y - ground) : 0
-      pyr?.update(eye.x, -eye.z, false, fwd ? { agl, fx: fwd.x, fy: fwd.y, fz: fwd.z } : { agl, fx: 0, fy: -1, fz: 0 })
+      pyr?.update(eye.x, -eye.z, false, fwd ? { agl, fx: fwd.x, fy: fwd.y, fz: fwd.z, focusX: focus.x, focusNorth: -focus.z } : { agl, fx: 0, fy: -1, fz: 0, focusX: focus.x, focusNorth: -focus.z })
       const m5 = performance.now()
       // Roads, houses, trees and grass leave with the coarse tiles. Houses are one group per
       // block, so a z10 patch drops its own. A long road follows the tile under the camera.
@@ -4309,7 +4332,7 @@ if (uLodOn > 0.5) {
       }
       const m6 = performance.now()
       for (const tick of signalTicks) tick(time)
-      gradeNear(eye)
+      gradeNear(eye, focus)
       const m7 = performance.now()
       veg?.update(eye.x, -eye.z)
       const m8 = performance.now()
@@ -4455,13 +4478,21 @@ if (uLodOn > 0.5) {
     tileStream: stream,
     pyramid: pyr ? () => pyr.counts : null,
     pyramidStream: pyr,
+    /** the resident pyramid tiles, for a probe to ask which level is under the car */
+    pyramidSet: pyrSet,
     /** how many parsed vector tiles are cached; the LRU cap bounds this on a long drive */
     vtileCache: () => vectorTileCacheSize(),
     /** where the building build time went: massing loop, dressing loop, final normals pass */
     buildingsTiming: () => buildTiming,
     heightAt,
     lowestGround,
-    graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst, long: [...gradeStats.long] }),
+    graded: () => ({
+      built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst, long: [...gradeStats.long],
+      // READINESS: units whose circle covers the eye and are not built yet — the ground the car
+      // is standing on is still being made. A run at speed wants this at zero every frame.
+      unfinishedHere: (() => { let n = 0; for (const u of gradeUnits) if (!u.done && Math.hypot(u.x - lastEyeSeen.x, u.z - lastEyeSeen.z) <= u.r) n++; return n })(),
+      focus: { x: Math.round(gradeEye.x), z: Math.round(gradeEye.z) },
+    }),
     roadStream: () => {
       const near: { key: string; d: number }[] = []
       let nearBranch = 0, nearStreet = 0, nearBuildings = 0

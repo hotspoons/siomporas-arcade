@@ -47,7 +47,8 @@ export interface CorridorPhysics {
    * site's height function, which walks the station grid and may pump the lazy grading, and that
    * has no business happening between two integrations.
    */
-  update(eye: THREE.Vector3, dt: number): void
+  /** `focus` (optional) is where the car is heading, a few seconds out: the tiles ahead are sampled first */
+  update(eye: THREE.Vector3, dt: number, focus?: { x: number; z: number }): void
   /**
    * The ground the PHYSICS thinks is there at a world x, z — by casting a ray down at it, which is
    * the only honest way to ask (the heightfield interpolates between samples, so reading the
@@ -783,9 +784,9 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       return out
     },
 
-    update(eye, dt) {
+    update(eye, dt, focus) {
       const t0 = performance.now()
-      terrain.update(eye.x, eye.z, T.PHYS_TILE_BUDGET, T.PHYS_TILE_MS)
+      terrain.update(eye.x, eye.z, T.PHYS_TILE_BUDGET, T.PHYS_TILE_MS, focus)
       const t1 = performance.now()
       refreshTrees(eye.x, eye.z)
       const t2 = performance.now()

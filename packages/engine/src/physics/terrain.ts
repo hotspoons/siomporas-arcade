@@ -120,7 +120,7 @@ export class Terrain {
    * frame somebody drives over a tile boundary is a visible hitch. The ones that did not get built
    * are built next frame; the car is never near enough to the edge of the ring for that to matter.
    */
-  update(x: number, z: number, budget = 2, sliceMs = this.opts.sliceMs ?? 0): void {
+  update(x: number, z: number, budget = 2, sliceMs = this.opts.sliceMs ?? 0, focus?: { x: number; z: number }): void {
     const { tile, radius } = this.opts
     this.stats.built = 0
     this.stats.dropped = 0
@@ -140,7 +140,9 @@ export class Terrain {
         if (d > radius + tile) continue
         const key = `${i},${j}`
         want.add(key)
-        if (!this.tiles.has(key)) todo.push({ i, j, d })
+        // ranked by distance to the FOCUS (ahead of the car) when there is one, so the tiles the
+        // car is about to need are sampled first; the ring itself is still around the car
+        if (!this.tiles.has(key)) todo.push({ i, j, d: focus ? Math.hypot(cx - focus.x, cz - focus.z) : d })
       }
     }
     todo.sort((a, b) => a.d - b.d)
@@ -148,7 +150,8 @@ export class Terrain {
     const near = tile * 1.5
     const ahead: typeof todo = []
     for (const t of todo) {
-      if (sliceMs > 0 && t.d > near) { ahead.push(t); continue }
+      const dCar = Math.hypot((t.i + 0.5) * tile - x, (t.j + 0.5) * tile - z)
+      if (sliceMs > 0 && dCar > near) { ahead.push(t); continue }
       if (this.stats.built >= budget) break
       if (this.build(t.i, t.j)) this.stats.built++
       else this.stats.skipped++

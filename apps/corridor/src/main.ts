@@ -4123,7 +4123,12 @@ function frame() {
     waypointHud.set(null)
   }
   fpMark('waypoint')
-  if (physics && !paused) physics.update(drive.car?.pos ?? camera.position, real)
+  if (physics && !paused) {
+    // the tiles ahead first: the car's own velocity, STREAM_LEAD_S of travel out
+    const c = drive.car
+    const lead = c && drive.on ? { x: c.pos.x + c.forward.x * c.speed * T.STREAM_LEAD_S, z: c.pos.z + c.forward.z * c.speed * T.STREAM_LEAD_S } : undefined
+    physics.update(c?.pos ?? camera.position, real, lead)
+  }
   fpMark('physics')
   // the dents the steps just made, to the GPU — a couple of meshes a frame, the rest wait a frame
   flushDents()

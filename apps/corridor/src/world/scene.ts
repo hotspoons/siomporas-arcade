@@ -647,7 +647,22 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
    * the formula on the same world (probes/corridor-gradedraster.mjs), and active adjustments —
    * the editor's `ground_offset_m` is authored outside the bake, and the raster cannot carry it.
    */
-  const gradedBake = !!(pyrSet && L.pyramid?.graded) && !adjustments.active && new URLSearchParams(location.search).get('grade') !== 'runtime'
+  /** the bake graded this pyramid (and wrote its deck runs and driveway heights to match) */
+  const bakeGraded = !!(pyrSet && L.pyramid?.graded)
+  const gradedBake = bakeGraded && !adjustments.active && new URLSearchParams(location.search).get('grade') !== 'runtime'
+  /**
+   * A RASTER CANNOT HOLD A STEP. The formula is discontinuous wherever two carriageways at
+   * different heights stand within a pixel of each other — an interchange ramp on its main line,
+   * a frontage road under an embankment — and a bilinear read smears that step over one cell:
+   * 1.4 m measured beside Route 3 at s = 2840 on crofton-triangle, where a branch runs 2.7 m
+   * below the spine four metres away. So a sample whose four pixels span more than this many
+   * metres is not read; it is computed, exactly as before. A natural bank steeper than this
+   * also takes the formula, which answers the same raster there — the cost is one station walk
+   * at a cliff, where the formula already paid it.
+   */
+  const RASTER_CLIFF_M = 0.5
+  /** the raster where it can answer; null at a cliff (see RASTER_CLIFF_M), for the formula */
+  const rasterOrNull = (x: number, z: number): number | null => (pyrSet!.cellSpanAt(x, -z) > RASTER_CLIFF_M ? null : heightAt(x, -z))
 
   /**
    * The lowest elevation of the terrain now HELD, in metres. This is the sea plane's gate: a water
@@ -1952,7 +1967,18 @@ if (uLodOn > 0.5) {
     const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len })), ...branchAts.map((b) => ({ at: b.at, len: b.len }))]
     const branchWho0 = 1 + sibAts.length // `who` of the first branch in the station grid
     const halfOf = (who: number, s: number) => (who === 0 ? pavedHalfAt(s) : who < branchWho0 ? pavedWidth(2) / 2 : branchAts[who - branchWho0].half)
-    const addStations = (who: number, halfAt: (s: number) => number, offAt: (s: number) => number = () => 0) => {
+    /**
+     * The bake's own deck runs for a carriageway, when it wrote them (`elev_s`): the raster under
+     * those stations is the EARTH, so the deck collider, the strip and the formula have to call
+     * them decks too, or a bridge approach has ground in neither. Without them the viewer decides
+     * at boot against the earth it holds — the 8 m overview for most of a site — as it always did.
+     */
+    const elevRunsFor = (runs: [number, number][] | null | undefined, s: number): boolean | null => {
+      if (!runs) return null
+      for (const r of runs) if (s >= r[0] - 1e-6 && s <= r[1] + 1e-6) return true
+      return false
+    }
+    const addStations = (who: number, halfAt: (s: number) => number, offAt: (s: number) => number = () => 0, elevRuns: [number, number][] | null = null) => {
       const c = curves[who]
       const list: { x: number; z: number; half: number; off: number; s: number; y: number; dx: number; dz: number; elev?: boolean }[] = []
       for (let s = 0; s <= c.len; s += 5) {
@@ -1965,7 +1991,7 @@ if (uLodOn > 0.5) {
         // collider instead. See `edgeDistance`'s `grade`. `bareAt` takes site (x, north), so -z —
         // and it is the EARTH, not the graded raster, or a bridge approach graded up to its crown
         // would never read as a deck.
-        const elev = isDeck(st.pos.y, bareAt(st.pos.x, -st.pos.z), T.OVERPASS_CLEAR_M)
+        const elev = elevRunsFor(elevRuns, s) ?? isDeck(st.pos.y, bareAt(st.pos.x, -st.pos.z), T.OVERPASS_CLEAR_M)
         const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), off: offAt(s), who, y: st.pos.y, elev }
         if (arr) arr.push(rec)
         else stGrid.set(k, [rec])
@@ -1973,9 +1999,9 @@ if (uLodOn > 0.5) {
       }
       stationsByWho[who] = list
     }
-    addStations(0, pavedHalfAt, pavedOffsetAt)
+    addStations(0, pavedHalfAt, pavedOffsetAt, manifest.spine.elev_s ?? null)
     for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
-    for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half)
+    for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half, undefined, branchRaw[i].br.elev_s ?? null)
 
     // --- cul-de-sacs ------------------------------------------------------------------------
     // "if a street dead ends, assume a cul de sac" (Rich, 2026-09-21). An end is a dead end when
@@ -2344,7 +2370,10 @@ if (uLodOn > 0.5) {
       // THE BAKED GROUND. The physics ground IS the raster on a graded bake — the bake ran this
       // very formula (grade = true: decks excluded, so the ground under an overpass is the road
       // below or the earth) into every fine tile. Nothing here is cheaper than one bilinear read.
-      if (gradedBake && grade) return heightAt(x, -z)
+      if (gradedBake && grade) {
+        const r = rasterOrNull(x, z)
+        if (r !== null) return r
+      }
       const e = edgeDistance(x, z, -1, false, grade)
       if (!Number.isFinite(e.d)) return null
       const primary = e.who < branchWho0
@@ -2367,7 +2396,7 @@ if (uLodOn > 0.5) {
     // What a strip vertex stands on when the bake graded the ground: the raster, read once, where
     // the formula would have blended road to earth. Null on an older bake — the strip then
     // computes the formula itself, exactly as it did.
-    const rasterGround: ((x: number, z: number) => number) | null = gradedBake ? (x, z) => heightAt(x, -z) : null
+    const rasterGround: ((x: number, z: number) => number | null) | null = gradedBake ? rasterOrNull : null
     type LiveStrip = Awaited<ReturnType<typeof buildStrip>>
     const liveStrips: LiveStrip[] = []
     // the terrain surfaces a new strip must sink: every geometry whose box it touches, not all 60
@@ -2700,7 +2729,7 @@ if (uLodOn > 0.5) {
       const b = branchAts[i]
       curves.push({ at: b.at, len: b.len })
       await budget.tick()
-      addStations(branchWho0 + i, () => b.half)
+      addStations(branchWho0 + i, () => b.half, undefined, br.elev_s ?? null)
       const de = br.dead_ends
       if (de?.length) authored.set(branchWho0 + i, de)
       endsFor(branchWho0 + i)
@@ -2837,10 +2866,30 @@ if (uLodOn > 0.5) {
         const base = pos.length / 3
         for (let i = 0; i < pts.length; i++) {
           const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]
-          const dx = b.x - a.x, dz = b.z - a.z
-          const n = Math.hypot(dx, dz) || 1
+          let dx = b.x - a.x, dz = b.z - a.z
+          let n = Math.hypot(dx, dz)
+          if (n < 1e-6) {
+            // A STATION WITH NO DIRECTION IS A 160 m PLATEAU. Two coincident shape points gave the
+            // station between them a (0, 0) tangent; `along` is then 0 for every point in the 7x7
+            // walk, every point is "in the band", `lat` is 0 and d is -half up to 80 m away — the
+            // stub of Lavender Cliff Way graded 3.5 m of ground over the fields beside Route 3,
+            // 160 m across (measured against the bake, 2026-10-09). The direction comes from the
+            // nearest distinct point instead; a ribbon with none is a dot and gets no station.
+            let j = -1, best = Infinity
+            for (let k = 0; k < pts.length; k++) { if (k === i) continue; const d = Math.hypot(pts[k].x - pts[i].x, pts[k].z - pts[i].z); if (d > 1e-6 && d < best) { best = d; j = k } }
+            if (j < 0) continue
+            const sgn = j > i ? 1 : -1
+            dx = (pts[j].x - pts[i].x) * sgn; dz = (pts[j].z - pts[i].z) * sgn
+            n = Math.hypot(dx, dz)
+          }
           const sx = -dz / n, sz = dx / n // right of travel
-          const g = groundAtWorld(pts[i].x, pts[i].z)
+          // ON THE BAKE'S OWN z when the bake graded the ground. `_service_ways` wrote each point's
+          // height from the 1 m DEM and graded the raster to it; laying the station on the earth
+          // held at boot instead — the 8 m overview for most of a site — put a stub on Route 3
+          // 3.5 m above the ground it stands on, with a 40 m verge graded up to it, and the
+          // formula and the raster disagreed by that much all round it (measured 2026-10-09).
+          // An older bake keeps the boot-time earth, exactly as before.
+          const g = bakeGraded ? pts[i].y : groundAtWorld(pts[i].x, pts[i].z)
           const y = (g ?? pts[i].y) + 0.03
           const hw = halfAtI(i)
           for (const s of [-1, 1]) {

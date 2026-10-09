@@ -510,6 +510,27 @@ export class PyramidSet {
   }
 
   /**
+   * How much the four pixels the bilinear read at this point would blend SPAN, in metres — zero
+   * where no tile answers. A graded raster is read bilinearly, and bilinear cannot hold a step:
+   * where two carriageways at different heights sit within a pixel of each other (an interchange
+   * ramp beside its main line, a frontage road under an embankment) the formula the raster was
+   * written with is discontinuous and the read smears the step over one cell — 1.4 m measured on
+   * crofton-triangle beside Route 3. The caller asks this first and takes the formula there.
+   */
+  cellSpanAt = (x: number, y: number): number => {
+    const hit = this.at(x, y)
+    if (!hit) return 0
+    const f = hit.t.dem
+    const [w, h] = f.layer.size
+    const gx = Math.min(w - 1, Math.max(0, hit.u * w - 0.5)), gy = Math.min(h - 1, Math.max(0, hit.v * h - 0.5))
+    const c0 = Math.floor(gx), r0 = Math.floor(gy)
+    const c1 = Math.min(w - 1, c0 + 1), r1 = Math.min(h - 1, r0 + 1)
+    const d = f.data
+    const a = d[r0 * w + c0], b = d[r0 * w + c1], c = d[r1 * w + c0], e = d[r1 * w + c1]
+    return Math.max(a, b, c, e) - Math.min(a, b, c, e)
+  }
+
+  /**
    * The BARE earth at this ENU point: `bare.png` where the tile is graded, the tile's own `dem`
    * where it is not (then the dem IS the earth), the overview beyond every tile. Same lookup and
    * the same curvature as `heightAt`, so on an ungraded bake the two are one function.

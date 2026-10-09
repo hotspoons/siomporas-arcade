@@ -151,6 +151,9 @@ export interface DeadEnd {
 }
 
 export interface Branch {
+  /** the bake's deck runs along this branch (see `spine.elev_s`) */
+  elev_s?: [number, number][]
+
   /** the bake's road id, `r<osm way id>`; the junction model's approaches name roads by it */
   id?: string
   name: string | null
@@ -207,6 +210,13 @@ export interface Manifest {
   layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>> & { tiles?: TileIndex; pyramid?: PyrIndex }
   spine: {
     dead_ends?: DeadEnd[] | null
+    /**
+     * The bake's own deck decision: along-track runs `[s0, s1]` (station metres) where the
+     * grading treated the carriageway as ELEVATED and left the raster under it as earth. Written
+     * by a graded bake (grade.RoadModel.annotate_decks); absent on an older one, where the viewer
+     * decides at boot against whatever earth it holds, as it always did.
+     */
+    elev_s?: [number, number][]
     coords: [number, number, number][]
     photo_s: number
     length_m: number

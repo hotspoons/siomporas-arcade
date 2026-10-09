@@ -141,9 +141,11 @@ const sampleAll = async (page, pts) => {
         const lvl = set.levelAt(p.x, -p.z)
         if (lvl !== zmax) coarse++
         const e = site.edgeInfo(p.x, p.z)
+        const tk = set.tileAt(p.x, -p.z)
         out.push({
           ...p,
           level: lvl,
+          tile: tk ? `${tk.z}/${tk.x}/${tk.y}` : null,
           phys: site.physGroundAt(p.x, p.z),
           physShift: site.physGroundAt(p.x + 12, p.z),
           bare: site.bareAt(p.x, -p.z),
@@ -168,7 +170,7 @@ console.log(`${site}: ${pts.length} sample points, booted in ${((Date.now() - t0
 const A = await sampleAll(pageA, pts)
 console.log(`runtime: ${A.out.length} sampled, ${A.coarse} answered by a coarse tile; chains ${A.chains}; junctions`, A.junctionMeet)
 
-if (DUMP) {
+if (DUMP && !COMPARE) {
   writeFileSync(DUMP, JSON.stringify({ site, points: A.out, junctionMeet: A.junctionMeet, gradedBake: A.gradedBake }))
   console.log(`dumped ${A.out.length} points to ${DUMP}`)
 }
@@ -178,6 +180,11 @@ if (COMPARE) {
   const pageB = await open('')
   const B = await sampleAll(pageB, pts)
   console.log(`raster:  ${B.out.length} sampled, ${B.coarse} coarse; gradedBake=${B.gradedBake}`)
+  if (DUMP) {
+    // both passes, point for point, so the worst can be looked at offline with their tile and road
+    writeFileSync(DUMP, JSON.stringify({ site, runtime: A.out, raster: B.out, junctionMeet: A.junctionMeet }))
+    console.log(`dumped both passes (${A.out.length} points) to ${DUMP}`)
+  }
   if (!B.gradedBake) verdict.push('the plain load did not take the raster path (manifest has no graded flag, or adjustments are active)')
   if (A.gradedBake) verdict.push('`?grade=runtime` did not force the formula')
   // classify each point by what the FORMULA saw: on a deck the raster is the earth by design

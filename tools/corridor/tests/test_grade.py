@@ -297,6 +297,22 @@ class DeckRunTest(unittest.TestCase):
         self.assertEqual(grade._smooth_runs(np.ones(6, bool), 2, 3).tolist(), [True] * 6)
 
 
+class DrivewayDirectionTest(unittest.TestCase):
+    def test_a_coincident_end_point_does_not_become_a_plateau(self):
+        dem = slope_dem(0.0)
+        # a stub ending on two coincident points, 6 m above the ground it crosses
+        stub = {"highway": "residential", "lanes": 2, "coords": [[300.0, 60.0, ROAD_Z + 6.0], [300.0, 64.0, ROAD_Z + 6.0], [300.0, 68.0, ROAD_Z + 6.0], [300.0, 68.0, ROAD_Z + 6.0]]}
+        w = world(spine_east(), bbox=[-10, -400, 610, 400])
+        w["stubs"] = [stub]
+        model = grade.RoadModel(w, dem)
+        # 50 m to the east of the stub, well outside any driveway's band: the DEM, not the stub
+        g = model.graded_height([350.0], [-64.0], dem(350.0, -64.0))
+        self.assertTrue(np.isnan(g[0]) or abs(float(g[0]) - ROAD_Z) < 0.05)
+        # on the stub itself: its own height
+        g = model.graded_height([300.0], [-64.0], dem(300.0, -64.0))
+        self.assertAlmostEqual(float(g[0]), ROAD_Z + 6.0 + 0.03 - grade.SURFACE_DROP, places=3)
+
+
 class WidthTest(unittest.TestCase):
     def test_paved_width_matches_props(self):
         self.assertAlmostEqual(grade.paved_width(2, two_way=True), 2 * 3.66 + 6.0)

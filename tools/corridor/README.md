@@ -58,10 +58,19 @@ verge) with the road grading folded into `dem.png`, and the earth as sampled bes
 grading is `corridor/grade.py`: a line-for-line port of the viewer's formula — the station field,
 `edgeDistance`, the Catmull-Rom splines (checked against three.js to 1e-9), the junction meet,
 the cul-de-sac bulbs, the driveways — built from the manifest the viewer will read, so the
-pyramid bake runs after the branches and the intersections are in it. A viewer that sees the
-flag reads the raster for `physGroundAt` and the strips and asks `bareAt` for the deck tests; an
-older bake grades at run time exactly as before. `?grade=runtime` forces the old path on a graded
-bake, which is how `probes/corridor-gradedraster.mjs` measures one against the other.
+pyramid bake runs after the branches and the intersections are in it. The bake also writes its
+deck decision into that manifest (`spine.elev_s`, `branches[].elev_s`: the station runs it
+treated as elevated, from the 1 m DEM, in runs of three stations or more), so the viewer's deck
+colliders and strips call the same stations decks as the raster does — it used to decide at boot
+against the 8 m overview — and driveway stations stand on the z the bake wrote for them (and a
+driveway point between two coincident shape points takes its direction from the nearest distinct
+one; a station with none claimed pavement over a 160 m square, in the viewer and in the port). A viewer
+that sees the flag reads the raster for `physGroundAt` and the strips and asks `bareAt` for the
+deck tests; an older bake grades at run time exactly as before. One place the raster cannot
+answer: a bilinear cell that spans a step — two carriageways at different heights within a pixel
+(a ramp on its main line) — smears the step over 2.3 m, so a cell spanning more than 0.5 m takes
+the formula (`RASTER_CLIFF_M`, scene.ts). `?grade=runtime` forces the old path on a graded bake,
+which is how `probes/corridor-gradedraster.mjs` measures one against the other.
 
 Grading costs the pyramid stage roughly a third again (crofton-triangle: 40 s → 54 s of the 1.5
 minute export, of which 8 s builds the station field once and ~2 minutes of worker CPU grades

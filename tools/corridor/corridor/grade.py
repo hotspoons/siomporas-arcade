@@ -780,7 +780,22 @@ class RoadModel:
                 a = pts[max(0, i - 1)]
                 b = pts[min(len(pts) - 1, i + 1)]
                 dx, dz = b[0] - a[0], b[2] - a[2]
-                n = np.hypot(dx, dz) or 1.0
+                n = float(np.hypot(dx, dz))
+                if n < 1e-6:
+                    # A STATION WITH NO DIRECTION IS A 160 m PLATEAU. Two coincident shape points
+                    # gave the station between them a (0, 0) tangent; then `along` is 0 for every
+                    # point in the 7x7 walk, every point is "in the band", `lat` is 0 and d is
+                    # -half up to 80 m away — one stub on Lavender Cliff Way graded 3.5 m of
+                    # ground over the fields beside Route 3 (measured 2026-10-09). The direction
+                    # comes from the nearest distinct point instead; a ribbon with none is a dot.
+                    dist = np.hypot(pts[:, 0] - pts[i, 0], pts[:, 2] - pts[i, 2])
+                    dist[i] = np.inf
+                    j = int(np.argmin(dist))
+                    if not np.isfinite(dist[j]) or dist[j] < 1e-6:
+                        continue
+                    sign = 1.0 if j > i else -1.0
+                    dx, dz = (pts[j, 0] - pts[i, 0]) * sign, (pts[j, 2] - pts[i, 2]) * sign
+                    n = float(np.hypot(dx, dz))
                 if flare_at < 0:
                     hw = half
                 else:

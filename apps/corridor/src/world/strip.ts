@@ -57,9 +57,10 @@ export async function buildStrip(
    * what the blend below computes — the bake ran the same formula into every fine tile — so a
    * vertex reads it instead. Except on a DECK: there the raster is the earth (the physics ground
    * under an overpass is the road below), while this strip is the deck's own verge, held at deck
-   * height to the parapet; those vertices keep the formula. Null on an older bake.
+   * height to the parapet; those vertices keep the formula. Null on an older bake, and null FROM
+   * the function where the raster cannot answer — a cell that spans a step between two roads.
    */
-  rasterAt: ((x: number, z: number) => number) | null = null,
+  rasterAt: ((x: number, z: number) => number | null) | null = null,
 ): Promise<{
   mesh: THREE.Mesh
   heightAt: (x: number, z: number) => number | null
@@ -122,7 +123,7 @@ export async function buildStrip(
       // over the same 0.6–7 m band the DEM blend uses
       const off = offsetAt ? offsetAt(x, -z) * t : 0
       let base = (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + dem * t) + off
-      if (rasterAt && !isDeck(e.y, dem, T.OVERPASS_CLEAR_M)) base = rasterAt(x, z)
+      if (rasterAt && !isDeck(e.y, dem, T.OVERPASS_CLEAR_M)) { const r = rasterAt(x, z); if (r !== null) base = r }
       baseY[k] = base
       // GRASS LIP. The mown/rough turf stands proud of the pavement: real mown grass beside asphalt
       // forms a lip, and raising the whole band (not a thin skirt) makes the ground itself the slab.

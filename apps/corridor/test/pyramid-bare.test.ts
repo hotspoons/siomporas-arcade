@@ -62,6 +62,20 @@ describe('PyramidSet.bareAt', () => {
     expect(set.levelAt(0, 0)).toBe(14)
   })
 
+  it('reports the span of the bilinear cell, so a cliff can take the formula instead', () => {
+    const set = new PyramidSet(14, 14, () => -999)
+    const t = tile(14, tx, ty, 50, 42)
+    // a 2.7 m step between two carriageways one pixel apart, as beside Route 3 at s = 2840
+    t.dem.data[0] = 52.7
+    set.add(t)
+    const span = set.cellSpanAt(t.cx, t.cy)
+    expect(span).toBeGreaterThanOrEqual(0)
+    // the middle of the tile is far from pixel 0: a flat cell
+    expect(span).toBe(0)
+    // nothing answers beyond every tile: no span, no cliff
+    expect(set.cellSpanAt(50_000, 50_000)).toBe(0)
+  })
+
   it('falls back to the overview beyond every tile', () => {
     const set = new PyramidSet(14, 14, () => -999)
     set.add(tile(14, tx, ty, 50, 42))

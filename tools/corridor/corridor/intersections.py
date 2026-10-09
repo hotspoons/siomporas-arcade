@@ -269,6 +269,13 @@ def _roads(site_dir: Path, frame) -> list[dict]:
             if k not in prim_tags:
                 prim_tags[k] = v
     prim_tags.setdefault("highway", prim_highway)
+    # junctions are PLACED under this frame from what the record means (node lon/lat, or the
+    # chain's own polyline at `s`), never read as stored x/y: the stored pair is ENU about the
+    # origin the file was written with, which is not always the one being exported under — see
+    # network.place_junctions. The clustering below is in metres about the frame, so the junctions
+    # and the lines have to be in the same one or every crossing is a kilometre from its arms.
+    from .network import place_junctions
+
     e, n = frame.to_enu([c[0] for c in sp["coords"]], [c[1] for c in sp["coords"]])
     out.append({
         "id": prim.get("id") or "primary",
@@ -278,18 +285,19 @@ def _roads(site_dir: Path, frame) -> list[dict]:
         "tags": prim_tags,
         "oneway": str(prim.get("oneway") or "no"),
         "line": [(float(a), float(b)) for a, b in zip(e, n)],
-        "junctions": prim.get("junctions") or sp.get("junctions") or [],
+        "junctions": place_junctions(frame, prim.get("junctions") or sp.get("junctions") or [], sp["coords"], what="the primary"),
         "primary": True,
     })
     for s in sp.get("siblings", []):
         line = enu_line(s["geometry"])
         if len(line) < 2:
             continue
+        gp = [s["geometry"]["coordinates"]] if s["geometry"]["type"] == "LineString" else s["geometry"]["coordinates"]
         out.append({
             "id": s.get("id"), "ident": s.get("ident"), "name": s.get("name"), "ref": s.get("ref"),
             "highway": s.get("highway") or "residential", "tags": s.get("tags") or {},
             "oneway": str(s.get("oneway") or "no"), "line": line,
-            "junctions": s.get("junctions") or [], "primary": False,
+            "junctions": place_junctions(frame, s.get("junctions") or [], [c for p in gp for c in p], what=f"{s.get('ident')} ({s.get('id')})"), "primary": False,
         })
     # the road's own lidar grade, so a post beside it stands at road height. This is a FALLBACK:
     # the viewer re-grounds every post it places through `groundAt`, and only uses this z where

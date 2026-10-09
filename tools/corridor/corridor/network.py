@@ -14,7 +14,9 @@ in the region whose `name` or `ref` is in `roads`, chains each identity into car
                      segments  = per way along the primary, as today
                      siblings  = every other chain, in the EXISTING schema (osm_ids, tags, geometry)
                                  PLUS additive keys: name, ref, highway, lanes, oneway, length_m,
-                                 junctions [{x, y, with:[names]}] — OSM nodes shared with other chains
+                                 junctions [{node, lon, lat, x, y, s, with:[names]}] — OSM nodes shared
+                                 with other chains; lon/lat is the position, x/y its ENU in the
+                                 frame the file is tagged with (see `place_junctions`)
                      junctions = the primary's own, roads = the identities found, network = true
     site.json        corridor  = the UNION of every chain buffered `half_width_m` (150 m) — the
                                  region is ~12 km across, its bbox is mostly fields nobody drives
@@ -38,7 +40,7 @@ import shapely
 from shapely.geometry import LineString, MultiLineString, Point, Polygon, box as shp_box, mapping
 from shapely.ops import linemerge, unary_union
 
-from . import osm
+from . import BakeFault, osm
 from . import progress
 from .geo import Frame, snap_bbox
 
@@ -233,12 +235,14 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
         c["id"] = f"r{min(w['id'] for w in c['ways'])}"
     # junctions: nodes shared between chains; position from any way's geometry that carries the node
     node_xy: dict[int, tuple[float, float]] = {}
+    node_ll: dict[int, tuple[float, float]] = {}
     for c in chains:
         for wy in c["ways"]:
             for nid, g in zip(wy["nodes"], wy["geometry"]):
                 if nid not in node_xy:
                     x, y = frame.from_wgs(g["lon"], g["lat"])
                     node_xy[nid] = (float(x), float(y))
+                    node_ll[nid] = (float(g["lon"]), float(g["lat"]))
     owners: dict[int, set[str]] = {}
     for c in chains:
         for nid in c["nodes"]:
@@ -250,7 +254,12 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
             others = owners.get(nid, set()) - {c["id"]}
             if others:
                 x, y = node_xy[nid]
-                js.append({"node": nid, "x": round(float(frame.to_enu(x, y)[0]), 1), "y": round(float(frame.to_enu(x, y)[1]), 1), "s": round(float(c["line"].project(Point(x, y))), 1), "with": sorted(by_id[o]["ident"] for o in others)})
+                lon, lat = node_ll[nid]
+                # `lon`/`lat` are the junction's POSITION; `x`/`y` are a convenience in the frame
+                # this file is tagged with (FRAME.md: WGS84 is the authority, ENU is a render
+                # frame). A reader places the junction from lon/lat under whatever frame it
+                # holds — see `place_junctions` for why the ENU pair alone was not enough.
+                js.append({"node": nid, "x": round(float(frame.to_enu(x, y)[0]), 1), "y": round(float(frame.to_enu(x, y)[1]), 1), "lon": round(lon, 7), "lat": round(lat, 7), "s": round(float(c["line"].project(Point(x, y))), 1), "with": sorted(by_id[o]["ident"] for o in others)})
         js.sort(key=lambda j: j["s"])
         c["junctions"] = js
     found = sorted({c["ident"] for c in chains})
@@ -426,6 +435,109 @@ def summary(R: dict) -> str:
 def branch_record(c: dict, prim: dict, bp: dict | None) -> dict:
     """One `branches.json` entry (fetch_site's `branch_rec`, hoisted so a shard can reuse it)."""
     return {"id": c["id"], "ident": c["ident"], "name": c["name"], "ref": c["ref"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"], "length_m": c["length_m"], "s_on_primary": round(float(prim["line"].project(c["line"].interpolate(0.5, normalized=True))), 1), "junctions": c["junctions"], "dead_ends": c.get("dead_ends", []), "profile": {"step_m": bp["step_m"], "s": bp["s"], "road_z": bp["road_z"]} if bp else None, "structures": bp["structures"] if bp else []}
+
+
+# --- where a junction IS ------------------------------------------------------------------------
+#
+# `junctions[].x/y` in spine_utm.json and branches.json are ENU metres about the frame origin the
+# file was written with, and the file used to say only `"frame": "enu"` — which frame, it did not
+# say. That was enough until the origin moved: crofton-triangle's vectors were written on 2026-09-26
+# about sites.json's centre (354269, 4318567) and the world editor's site.json of 2026-10-02 put the
+# origin at (355342, 4318965), 1.14 km away. `export_site` builds its frame from site.json, so a
+# re-export read x/y written about one origin as if they were about the other: every junction
+# 1,082 m from its road, the viewer's junction meet finding nothing (0 met, 604 without a target).
+# The on-read "repair" that was here measured which of two readings — ENU as-is, or UTM-relative
+# converted — lay nearer the road and chose the nearer; with the origin wrong BOTH readings were a
+# kilometre out, and it chose the one 1,068 m off over the one 1,082 m off and said "converted".
+#
+# So no reader takes a frame-relative number on trust any more. A junction's POSITION is the OSM
+# node's lon/lat (`roads` writes it; FRAME.md: WGS84 is the authority), and a file from before that
+# key still carries `s`, the station along the chain's own ABSOLUTE-UTM polyline, which is the same
+# vertex to 5 cm (the rounding of `s`). Either is placed under whatever frame the reader holds, so
+# reading twice is reading once. The tag is kept, with its origin, because it is what a reader that
+# still consumed x/y could check against — and so the next person to open the file can see which
+# ENU it means. Placement is then ASSERTED: a junction belongs to its own road by construction, so
+# one more than JUNCTION_OFF_ROAD_M from its polyline is a wrong input, not a warning.
+
+JUNCTION_OFF_ROAD_M = 1.0
+
+
+class FrameFault(BakeFault):
+    """A junction that could not be placed on its own road — an input in the wrong frame."""
+
+
+def frame_tag(frame: Frame) -> dict:
+    """The `frame` block an intermediate (spine_utm.json, branches.json) is written under."""
+    return {"kind": "enu", "epsg": int(frame.epsg), "origin": [float(frame.origin[0]), float(frame.origin[1])]}
+
+
+def branches_doc(branches: list[dict], frame: Frame | dict | None) -> str:
+    """`branches.json`'s text: the frame tag (from a Frame, or a tag copied from another file) and
+    the records. The one place the file's shape is spelled out."""
+    tag = frame_tag(frame) if isinstance(frame, Frame) else (frame or "enu")
+    return json.dumps({"frame": tag, "branches": branches})
+
+
+def site_frame(site_dir: Path) -> Frame:
+    """The frame a site's intermediates are read under: site.json's, which is what export_site
+    uses; manifest.json's for a site from before site.json carried one."""
+    for name in ("site.json", "manifest.json"):
+        p = site_dir / name
+        if p.exists():
+            fr = (json.loads(p.read_text()).get("frame") or {})
+            if fr.get("origin"):
+                return Frame(int(fr["epsg"]), (float(fr["origin"][0]), float(fr["origin"][1])))
+    raise FrameFault(f"{site_dir.name}: neither site.json nor manifest.json records a frame")
+
+
+def place_junctions(frame: Frame, junctions: list[dict], line_utm, what: str = "a road") -> list[dict]:
+    """
+    Every junction of one road with `x`/`y` in `frame`, placed from what the record MEANS.
+
+    `lon`/`lat` when the record has them (every file written since this function), else the chain's
+    own polyline at station `s` (every file before it — the vertex the node was, to the rounding of
+    `s`), else the stored x/y as a last resort. `line_utm` is the road's absolute-UTM polyline — the
+    sibling's `geometry`, the spine's `coords` — the one thing in these files that never depended on
+    an origin. Then the placement is measured, because a junction that is not on its own road is
+    not a junction: a record further than JUNCTION_OFF_ROAD_M from the polyline raises FrameFault
+    with the numbers, so a re-export of a file in the wrong frame fails here and not in the viewer.
+    """
+    out: list[dict] = []
+    if not junctions:
+        return out
+    ln = line_utm if isinstance(line_utm, LineString) else (LineString(line_utm) if line_utm is not None and len(line_utm) >= 2 else None)
+    pe = pn = None
+    if ln is not None:
+        a = np.asarray(ln.coords, dtype=float)
+        pe, pn = frame.to_enu(a[:, 0], a[:, 1])
+        pe, pn = np.asarray(pe, dtype=float), np.asarray(pn, dtype=float)
+    worst = 0.0
+    for j in junctions:
+        if j.get("lon") is not None and j.get("lat") is not None:
+            ux, uy = frame.from_wgs(float(j["lon"]), float(j["lat"]))
+            how = "lon/lat"
+        elif ln is not None and j.get("s") is not None:
+            p = ln.interpolate(min(max(float(j["s"]), 0.0), ln.length))
+            ux, uy = p.x, p.y
+            how = "s"
+        else:
+            ux = uy = None
+            how = "x/y"
+        if ux is None:
+            e, n = float(j["x"]), float(j["y"])
+        else:
+            ee, nn = frame.to_enu([float(ux)], [float(uy)])  # vectorised, like every caller of to_enu
+            e, n = float(np.asarray(ee).ravel()[0]), float(np.asarray(nn).ravel()[0])
+        if pe is not None:
+            d = float(np.hypot(pe - e, pn - n).min())
+            worst = max(worst, d)
+            if d > JUNCTION_OFF_ROAD_M:
+                raise FrameFault(
+                    f"junction node {j.get('node')} of {what} placed from {how} lands {d:.1f} m from its own road "
+                    f"(limit {JUNCTION_OFF_ROAD_M} m): the record's frame does not match the one being exported under "
+                    f"(origin {frame.origin[0]:.0f}, {frame.origin[1]:.0f}); the vectors need a revector")
+        out.append({**j, "x": round(e, 1), "y": round(n, 1)})
+    return out
 
 
 def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set[str], data: Path, cache: Path) -> None:
@@ -711,7 +823,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
         except Exception as exc:
             # not fatal: a world without trees is worse than a world, but it is still a world
             print(f"  canopy  global CHM unavailable: {exc}", flush=True)
-    (out / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
+    (out / "branches.json").write_text(branches_doc(branches, frame))
     manifest["branches"] = {"count": len(branches), "structures": sum(len(b["structures"]) for b in branches)}
     try:
         from . import preview
@@ -859,7 +971,7 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
         prof = None
         manifest_lidar = {}
 
-    (sdir / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
+    (sdir / "branches.json").write_text(branches_doc(branches, frame))
     manifest = {"slug": slug, "kind": "network", "tiled": True, "shard": index, "world": bool(site.get("world")),
                 "frame": {"epsg": frame.epsg, "origin": frame.origin},
                 "bbox_utm": list(bbox), "lidar": manifest_lidar,
@@ -898,89 +1010,14 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
 
     _bj = json.loads(br_p.read_text())
     _br = _bj["branches"]
-    # `junctions[].x/y` are copied VERBATIM into the manifest below, unlike `coords` which goes
-    # through _enu_cols. A branches.json written before the ENU conversion holds UTM-relative
-    # metres there, and a re-export cannot repair it because the intermediate is what is stale —
-    # only a revector would, and that re-queries Overpass for no reason. So repair it on read.
-    #
-    # Reported by the street-spice lane and confirmed by measuring junction-to-polyline distance
-    # against distance from origin: a pure frame rotation gives 18 mm/m at 1.06 deg, and
-    # crofton-crownsville measured 14.9 mm/m (mean 76 m, max 147 m), arrowhead-farms-network
-    # 17.3 mm/m. It is not cosmetic — scene.ts feeds these to the junction paint-suppression
-    # circles, so lane paint was being cut in empty ground and drawn through real intersections.
-    # DO NOT infer staleness from the marker alone. A branches.json can be correct-but-unmarked —
-    # written by a revector after the ENU commit but before the marker existed — and converting
-    # that a second time rotates it the wrong way, turning a right answer into a doubly-wrong one.
-    # The street-spice lane created exactly that file and caught it before it bit.
-    #
-    # So MEASURE instead. A junction belongs to its own road, so its distance to that road's own
-    # polyline grows linearly with distance from the origin if and only if the frame is rotated.
-    # Fit that slope and compare it with the convergence: the two states are three orders of
-    # magnitude apart (crofton-triangle read 0.02 mm/m once converted, against 18 for a rotation),
-    # so there is no ambiguous middle to get wrong. The marker is then just a fast path.
+    # `junctions[].x/y` go into the manifest beside `coords`, which is converted from the sibling's
+    # absolute-UTM geometry under THIS frame. The junctions are not read from the file's frame at
+    # all — they are placed from the node's lon/lat (or the chain's own polyline at `s`) under the
+    # same frame, and asserted onto the road (`place_junctions`, and the history above it: three
+    # on-read "repairs" preceded this, each measuring the wrong thing). Reading the file twice is
+    # reading it once.
     by_id = {b["id"]: b for b in _br if b.get("id")}
     by_pos = _br  # a branches.json written before chains carried ids: its order is the sibling order
-
-    def _junctions_are_stale() -> bool:
-        """
-        Are `junctions[].x/y` in the OLD frame — UTM-relative metres — rather than ENU?
-
-        THIRD version of this test, and the first two both failed silently on real input:
-
-          1. keyed on the ABSENCE of a "frame": "enu" marker. A correct-but-unmarked file (written
-             by a revector after the ENU commit but before the marker existed) would have been
-             converted twice. street-spice caught it.
-          2. measured the junctions against `b["coords"]`. branches.json has NO `coords` — the
-             geometry lives on the SIBLING in spine_utm.json — so it sampled nothing, returned
-             False, and skipped the repair on genuinely stale input. `corridor.verify` caught it on
-             crofton-crownsville at 14.9 mm/m, which is the only reason I know.
-
-        So this one pairs exactly as the emission loop below does: the branch record supplies the
-        junctions, the sibling supplies the polyline. Then it tries BOTH readings and lets the data
-        choose, with no threshold and no marker to trust:
-
-            A  the junctions are already ENU     use them as they are
-            B  the junctions are UTM-relative    to_enu(j + origin)
-
-        Whichever lands nearer the converted polyline is the truth, and the two are orders of
-        magnitude apart rather than marginal.
-        """
-        ox_, oy_ = frame.origin
-        sa = sb = 0.0
-        n = 0
-        for si, sib in enumerate(spine.get("siblings", [])):
-            b = by_id.get(sib.get("id")) or (by_pos[si] if not by_id and si < len(by_pos) else None) or {}
-            js = b.get("junctions") or []
-            g = sib.get("geometry")
-            if not js or not g:
-                continue
-            gc = g.get("coordinates") if isinstance(g, dict) else g
-            if not gc or len(gc) < 2:
-                continue
-            pts = np.asarray([[c[0], c[1]] for c in gc], dtype=float)
-            ce, cn = frame.to_enu(pts[:, 0], pts[:, 1])  # sibling geometry is ABSOLUTE utm
-            ce, cn = np.asarray(ce), np.asarray(cn)
-            for j in js:
-                jx, jy = j.get("x"), j.get("y")
-                if jx is None or jy is None:
-                    continue
-                sa += float(np.hypot(ce - jx, cn - jy).min())
-                be, bn = frame.to_enu(jx + ox_, jy + oy_)
-                sb += float(np.hypot(ce - float(be), cn - float(bn)).min())
-                n += 1
-            if n >= 200:
-                break
-        if n < 8:
-            return False  # too little to judge; leave it alone rather than guess
-        return sb < sa
-
-    if _junctions_are_stale():
-        ox_, oy_ = frame.origin
-        for _b in _br:
-            for _j in _b.get("junctions", []) or []:
-                _e, _n = frame.to_enu(_j["x"] + ox_, _j["y"] + oy_)
-                _j["x"], _j["y"] = round(float(_e), 1), round(float(_n), 1)
-        print(f"  note    branches.json junctions measured as still in the old frame; {sum(len(b.get('junctions') or []) for b in _br)} converted on read", flush=True)
 
     out = []
     for si, sib in enumerate(spine.get("siblings", [])):
@@ -993,6 +1030,7 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
         if len(coords) < 2:
             continue
         ln = LineString(coords)
+        placed = place_junctions(frame, b.get("junctions") or [], ln, what=f"{sib.get('ident')} ({sib.get('id')})")
         fine = np.arange(0.0, ln.length, 2.0).tolist() + [ln.length]
         raw = np.array([ln.interpolate(v).coords[0] for v in fine])
         from .export import _smooth_on_line
@@ -1033,7 +1071,7 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
             return out
 
         js = []
-        for j in b.get("junctions", []):
+        for j in placed:
             z = None
             if prof and prof.get("s"):
                 z = float(np.interp(j["s"], s_d_a, spine_zb))
@@ -1070,7 +1108,12 @@ def revector(site: dict, data: Path, cache: Path) -> dict:
     """
     slug = site["slug"]
     out = data / "sites" / slug
-    frame = Frame.at(site["lon"], site["lat"])
+    # the site's STORED frame, the one export_site reads under — not one re-derived from the
+    # sites.json centre, which is where crofton-triangle's two origins came from (place_junctions)
+    try:
+        frame = site_frame(out)
+    except FrameFault:
+        frame = Frame.at(site["lon"], site["lat"])
     old_spine = json.loads((out / "spine_utm.json").read_text()) if (out / "spine_utm.json").exists() else {}
     R = roads(site, frame, cache / "overpass")
     print(f"  roads   {summary(R)}", flush=True)
@@ -1104,7 +1147,7 @@ def revector(site: dict, data: Path, cache: Path) -> dict:
             if c:
                 b["junctions"] = c["junctions"]
                 b["dead_ends"] = c.get("dead_ends", [])
-        br_p.write_text(json.dumps({"frame": "enu", "branches": branches}))
+        br_p.write_text(branches_doc(branches, frame))
     m_p = out / "manifest.json"
     if m_p.exists():
         m = json.loads(m_p.read_text())

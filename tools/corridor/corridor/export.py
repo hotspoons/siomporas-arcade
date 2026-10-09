@@ -31,6 +31,7 @@ from rasterio.enums import Resampling
 from shapely.geometry import LineString
 
 from . import progress
+from . import BakeFault
 from .geo import Frame
 
 
@@ -1927,8 +1928,12 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         if br is not None:
             out["network"] = True
             out["roads"] = spine.get("roads", [])
-            out["junctions"] = (spine.get("primary") or {}).get("junctions", [])
+            # the primary's junctions, placed under THIS frame like every branch's — they were
+            # copied verbatim, in whatever frame spine_utm.json was written with
+            out["junctions"] = network.place_junctions(frame, (spine.get("primary") or {}).get("junctions", []), spine.get("coords"), what="the primary")
             out["branches"] = br
+    except BakeFault:
+        raise  # a junction off its road is a wrong world, not a missing layer
     except Exception as exc:
         print(f"  branches failed: {exc}")
     # The LOD pyramid, beside the flat tiles rather than instead of them: a viewer that does not
@@ -1952,6 +1957,8 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
                 n = len(pl["list"])
                 empt = sum(1 for e in pl["list"] if e.get("empty"))
                 print(f"  pyramid z{pl['zmin']}..z{pl['zmax']}, {n} tiles ({empt} empty){', graded ' + str(pl.get('graded_levels')) if pl.get('graded') else ''} -> web/pyr", flush=True)
+        except BakeFault:
+            raise  # the grades are off the earth: not a pyramid to skip, a bake to stop
         except Exception as exc:
             print(f"  pyramid SKIPPED: {exc.__class__.__name__}: {exc}", flush=True)
     # --- vector tiling --------------------------------------------------------------------------

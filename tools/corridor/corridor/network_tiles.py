@@ -38,6 +38,8 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from rasterio.features import rasterize
+
+from . import network
 from rasterio.transform import from_origin
 from scipy import ndimage
 from shapely.geometry import LineString, box
@@ -1125,7 +1127,7 @@ def reprofile(site_dir: Path) -> dict:
             "profile": {"step_m": prof["step_m"], "s": prof["s"], "road_z": prof["road_z"]},
             "structures": prof["structures"],
         })
-    (site_dir / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
+    (site_dir / "branches.json").write_text(network.branches_doc(branches, network.site_frame(site_dir)))
     print(f"  reprofile {len(branches)} branches, {sum(len(b['structures']) for b in branches)} structures", flush=True)
     return {"chains": len(chains), "branches": len(branches)}
 
@@ -1196,7 +1198,7 @@ def reprofile_from_dtm(site_dir: Path, step_m: float = 2.0) -> dict:
     dtm.close()
     if dem is not None:
         dem.close()
-    (site_dir / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
+    (site_dir / "branches.json").write_text(network.branches_doc(branches, network.site_frame(site_dir)))
     print(f"  reprofile(dtm) {len(branches)} branches from the DTM, {filled} samples filled from the DEM", flush=True)
     return {"branches": len(branches), "filled": filled}
 

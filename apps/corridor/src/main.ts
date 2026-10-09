@@ -1885,7 +1885,7 @@ function fireGun(dt: number): void {
   }
   const muzzles = muzzlesNow()
   const from = muzzles.length ? muzzles : [drive.car.pos.clone().add(drive.car.forward.clone().multiplyScalar(2.2)).add(new THREE.Vector3(0, 0.6, 0))]
-  gun.fire(from, drive.car.forward, dt)
+  gun.fire(from, playerAim(drive.car), dt)
 }
 let offPlayerImpact: (() => void) | null = null
 
@@ -1957,6 +1957,27 @@ function ensureMissiles(): MissileLayer | null {
 }
 
 /**
+ * WHERE THE PLAYER IS LOOKING IS WHERE THE PLAYER SHOOTS. The gun and the missiles fired along the
+ * nose; the right stick (or a drag) turned the chase camera round the car and the rounds still
+ * went straight on. Rich, 2026-10-09: "make it so the direction that missiles and guns go is in
+ * relation to the camera's orientation, with neutral/default being the current default direction
+ * of gun travel" — the turret the ghost car has. So the aim is the nose turned by the camera's
+ * look-around yaw, pitched by its look-around pitch (positive is down, as the camera reads it); at
+ * neutral it is exactly the nose.
+ */
+function playerAim(car: DrivableCar): THREE.Vector3 {
+  const lookYaw = drive.yaw + drive.stickYaw
+  const lookPitch = Math.max(-0.8, Math.min(0.8, drive.pitch + drive.stickPitch))
+  const carUp = car.right.clone().cross(car.forward).normalize()
+  const dir = car.forward.clone().applyAxisAngle(carUp, lookYaw)
+  if (Math.abs(lookPitch) > 1e-4) {
+    const right = dir.clone().cross(carUp).normalize()
+    dir.applyAxisAngle(right, lookPitch) // positive pitch looks down; +pitch about the right axis takes the nose down
+  }
+  return dir.normalize()
+}
+
+/**
  * Fire a missile from the player's bonnet, along the nose (or along `aim`, the test rig's shot at
  * the car ahead), at the missile speed plus the car's.
  */
@@ -1968,7 +1989,7 @@ function fireMissile(aim?: THREE.Vector3): boolean {
   // from the bonnet, not the roof: the body origin is already a metre up, and a traffic car's box
   // tops out at a metre and a half — a missile launched from two metres sailed over every one
   const from = car.pos.clone().add(car.forward.clone().multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.15, 0))
-  const dir = aim ? aim.clone().normalize() : car.forward.clone()
+  const dir = aim ? aim.clone().normalize() : playerAim(car)
   layer.fire(from, dir, Math.max(0, car.speed))
   return true
 }

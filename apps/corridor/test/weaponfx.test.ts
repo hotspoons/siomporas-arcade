@@ -39,21 +39,38 @@ describe('GunLayer', () => {
 })
 
 describe('the hardware', () => {
+  /** a muzzle's point in the car's frame: through its pivot, so a turned gun fires where it points */
+  const muzzleAt = (m: ReturnType<typeof mountWeapons>, i: number) => { m.root.updateMatrixWorld(true); return m.muzzles[i].pivot.localToWorld(m.muzzles[i].offset.clone()) }
+
   it('mounts a launcher on the roof and a gun on each bonnet corner, muzzles ahead of the guns', () => {
     const m = mountWeapons({ length: 5, width: 2, height: 1.85 }, { launcher: null, gun: null })
-    expect(m.root.children.length).toBe(3)
+    expect(m.root.children.length).toBe(3) // three pivots: the launcher's and two guns'
+    expect(m.turrets.map((t) => t.kind).sort()).toEqual(['gun', 'gun', 'missile'])
     expect(m.muzzles.length).toBe(2)
-    for (const mz of m.muzzles) { expect(mz.x).toBeGreaterThan(1.5); expect(mz.y).toBeGreaterThan(1) }
-    expect(Math.sign(m.muzzles[0].z)).toBe(-Math.sign(m.muzzles[1].z))
-    expect(m.root.children[0].position.y).toBeGreaterThan(1.7)
+    const mz = [muzzleAt(m, 0), muzzleAt(m, 1)]
+    for (const p of mz) { expect(p.x).toBeGreaterThan(1.5); expect(p.y).toBeGreaterThan(1) }
+    expect(Math.sign(mz[0].z)).toBe(-Math.sign(mz[1].z))
+    expect(m.turrets.find((t) => t.kind === 'missile')!.pivot.position.y).toBeGreaterThan(1.7)
+  })
+
+  it('turns a gun on its pivot and the muzzle goes with it', () => {
+    const m = mountWeapons({ length: 5, width: 2, height: 1.85 }, { launcher: null, gun: null })
+    const before = muzzleAt(m, 0)
+    // yaw the gun 90° to the right (a negative three rotation about +Y turns +X toward +Z)
+    m.muzzles[0].pivot.rotation.set(0, -Math.PI / 2, 0, 'YZX')
+    const after = muzzleAt(m, 0)
+    expect(after.z - m.muzzles[0].pivot.position.z).toBeCloseTo(0.85, 2) // the barrel now points +Z
+    expect(after.x).toBeLessThan(before.x) // and no longer reaches ahead
   })
 
   it('uses an override model in place of a built-in when one is chosen', () => {
     const custom = new THREE.Group()
     custom.name = 'my-launcher'
     const m = mountWeapons({ length: 4.4, width: 1.9, height: 1.35 }, { launcher: custom, gun: null })
-    expect(m.root.children[0].name).toBe('my-launcher')
-    expect(m.root.children[1].name).toBe('gun')
+    // the model hangs under its pivot
+    expect(m.root.children[0].name).toBe('turret:missile')
+    expect(m.root.children[0].children[0].name).toBe('my-launcher')
+    expect(m.root.children[1].children[0].name).toBe('gun')
   })
 
   it('has built-ins that point +X and are sized in metres', () => {

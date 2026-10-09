@@ -16,7 +16,8 @@ import { assetsvc } from '../../assets/assetsvc'
 import { Sfx } from '../../game/audio/sfx'
 import { SLOT_HELP, SOUND_SLOTS, type SoundOverrides, type SoundSlot } from '../../game/audio/soundbank'
 import { bodyOf, group, readout, select, textField } from '../../ui/controls'
-import { button, el, toast } from '../../ui/shell'
+import { button, Dialog, el, toast } from '../../ui/shell'
+import { soundBoard } from './soundboard'
 
 /** the preview player: one for the whole editor, made on the first Listen */
 let preview: Sfx | null = null
@@ -114,6 +115,7 @@ function slotEditor(slot: SoundSlot, o: SoundsGroupOpts, over: SoundOverrides, b
       const line = el('div', 'panel-actions snd-entry')
       line.append(el('code', 'snd-entry-name', describeEntry(e)))
       line.append(button({ label: '', icon: 'play', variant: 'ghost', title: 'listen to this one', onClick: () => listen(slot, [], e) }))
+      line.append(button({ label: 'Board', variant: 'ghost', title: 'open this clip on the sound board: trim it, shape it, save it as a clip of this slot’s own', onClick: () => openBoard(slot, e, o.assetId, add) }))
       line.append(button({ label: '', icon: 'x-mark', variant: 'ghost', title: 'remove', onClick: () => write(mine.filter((_, k) => k !== i)) }))
       box.append(line)
     }
@@ -166,10 +168,25 @@ function slotEditor(slot: SoundSlot, o: SoundsGroupOpts, over: SoundOverrides, b
   box.append(up)
 
   const foot = el('div', 'panel-actions')
+  foot.append(button({ label: 'Sound board', icon: 'play', variant: 'ghost', title: 'open a bank clip or a file on the board and save what you make as a clip of this slot', onClick: () => openBoard(slot, bankClips(slot)[0], o.assetId, add) }))
   if (mine === undefined || mine.length) foot.append(button({ label: 'Make it silent', variant: 'ghost', onClick: () => write([]) }))
   if (mine !== undefined) foot.append(button({ label: 'Back to the bank', variant: 'ghost', onClick: () => write(undefined) }))
   box.append(foot)
   return box
+}
+
+/**
+ * The sound board in a dialog, over a slot: opens with `entry` (or empty), and what gets saved
+ * is added to the slot through `add`. Needs a model on the build to save to; without one the
+ * board still plays and downloads, and the save row says why.
+ */
+function openBoard(slot: SoundSlot, entry: string | undefined, assetId: string | null, add: (e: string) => void): void {
+  const d = new Dialog({ title: `Sound board — ${slot}`, size: 'lg', icon: 'play' })
+  const host = el('div', 'sndb-dialog')
+  d.body.append(host)
+  soundBoard(host, { entry, assetId, onSaved: (e) => { add(e); d.close() } })
+  d.footer(button({ label: 'Close', variant: 'ghost', onClick: () => d.close() }))
+  d.open()
 }
 
 /** an entry, as a person reads it */

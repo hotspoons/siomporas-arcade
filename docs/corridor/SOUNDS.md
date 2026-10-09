@@ -15,8 +15,8 @@ vehicle, actor, etc. and feature it in the code editor."*
 `apps/corridor/public/sounds/` — `bank.json` and a folder per slot, written by
 `tools/sounds/build.py` from the CC0 sources listed in `tools/sounds/sources.json` (Kenney's
 Impact and Sci-fi packs, BigSoundBank's per-file CC0 recordings, two OpenGameArt CC0 packs).
-`CREDITS.md` beside it is generated from the same list. Nothing in it needs attribution; it is
-given anyway. The cuts are mono 44.1 kHz, trimmed to their onset, peak-normalised, as `.ogg`
+`CREDITS.md` beside it is generated from the same list. Nothing in the CC0 part needs attribution;
+it is given anyway. The tyres are Rich's own recordings and are not free (below). The cuts are mono 44.1 kHz, trimmed to their onset, peak-normalised, as `.ogg`
 with an `.mp3` twin for browsers that cannot decode Vorbis (Safari); the game picks by
 `canPlayType`. 150 clips, 2.9 MB for both formats.
 
@@ -51,6 +51,35 @@ The traffic's own crashes are placed where they happen, in the car's own voice, 
 `SFX_TRAFFIC_CRASH_PER_S` — a pile-up is one roar, not sixty taps. The player's contacts are
 played by `watchPlayerImpacts`, at most one tap a sixth of a second (a scrape along a wall reports
 a contact every step), a wreck always.
+
+### Rich's own tyres
+
+The BigSoundBank squeal was, in Rich's words, a mouse. The tyre slots are now cut from his own
+recordings — the Lotus pirouette at an autocross, the Subaru scrubbing and squealing — kept in
+`tools/sounds/own/` (his rights, with permission, **not CC0**; README.md there has the videos and
+timestamps, and how to re-cut with yt-dlp + the venv's ffmpeg). `isolate_squeal` in build.py
+takes the engine out: a 650 Hz–9 kHz band-pass under the boxer, then a spectral gate learned from
+each clip's own run-in. `build.py --spectrograms` writes a PNG per slot into `.cache/` so the cuts
+can be checked by eye; the Lotus lines sit clean at 1–2 kHz.
+
+### Levels
+
+Clips are set by loudness, not peak: `LEVELS` in build.py is an RMS target per slot (a wreck −12
+dBFS, a tap −20, the squeal loops −22) with the peak held under −1 dBFS. `SFX_MASTER` defaults to
+0.6 and the gun's report to 0.35 after the first listen was "way too loud".
+
+## The sound board — `src/editor/library/soundboard.ts`
+
+Because the cuts are made by spectrogram on this side and by ear on Rich's. Any clip — a bank
+clip, an `asset:` entry, a URL, a file from the machine — on a waveform: drag a selection (or the
+Start/End sliders), gain, pitch, fades, a high-pass and a low-pass (600–800 Hz takes a boxer out
+from under a tyre), normalise, and a loop-close crossfade that folds the tail over the head so a
+squeal can run. **Play** / **Loop** render the shape through an `OfflineAudioContext` from the
+untouched decoded buffer; nothing is destructive. **Trim to selection** makes the selection the
+new source so the handles have room again. **Save** writes a 16-bit wav to a catalog asset
+(`asset:<id>/<name>`) that any slot can then name; **Download .wav** keeps it. It sits at the top
+of the library's Sounds tab, and every slot's Edit box has a **Board** button that opens it in a
+dialog with that clip and adds what is saved to the slot.
 
 ## Playing it — `src/game/audio/sfx.ts`
 

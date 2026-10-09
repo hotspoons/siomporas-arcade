@@ -5,6 +5,8 @@
 import { SLOT_HELP, SOUND_SLOTS, type SoundSlot } from '../../game/audio/soundbank'
 import { button, el, type Tab } from '../../ui/shell'
 import { listen, previewSfx } from './soundpicker'
+import { soundBoard } from './soundboard'
+import { bodyOf, group } from '../../ui/controls'
 
 export function soundsExtension(): { tabs: Tab[] } {
   return { tabs: [{ id: 'sounds', label: 'Sounds', icon: 'speaker-wave', build: buildSoundsTab }] }
@@ -18,13 +20,17 @@ function buildSoundsTab(host: HTMLElement): void {
     const head = el('div', 'panel-note')
     head.append(el('div', '', 'The sound bank: what the game plays for each thing it says. A vehicle, an actor or a weapon may give any slot clips of its own on its Sounds tab; a program reaches the same slots as api.audio.'))
     const credit = el('div', 'field-note')
-    credit.append('Every clip is cut from a CC0 recording — Kenney, BigSoundBank, OpenGameArt — by tools/sounds/build.py; the provenance is ')
+    credit.append('Cut by tools/sounds/build.py from CC0 recordings — Kenney, BigSoundBank, OpenGameArt, the Internet Archive — except the tyres, which are Rich’s own and not free; the provenance is ')
     const a = el('a', '', 'public/sounds/CREDITS.md')
     a.href = '/sounds/CREDITS.md'
     a.target = '_blank'
     credit.append(a, '.')
     head.append(credit)
     host.append(head)
+    // THE BOARD FIRST: listen to anything, trim it, shape it, save it as a clip of your own
+    const board = group('Sound board', { collapsed: false, note: 'any clip on a waveform — drag a selection, shape it, Play / Loop, Save to an asset as a new clip, or download it' })
+    soundBoard(bodyOf(board))
+    host.append(board)
     const bank = p.bank
     if (!bank) {
       host.append(el('div', 'field-note', 'loading the bank…'))

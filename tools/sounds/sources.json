@@ -1,5 +1,5 @@
 {
-  "_": "Every source the corridor sound bank is cut from. All CC0 — verified on each page on 2026-10-09 (BigSoundBank states the licence per file; Kenney and the two OpenGameArt packs per pack). Keep this list honest: build.py writes apps/corridor/public/sounds/CREDITS.md from it.",
+  "_": "Every source the corridor sound bank is cut from. All CC0 \u2014 verified on each page on 2026-10-09 (BigSoundBank states the licence per file; Kenney and the two OpenGameArt packs per pack). Keep this list honest: build.py writes apps/corridor/public/sounds/CREDITS.md from it.",
   "sources": {
     "kenney-impact": {
       "title": "Impact Sounds",
@@ -44,21 +44,84 @@
       "licence": "CC0 1.0",
       "kind": "files",
       "files": {
-        "0500": { "name": "Tire squeal", "url": "https://bigsoundbank.com/tire-squeal-s0500.html" },
-        "2368": { "name": "Screeching Tires #1", "url": "https://bigsoundbank.com/screeching-tires-1-s2368.html" },
-        "2369": { "name": "Screeching Tires #2", "url": "https://bigsoundbank.com/screeching-tires-2-s2369.html" },
-        "2370": { "name": "Screeching Tires #3", "url": "https://bigsoundbank.com/screeching-tires-3-s2370.html" },
-        "2371": { "name": "Screeching Tires #4", "url": "https://bigsoundbank.com/screeching-tires-4-s2371.html" },
-        "1807": { "name": "Explosion #1", "url": "https://bigsoundbank.com/explosion-1-s1807.html" },
-        "1808": { "name": "Explosion #2", "url": "https://bigsoundbank.com/explosion-2-s1808.html" },
-        "1806": { "name": "Explosion far away #2", "url": "https://bigsoundbank.com/explosion-far-away-2-s1806.html" },
-        "1023": { "name": "Explosion far away #1", "url": "https://bigsoundbank.com/explosion-far-away-s1023.html" },
-        "0437": { "name": "Shot Beretta M12 9mm", "url": "https://bigsoundbank.com/shot-beretta-m12-9-mm-s0437.html" },
-        "0438": { "name": "Shot in .357 Magnum", "url": "https://bigsoundbank.com/shot-in-357-magnum-9-mm-s0438.html" },
-        "0397": { "name": "Shot of Winchester Magnum XTR", "url": "https://bigsoundbank.com/shot-of-winchester-magnum-xtr-s0397.html" },
-        "0532": { "name": "Shotgun: Shots", "url": "https://bigsoundbank.com/shotgun-shots-s0532.html" }
+        "0500": {
+          "name": "Tire squeal",
+          "url": "https://bigsoundbank.com/tire-squeal-s0500.html"
+        },
+        "2368": {
+          "name": "Screeching Tires #1",
+          "url": "https://bigsoundbank.com/screeching-tires-1-s2368.html"
+        },
+        "2369": {
+          "name": "Screeching Tires #2",
+          "url": "https://bigsoundbank.com/screeching-tires-2-s2369.html"
+        },
+        "2370": {
+          "name": "Screeching Tires #3",
+          "url": "https://bigsoundbank.com/screeching-tires-3-s2370.html"
+        },
+        "2371": {
+          "name": "Screeching Tires #4",
+          "url": "https://bigsoundbank.com/screeching-tires-4-s2371.html"
+        },
+        "1807": {
+          "name": "Explosion #1",
+          "url": "https://bigsoundbank.com/explosion-1-s1807.html"
+        },
+        "1808": {
+          "name": "Explosion #2",
+          "url": "https://bigsoundbank.com/explosion-2-s1808.html"
+        },
+        "1806": {
+          "name": "Explosion far away #2",
+          "url": "https://bigsoundbank.com/explosion-far-away-2-s1806.html"
+        },
+        "1023": {
+          "name": "Explosion far away #1",
+          "url": "https://bigsoundbank.com/explosion-far-away-s1023.html"
+        },
+        "0437": {
+          "name": "Shot Beretta M12 9mm",
+          "url": "https://bigsoundbank.com/shot-beretta-m12-9-mm-s0437.html"
+        },
+        "0438": {
+          "name": "Shot in .357 Magnum",
+          "url": "https://bigsoundbank.com/shot-in-357-magnum-9-mm-s0438.html"
+        },
+        "0397": {
+          "name": "Shot of Winchester Magnum XTR",
+          "url": "https://bigsoundbank.com/shot-of-winchester-magnum-xtr-s0397.html"
+        },
+        "0532": {
+          "name": "Shotgun: Shots",
+          "url": "https://bigsoundbank.com/shotgun-shots-s0532.html"
+        }
       },
       "download": "https://bigsoundbank.com/UPLOAD/mp3/{id}.mp3"
+    },
+    "oga-launch": {
+      "title": "Rocket launch (made in Audacity from noise \u2014 the only CC0 launch that sounds like one)",
+      "author": "qubodup",
+      "url": "https://opengameart.org/content/rocket-launch",
+      "download": "https://opengameart.org/sites/default/files/launch.7z",
+      "licence": "CC0 1.0",
+      "kind": "7z",
+      "root": "launch"
+    },
+    "ia-sse-swooshes": {
+      "title": "SSE Library: SWOOSHES (archive.org item SSE_Library_SWOOSHES)",
+      "author": "Sound Studio Effects / USC Optical Sound Effects Library, uploaded to the Internet Archive",
+      "url": "https://archive.org/details/SSE_Library_SWOOSHES",
+      "licence": "CC0 1.0 (the item's licenseurl)",
+      "kind": "files",
+      "files": {
+        "fireworks-launch": {
+          "name": "WHSH-FIREWORKS Fireworks launching swooshes",
+          "url": "https://archive.org/download/SSE_Library_SWOOSHES/WHOOSH/WHSH-FIREWORKS_Fireworks%20launching%20swooshes_CS_USC.wav"
+        }
+      },
+      "download": "https://archive.org/download/SSE_Library_SWOOSHES/WHOOSH/WHSH-FIREWORKS_Fireworks%20launching%20swooshes_CS_USC.wav",
+      "mirror": "https://ia801602.us.archive.org/25/items/SSE_Library_SWOOSHES/WHOOSH/WHSH-FIREWORKS_Fireworks%20launching%20swooshes_CS_USC.wav"
     }
   }
 }

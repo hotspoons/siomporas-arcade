@@ -756,28 +756,18 @@
    "clips": [
     {
      "file": "missile-launch/launch-0.ogg",
-     "s": 1.2,
-     "rms": 0.1387
+     "s": 1.6,
+     "rms": 0.1036
     },
     {
      "file": "missile-launch/launch-1.ogg",
-     "s": 1.2,
-     "rms": 0.1599
+     "s": 1.6,
+     "rms": 0.1504
     },
     {
-     "file": "missile-launch/launch-2.ogg",
-     "s": 1.2,
-     "rms": 0.1318
-    },
-    {
-     "file": "missile-launch/launch-3.ogg",
-     "s": 1.2,
-     "rms": 0.179
-    },
-    {
-     "file": "missile-launch/launch-4.ogg",
-     "s": 1.2,
-     "rms": 0.1343
+     "file": "missile-launch/launch-thruster.ogg",
+     "s": 1.6,
+     "rms": 0.1331
     }
    ]
   },

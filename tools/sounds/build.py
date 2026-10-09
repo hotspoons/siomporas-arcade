@@ -24,8 +24,8 @@ they are split on onsets (energy envelope jumping 8× over the preceding 200 ms,
 each shot is cut to 450 ms with an exponential tail so a 10 Hz machine gun does not pile up tails.
 The squeal loops are windows of the 30 s BigSoundBank squeal chosen by level (RMS quantile) and
 steadiness (lowest envelope variance), closed with a 150 ms equal-power crossfade. The missile
-launch is Kenney's thruster cut to 1.2 s under a low-frequency thump — there is no CC0 missile
-launch recording worth the name; replace it the day one turns up.
+launch is qubodup's CC0 rocket launch (OpenGameArt) under the SSE library's launching swooshes
+(archive.org, CC0), one swoosh per variant, with Kenney's thruster as a sixth voice.
 """
 from __future__ import annotations
 
@@ -52,14 +52,22 @@ SOURCES = json.loads((HERE / 'sources.json').read_text())['sources']
 
 # ---------------------------------------------------------------- fetching
 
-def fetch(url: str, dest: Path) -> Path:
+def fetch(url: str, dest: Path, mirror: str | None = None) -> Path:
     if dest.exists() and dest.stat().st_size > 2000:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    print(f'  fetch {url}')
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=120) as r:
-        data = r.read()
-    if len(data) < 2000 or data[:15].lower().startswith(b'<!doctype html'):
+    data = b''
+    for u in [url] + ([mirror] if mirror else []):
+        print(f'  fetch {u}')
+        try:
+            with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=120) as r:
+                data = r.read()
+        except Exception as e:  # archive.org's canonical /download/ URL 500s now and then; the item's own server answers
+            print(f'  {u}: {e}')
+            continue
+        if len(data) >= 2000 and not data[:15].lower().startswith((b'<!doctype html', b'<html')):
+            break
+    if len(data) < 2000 or data[:15].lower().startswith((b'<!doctype html', b'<html')):
         raise SystemExit(f'{url}: got {len(data)} bytes of not-audio; the source moved?')
     dest.write_bytes(data)
     return dest
@@ -69,12 +77,17 @@ def source_file(src: str, name: str) -> Path:
     """A file out of a source: a member of its zip, or one of its listed files."""
     s = SOURCES[src]
     d = CACHE / src
-    if s['kind'] == 'zip':
+    if s['kind'] in ('zip', '7z'):
         marker = d / '.unpacked'
         if not marker.exists():
-            z = fetch(s['download'], CACHE / f'{src}.zip')
-            with zipfile.ZipFile(z) as zf:
-                zf.extractall(d)
+            z = fetch(s['download'], CACHE / f'{src}.{s["kind"]}')
+            if s['kind'] == 'zip':
+                with zipfile.ZipFile(z) as zf:
+                    zf.extractall(d)
+            else:
+                import py7zr  # pip install py7zr — only the one OpenGameArt launch needs it
+                with py7zr.SevenZipFile(z) as zf:
+                    zf.extractall(d)
             marker.write_text('')
         hits = list(d.rglob(name))
         if not hits:
@@ -83,8 +96,8 @@ def source_file(src: str, name: str) -> Path:
     if s['kind'] == 'files':
         if name not in s['files']:
             raise SystemExit(f'{src}: {name} is not in sources.json')
-        url = s['download'].format(id=name)
-        return fetch(url, d / Path(url).name)
+        url = s['files'][name].get('download') or s['download'].format(id=name)
+        return fetch(url, d / (name + Path(url.split('?')[0]).suffix), s.get('mirror'))
     raise SystemExit(f'{src}: kind {s["kind"]}')
 
 
@@ -273,11 +286,20 @@ def slot_explosion_far():
 
 
 def slot_missile_launch():
+    """qubodup's rocket launch (the ignition and the first second and a half of roar) under the
+    launching swooshes from the SSE library split one by one, so each variant has its own
+    whoosh over the same motor; a low thump under all of it."""
     lows = [trim_start(load(p)) for _, p in kenney('kenney-scifi', 'lowFrequency_explosion', 2)]
+    motor = cut(trim_start(load(source_file('oga-launch', 'launch.wav'))), 1.6, 0.7)
+    swooshes = split_shots(load(source_file('ia-sse-swooshes', 'fireworks-launch')), 1.2, 0.4)
+    if not swooshes:
+        raise SystemExit('missile.launch: no swooshes found in the SSE fireworks file')
     clips = []
-    for i, (name, p) in enumerate(kenney('kenney-scifi', 'thrusterFire')):
-        thr = cut(trim_start(load(p)), 1.2, 0.6)
-        clips.append((f'launch-{i}', mix((thr, 1.0), (cut(lows[i % 2], 0.5, 0.3), 0.45))))
+    for i, sw in enumerate(swooshes[:5]):
+        clips.append((f'launch-{i}', mix((sw, 0.9), (motor, 0.8), (cut(lows[i % 2], 0.5, 0.3), 0.4))))
+    # and the thruster version, so the rail has a sci-fi voice to pick too
+    thr = cut(trim_start(load(source_file('kenney-scifi', 'thrusterFire_000.ogg'))), 1.2, 0.6)
+    clips.append(('launch-thruster', mix((thr, 1.0), (motor, 0.5), (cut(lows[0], 0.5, 0.3), 0.45))))
     return clips, {}
 
 

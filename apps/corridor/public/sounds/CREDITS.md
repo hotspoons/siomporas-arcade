@@ -20,5 +20,8 @@ Every clip under this directory is cut from a CC0 (public domain) recording by `
   - #0438 Shot in .357 Magnum <https://bigsoundbank.com/shot-in-357-magnum-9-mm-s0438.html>
   - #0397 Shot of Winchester Magnum XTR <https://bigsoundbank.com/shot-of-winchester-magnum-xtr-s0397.html>
   - #0532 Shotgun: Shots <https://bigsoundbank.com/shotgun-shots-s0532.html>
+- **Rocket launch (made in Audacity from noise — the only CC0 launch that sounds like one)** — qubodup, CC0 1.0. <https://opengameart.org/content/rocket-launch>
+- **SSE Library: SWOOSHES (archive.org item SSE_Library_SWOOSHES)** — Sound Studio Effects / USC Optical Sound Effects Library, uploaded to the Internet Archive, CC0 1.0 (the item's licenseurl). <https://archive.org/details/SSE_Library_SWOOSHES>
+  - #fireworks-launch WHSH-FIREWORKS Fireworks launching swooshes <https://archive.org/download/SSE_Library_SWOOSHES/WHOOSH/WHSH-FIREWORKS_Fireworks%20launching%20swooshes_CS_USC.wav>
 
 The slot each clip serves is in `bank.json`; a world, vehicle or actor may replace any slot with its own clips (see docs/corridor/SOUNDS.md).

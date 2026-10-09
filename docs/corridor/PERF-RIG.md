@@ -181,7 +181,8 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
   spikes, a quarter of the GPU memory.
 - **Grass eligibility per cell** (road distance, canopy, slope, shelf, zone): the generator asks
   the same five questions of the same ground every time a tile is planted. A per-tile bitmask from
-  the bake leaves only the per-blade jitter at run time.
+  the bake leaves only the per-blade jitter at run time. Measured 2026-10-10 and NOT built — the
+  questions are a quarter of a 2.5 ms generator; below.
 - **Tree records per 1 km cell** so a replant is a cell swap, not a walk over every record.
   Done 2026-10-10, viewer-side (below): the bake never held tree records, the viewer grows them
   from the canopy raster, so the cell is the planter's.
@@ -322,3 +323,21 @@ kilometre of woods (10–33k records in a block sweep after a jump); what remain
 replant is the leavers' drops from the collision grid (`grid`: 7 ms for 19k leavers, one tree at
 a time) and the impostor reseat — the first row of "what is left". The probe's negative
 (`--prove`, `TREE_REPLANT_M` at a billion metres) must fail its own checks; it does.
+
+### Measured, not built: the grass eligibility mask (2026-10-10)
+
+The third item was measured before it was baked, and the number says to leave it. The generator
+now counts what its per-cell questions cost (`grass.perf.questionsMs`, `cellsAsked`,
+`cellsRejected`, against `genTotalMs`, since boot), and the same rig run reads them: at 78 m/s on
+crofton-triangle, 40 s, the questions — the road field, the canopy, the three ground reads for
+the slope, the bare earth for the shelf — are **25 % of the generator**: 13.0 µs a cell on the
+graded scratch bake (1,722 ms of 6,808), 14.7 µs on the served one (1,450 of 5,833), with 69–75 %
+of the cells asked rejected. The generator itself is ~2.5 ms of a frame (`genMs` p50 2.4–2.8) and
+is governed, so a mask that answered every rejected cell for free would hand back ~0.5–0.6 ms a
+frame — and it could not answer them all: a 2.3 m pyramid pixel cannot say what a 1 m cell at a
+kerb, a driveway mouth or a parking apron is without the run-time question being asked there
+anyway, the mask would be baked for tuning.ts's defaults the way the graded raster is (a moved
+`GRASS_SLOPE_MAX` or `GRASS_MAX_FROM_ROAD` then disagrees with it), and it would be a raster per
+tile on the wire. On a graded bake the ground reads are already raster reads, which is where the
+13 µs comes from. Not worth a bake format for; the counters stay so it can be re-measured when
+the generator is next on the table.

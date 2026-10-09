@@ -129,6 +129,19 @@ Paired A/B while driving drifts with the scenery; alternate frames (odd with, ev
 the car. `apex.screenshot` now reads the frame loop's own render: a render made from the bridge
 between frames inherits a probe's scissor and lies.
 
+## Direction of travel (2026-10-09)
+
+Rich, after playing through at Ultra: *"I was racing renderer budgets, and often on the freeway I
+would outpace the tile renderer and it would never catch up; though I would drive across the next
+tile and it would already be rendered … render budgets need to be focused in the direction of
+travel."* Every builder ranked by distance to the eye in a disc, became eligible only within
+`STREAM_BUILD_M` (100 m) of it, and the governor had them at 15%. Now the grading pump, the
+pyramid's loads and the physics tiles rank by a **focus** `STREAM_LEAD_S` (3 s) of travel ahead of
+the eye (the eye's own velocity; the eye itself at rest), the governor floor is 0.3 and its target
+13 ms. `graded().unfinishedHere` counts the units covering the eye that are still being built —
+the number a run at speed wants at zero; `aheadrun.js` (scratchpad) samples it per frame with
+`STREAM_LEAD_S` 0 against 3. Not yet measured on Rich's machine: his tab was hidden.
+
 ## What is left (measured, not yet fixed)
 
 | cost | where | what to do |

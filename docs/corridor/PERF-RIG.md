@@ -285,3 +285,35 @@ repair converts an already-ENU `branches.json` a second time, putting every re-e
 junction ~1 km off its road (0 junctions met). And every probe in `probes/` that aborts
 `/@vite/client` no longer boots under Vite 8.2 — the page never evaluates `main.ts`, with no
 error. The new probe does not abort it.
+
+**Both faults run down (2026-10-09, branch `agent/bake-blockers`), neither was what it looked like:**
+
+- *The junctions were not converted twice; they were read about the wrong origin.* `junctions[].x/y`
+  in spine_utm.json/branches.json are ENU about the origin the file was written with, and the file
+  said only `"frame": "enu"`. crofton-triangle's vectors (2026-09-26) are about sites.json's centre,
+  (354269, 4318567); its site.json (world editor, 2026-10-02) puts the origin at (355342, 4318965),
+  1.14 km away, and `export_site` builds its frame from site.json. Measured on the on-disk file:
+  under the manifest's origin the junctions sit 0.04 m from their roads; under site.json's, 1,082 m
+  as-is and 1,068 m "repaired" — the on-read repair chose between two wrong answers. Now a junction
+  is PLACED under the export frame from the node's lon/lat (`roads` writes it), or in an older file
+  from the chain's own absolute-UTM polyline at `s`, and asserted onto the road
+  (`network.place_junctions`, FrameFault past 1 m; the primary's and `intersections.py`'s go through
+  it too). The scratch re-export of the on-disk site, twice: the two manifests byte-identical
+  (7.97 MB), 1,038 junctions a median 0.028 m (max 0.070 m) from the raw polyline, and against the
+  smoothed `coords` the same distribution the served bake has (median 0.050 vs 0.052 m, p90 1.63 vs
+  1.71 m — the tail is the Gaussian smoothing on bends, in both). `tests/test_junction_frame.py`.
+- *The served branch grades were not sampled from another DEM; they are the raw height.* Against
+  main's dem_1m.tif the served branch z reads z − h: p50 −0.01 m, p90 0.10 m — and z − up(h):
+  0.15 m within 2 km of the anchor, 0.65 at 2–4, 2.11 at 4–6, 3.34 at 6–9 km: d²/2R, the ellipsoid
+  drop. The bake was exported on 2026-10-02; f208be9 (2026-10-06) is the commit that curved the
+  vertical. Stale, and the next bake would not have repeated it — but nothing would have said so
+  either, so the bake now measures its carriageways against the DEM before deciding the decks:
+  `RoadModel.assert_grades_on_the_dem` (median over the non-deck stations within `GRADE_OFF_MAX_M`,
+  0.5 m) is a `GradeFault`, which export.py and `corridor fetch` re-raise instead of printing
+  "pyramid SKIPPED". On the served manifest it reads +1.28 m over 71,896 non-deck stations (23.4 %
+  deck) and stops; the scratch re-export reads −0.013 m (|p90| 0.19 m, 0.1 % deck, 3 deck runs).
+  `GradeOffsetTest` in `tests/test_grade.py`.
+- *427 vs 1038 is the site, not a filter:* 421 of the on-disk 427 chain ids are among the served
+  1,038; the served world is the editor's 5.26 km site (14.2 × 13.7 km DEM, primary MD 3/MD 450,
+  NOAA 10311 lidar) and the on-disk intermediates are sites.json's 2.6 km Crofton Parkway entry
+  (8.7 × 8.1 km). 404 of the 617 extra branches lie outside the Sep-26 footprint altogether.

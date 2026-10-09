@@ -50,6 +50,8 @@ for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXP
 
 import numpy as np  # noqa: E402  (must come after the thread pool is pinned)
 
+from . import BakeFault  # noqa: E402
+
 HERE = Path(__file__).resolve().parent.parent
 # In the container these point at the mounted volume; in the devcontainer at tools/corridor/data.
 DATA = Path(os.environ.get("CORRIDOR_DATA", HERE / "data"))
@@ -187,6 +189,8 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
         ex = export.export_site(out)
         export.write_index(DATA / "sites")
         print(f"  web     {', '.join(ex['layers'])} ({ex['bytes'] / 2**20:.1f} MiB)")
+    except BakeFault:
+        raise  # measured wrong: the job fails, the world is not published
     except Exception as exc:
         print(f"  web export failed: {exc}")
     # written again: the surface summary is measured after the first write above

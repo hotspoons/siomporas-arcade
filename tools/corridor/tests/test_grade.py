@@ -203,6 +203,40 @@ class DeckTest(unittest.TestCase):
         self.assertTrue(np.isnan(g[1]))
 
 
+class GradeOffsetTest(unittest.TestCase):
+    """The carriageways have to stand on the DEM the pyramid writes, or the bake stops.
+
+    The served crofton-triangle of 2026-10-02 had its branch z written as the raw height against
+    an earth that is curved (f208be9 came four days later): a median 1.28 m above the DEM over
+    the non-deck stations, 23 % of stations "decks", and the bake printed its counts and shipped.
+    """
+
+    def test_a_road_on_its_dem_reads_zero_and_passes(self):
+        model = grade.RoadModel(world(spine_east()), slope_dem(0.0))
+        g = model.assert_grades_on_the_dem()
+        self.assertEqual(g["n"], model.road_station_count)
+        self.assertAlmostEqual(g["median"], 0.0, places=2)  # ROAD_LIFT is the formula's, not the grade's
+        self.assertEqual(g["deck_share"], 0.0)
+
+    def test_grades_sampled_off_the_earth_fail_loudly(self):
+        # every station 1.5 m up: under OVERPASS_CLEAR_M, so not a deck — a wrong grade, not a bridge
+        model = grade.RoadModel(world(spine_east(z=ROAD_Z + 1.5)), slope_dem(0.0))
+        self.assertAlmostEqual(model.grade_offset["median"], 1.5, places=2)
+        with self.assertRaises(grade.GradeFault) as cm:
+            model.assert_grades_on_the_dem()
+        self.assertIn("+1.50 m off the DEM", str(cm.exception))
+        self.assertIn("grade_offset", model.summary())
+
+    def test_a_real_deck_is_not_an_offset(self):
+        # the whole spine 8 m over the valley floor is a deck: excluded, nothing to judge, no fault
+        model = grade.RoadModel(world(spine_east()), slope_dem(0.0, base=ROAD_Z - 8.0))
+        self.assertTrue(model.st.elev.all())
+        g = model.assert_grades_on_the_dem()
+        self.assertEqual(g["n"], 0)
+        self.assertIsNone(g["median"])
+        self.assertEqual(g["deck_share"], 1.0)
+
+
 class JunctionMeetTest(unittest.TestCase):
     """An inferior road is re-graded to meet the superior one, fading out over JUNCTION_MEET_M."""
 

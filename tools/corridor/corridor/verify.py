@@ -236,7 +236,8 @@ def verify(site_dir: Path) -> dict:
                     f"branches[].junctions look like they are still in the OLD frame: offset grows "
                     f"{slope * 1000:.1f} mm per metre from the origin (a {abs(m['frame']['utm_convergence_deg']):.2f} deg "
                     f"rotation would give {rot * 1000:.0f}), worst {worst:.0f} m over {n_j} junctions. "
-                    f"branches.json predates the ENU frame; export repairs it on read, so re-export."
+                    f"this manifest was exported before junctions were placed from the node's lon/lat under the "
+                    f"export frame (network.place_junctions); a re-export lands them on their roads or stops with a FrameFault."
                 )
             elif worst > 60:
                 warnings.append(f"a junction sits {worst:.0f} m from its own road's polyline over {n_j} junctions")

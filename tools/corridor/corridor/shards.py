@@ -312,18 +312,23 @@ def merge_branches(parts: list[Path], dest: Path) -> int:
     """Union the shards' `branches.json`, keyed by chain id. Whole chains mean no real overlap."""
     by_id: dict[str, dict] = {}
     order: list[str] = []
+    tag = None  # every shard is written under the site's one frame; the union carries its tag
     for p in parts:
         src = p / "branches.json"
         if not src.exists():
             continue
-        for b in json.loads(src.read_text()).get("branches", []):
+        doc = json.loads(src.read_text())
+        tag = tag or doc.get("frame")
+        for b in doc.get("branches", []):
             key = str(b.get("id"))
             if key not in by_id:
                 by_id[key] = b
                 order.append(key)
     merged = [by_id[k] for k in order]
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / "branches.json").write_text(json.dumps({"frame": "enu", "branches": merged}))
+    from .network import branches_doc
+
+    (dest / "branches.json").write_text(branches_doc(merged, tag))
     return len(merged)
 
 

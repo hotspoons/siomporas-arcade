@@ -45,6 +45,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from . import BakeFault
+
 # --- the knobs (apps/corridor/src/tuning.ts defaults) ------------------------------------------
 #
 # Read out of tuning.ts on 2026-10-09. These are the DEFAULTS; a browser whose F6 panel moved one
@@ -93,6 +95,22 @@ ONE_WAY_CLASSES = ("motorway", "motorway_link", "trunk_link", "primary_link")
 RANK = {"motorway": 0, "trunk": 1, "primary": 2, "secondary": 3, "tertiary": 4, "unclassified": 5, "residential": 6, "living_street": 7, "service": 8}
 #: edgeDistance's `who` for a driveway or stub station (not a carriageway, carries its own height)
 WHO_DRIVEWAY = -2
+
+#: How far the carriageways may stand off the DEM, as a median over every station that is NOT a
+#: deck, before the bake is wrong rather than the ground being hilly. A road's grade is the lidar
+#: DTM under it and the pyramid is the 1 m DEM of the same survey: measured on crofton-triangle
+#: they agree to 2 cm (median -0.02 m over 16,282 profile samples). The served 2026-10-02 bake
+#: stood a median 1.51 m (p90 3.32 m) above the DEM — its branch z was the raw height, written
+#: before f208be9 curved the vertical, and against an earth that IS curved the roads floated by
+#: d²/2R: 0.15 m within 2 km of the anchor, 3.3 m at 6–9 km, 6,883 stations over 3 m and so
+#: "decks" through a suburb. Half a metre is ten times the agreement and a third of the deck
+#: threshold: nothing real sits there, and a bake that does has sampled its grades off something
+#: other than the earth it is writing.
+GRADE_OFF_MAX_M = 0.5
+
+
+class GradeFault(BakeFault):
+    """The carriageways stand systematically off the DEM the pyramid writes."""
 
 
 def _smooth_runs(flags: np.ndarray, max_gap: int, min_run: int) -> np.ndarray:
@@ -632,7 +650,7 @@ class RoadModel:
     # --- the station field ----------------------------------------------------------------------
     def _build_stations(self) -> None:
         k = self.k
-        cols: dict[str, list] = {n: [] for n in ("x", "z", "dx", "dz", "s", "half", "off", "who", "y", "elev")}
+        cols: dict[str, list] = {n: [] for n in ("x", "z", "dx", "dz", "s", "half", "off", "who", "y", "elev", "dem")}
         for r in self.roads:
             ss = np.arange(0.0, r.curve.len + 1e-9, ST_STEP)
             ss = ss[ss <= r.curve.len]
@@ -645,6 +663,7 @@ class RoadModel:
             d = d / np.where(n > 0, n, 1.0)[:, None]
             dem = self.dem_up_at(pos[:, 0], pos[:, 2])
             elev = (pos[:, 1] - dem) > k.OVERPASS_CLEAR_M
+            cols["dem"].append(dem)
             cols["x"].append(pos[:, 0]); cols["z"].append(pos[:, 2])
             cols["dx"].append(d[:, 0]); cols["dz"].append(d[:, 2])
             cols["s"].append(ss)
@@ -653,6 +672,7 @@ class RoadModel:
             cols["who"].append(np.full(len(ss), r.who, dtype=int))
             cols["y"].append(pos[:, 1])
             cols["elev"].append(elev)
+        dem_all = np.concatenate(cols.pop("dem")) if cols["dem"] else np.zeros(0)
         st = Stations()
         for n, arrs in cols.items():
             setattr(st, n, np.concatenate(arrs) if arrs else np.zeros(0))
@@ -673,6 +693,42 @@ class RoadModel:
         st.order = np.arange(len(st.x))
         self.st = st
         self.road_station_count = len(st.x)
+        # How far the carriageways stand off the earth, over the stations that are not decks: the
+        # number `assert_grades_on_the_dem` judges, kept for the summary and the bake log. A deck
+        # is excluded by definition — the question is whether the GROUND roads sit on the ground.
+        # ROAD_LIFT is the formula's own (every curve is the profile + 0.4), not the grade's, so it
+        # comes off first: a road exactly on its DEM reads 0 here, not 0.4.
+        off = st.y - ROAD_LIFT - dem_all
+        ok = np.isfinite(off) & ~st.elev
+        self.grade_offset = {
+            "n": int(ok.sum()),
+            "median": round(float(np.median(off[ok])), 3) if ok.any() else None,
+            "p90": round(float(np.percentile(np.abs(off[ok]), 90)), 3) if ok.any() else None,
+            "deck_share": round(float(st.elev.mean()), 4) if len(st.elev) else 0.0,
+        }
+
+    def assert_grades_on_the_dem(self) -> dict:
+        """
+        Fail LOUDLY when the branch grades sit systematically off the DEM the pyramid writes.
+
+        The deck decision above is `road - DEM > OVERPASS_CLEAR_M`, station by station. That is
+        only a decision about bridges if the road and the DEM are measured against the same earth:
+        a grade sampled from a different product, a different vertical datum, or — the served
+        crofton-triangle of 2026-10-02 — a raw height against a curved earth, lifts every station
+        by the same systematic amount, and the ones past the threshold become deck colliders the
+        car rides through a suburb. The bake used to print its counts and ship that. Now the median
+        offset over the non-deck stations has to be within GRADE_OFF_MAX_M, or the export stops
+        here with the numbers (BakeFault reaches the job's exit status). Returns the offset block.
+        """
+        g = self.grade_offset
+        if g["median"] is not None and abs(g["median"]) > GRADE_OFF_MAX_M:
+            raise GradeFault(
+                f"the carriageways stand a median {g['median']:+.2f} m off the DEM over {g['n']:,} non-deck stations "
+                f"(|p90| {g['p90']:.2f} m, {100 * g['deck_share']:.1f} % of stations flagged deck; limit {GRADE_OFF_MAX_M} m): "
+                f"the branch grades were not sampled from the earth this pyramid writes — a stale or differently-sourced "
+                f"profile — and the decks decided against them would be wrong. Re-profile against the site's dem_1m.tif."
+            )
+        return g
 
     # --- cul-de-sacs ----------------------------------------------------------------------------
     def _dead_ends(self) -> None:
@@ -1028,6 +1084,7 @@ class RoadModel:
             "bulbs": int(self.bulb_count),
             "driveway_stations": int(self.driveway_count),
             "junctions": dict(self.junction_meet),
+            "grade_offset": dict(self.grade_offset),
         }
 
 

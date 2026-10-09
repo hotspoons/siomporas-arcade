@@ -72,6 +72,20 @@ answer: a bilinear cell that spans a step — two carriageways at different heig
 the formula (`RASTER_CLIFF_M`, scene.ts). `?grade=runtime` forces the old path on a graded bake,
 which is how `probes/corridor-gradedraster.mjs` measures one against the other.
 
+Two things the bake now refuses rather than ships, both found re-baking crofton-triangle
+(2026-10-09; the exceptions are `BakeFault`s, which the export's catch-alls re-raise so the job
+exits non-zero). **Grades off the earth**: before the decks are decided the carriageways are
+measured against the DEM over every non-deck station, and a median beyond `GRADE_OFF_MAX_M`
+(0.5 m; the lidar DTM and the 3DEP DEM agree to 2 cm) is a `GradeFault` — the served 2026-10-02
+crofton-triangle stood a median 1.28 m up (23 % of its stations "decks") because its branch z was
+the raw height from before f208be9 curved the vertical. **Junctions in another frame**:
+`junctions[].x/y` in the intermediates are ENU about the origin the file was written with, and
+crofton-triangle's site.json moved that origin 1.14 km after the vectors were written, so a
+re-export put every junction a kilometre off its road. A junction is now PLACED under the export
+frame from the node's lon/lat (`roads` writes it) or, in an older file, the chain's own polyline
+at `s`, and asserted onto the road (`network.place_junctions`, 1 m) — reading the file twice is
+reading it once, and the file's `frame` tag carries the origin it was written about.
+
 Grading costs the pyramid stage roughly a third again (crofton-triangle: 40 s → 54 s of the 1.5
 minute export, of which 8 s builds the station field once and ~2 minutes of worker CPU grades
 241 tiles). `CORRIDOR_GRADE=0` turns it off. The knobs the grading reads are tuning.ts's

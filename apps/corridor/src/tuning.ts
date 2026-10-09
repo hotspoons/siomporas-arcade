@@ -534,8 +534,8 @@ export let GUN_DAMAGE = 0.12
 export let GUN_SPREAD = 0.015
 
 // --- sound effects (game/audio/sfx.ts, the bank under public/sounds) ----------------------------
-/** the effects bus, under the player's master × sfx sliders. 0 silences every sample; the engine is its own bus. Rich, 2026-10-09: "way too loud" at 1 */
-export let SFX_MASTER = 0.6
+/** the effects bus, under the player's master × sfx sliders. 0 silences every sample; the engine is its own bus. Rich, 2026-10-09: "way too loud" at 1, then "drastically lower" at 0.6 */
+export let SFX_MASTER = 0.25
 /** a placed sound is at full level within this many metres of the camera, falling off as 1/d beyond */
 export let SFX_REF_M = 10
 /** beyond this it does not get any quieter (m) */

@@ -76,6 +76,17 @@ describe('resolving a slot', () => {
     // a single-clip slot has no choice
     expect(b.pick('gun.fire.shotgun')!.url).toBe(b.pick('gun.fire.shotgun')!.url)
   })
+  it('cycles a slot marked cycle, and plays only the first N of a slot marked first', () => {
+    const m: BankManifest = { ...manifest, slots: { ...manifest.slots,
+      'gun.fire': { desc: 'a round', cycle: true, clips: manifest.slots['gun.fire'].clips },
+      'missile.launch': { desc: 'a launch', first: 1, clips: [{ file: 'missile-launch/launch-thruster.ogg', s: 1.4 }, { file: 'missile-launch/launch-0.ogg', s: 1.6 }] },
+    } }
+    const b = new SoundBank(m, { ext: 'ogg' })
+    expect([1, 2, 3, 4].map(() => b.pick('gun.fire')!.url)).toEqual(['/sounds/gun-fire/a.ogg', '/sounds/gun-fire/b.ogg', '/sounds/gun-fire/c.ogg', '/sounds/gun-fire/a.ogg'])
+    expect(b.resolve('missile.launch').map((c) => c.url)).toEqual(['/sounds/missile-launch/launch-thruster.ogg'])
+    // an override may still name the rest
+    expect(b.resolve('missile.launch', [{ 'missile.launch': ['missile-launch/launch-0'] }])[0].url).toBe('/sounds/missile-launch/launch-0.ogg')
+  })
   it('lists the bank’s entries for the editor without their extension', () => {
     expect(bank().bankEntries('gun.fire')).toEqual(['gun-fire/a', 'gun-fire/b', 'gun-fire/c'])
     expect(bank().slots().find((s) => s.slot === 'tire.squeal.loop')).toMatchObject({ clips: 2, loop: true })

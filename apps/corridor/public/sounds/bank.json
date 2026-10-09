@@ -100,66 +100,6 @@
    "desc": "a wreck: head-on, a roll, a wall at speed",
    "clips": [
     {
-     "file": "crash-heavy/impactMetal_heavy_000.ogg",
-     "s": 0.168,
-     "rms": 0.0797,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactMetal_heavy_001.ogg",
-     "s": 0.359,
-     "rms": 0.0625,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactMetal_heavy_002.ogg",
-     "s": 0.117,
-     "rms": 0.0983,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactMetal_heavy_003.ogg",
-     "s": 0.207,
-     "rms": 0.0756,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactMetal_heavy_004.ogg",
-     "s": 0.134,
-     "rms": 0.0918,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactPlate_heavy_000.ogg",
-     "s": 0.489,
-     "rms": 0.0737,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactPlate_heavy_001.ogg",
-     "s": 0.352,
-     "rms": 0.1283,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactPlate_heavy_002.ogg",
-     "s": 0.494,
-     "rms": 0.0828,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactPlate_heavy_003.ogg",
-     "s": 0.347,
-     "rms": 0.1289,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/impactPlate_heavy_004.ogg",
-     "s": 0.559,
-     "rms": 0.0769,
-     "peak": 0.891
-    },
-    {
      "file": "crash-heavy/slam-14.ogg",
      "s": 1.6,
      "rms": 0.189,
@@ -168,43 +108,13 @@
     {
      "file": "crash-heavy/slam-3.ogg",
      "s": 1.6,
-     "rms": 0.1873,
+     "rms": 0.1871,
      "peak": 0.891
     },
     {
      "file": "crash-heavy/slam-15.ogg",
      "s": 1.143,
-     "rms": 0.1489,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/slam-8.ogg",
-     "s": 1.306,
-     "rms": 0.0892,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/slam-1.ogg",
-     "s": 1.6,
-     "rms": 0.085,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/slam-6.ogg",
-     "s": 1.58,
-     "rms": 0.0789,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/slam-4.ogg",
-     "s": 1.6,
-     "rms": 0.0782,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-heavy/slam-12.ogg",
-     "s": 1.6,
-     "rms": 0.1441,
+     "rms": 0.1475,
      "peak": 0.891
     }
    ]
@@ -213,64 +123,22 @@
    "desc": "a tap: kerbs, bollards, the side of a parked car",
    "clips": [
     {
-     "file": "crash-light/impactMetal_light_000.ogg",
-     "s": 0.351,
+     "file": "crash-light/slam-14.ogg",
+     "s": 1.6,
      "rms": 0.1,
-     "peak": 0.888
+     "peak": 0.471
     },
     {
-     "file": "crash-light/impactMetal_light_001.ogg",
-     "s": 0.252,
-     "rms": 0.0995,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-light/impactMetal_light_002.ogg",
-     "s": 0.236,
+     "file": "crash-light/slam-3.ogg",
+     "s": 1.6,
      "rms": 0.1,
-     "peak": 0.887
+     "peak": 0.474
     },
     {
-     "file": "crash-light/impactMetal_light_003.ogg",
-     "s": 0.482,
+     "file": "crash-light/slam-15.ogg",
+     "s": 1.143,
      "rms": 0.1,
-     "peak": 0.849
-    },
-    {
-     "file": "crash-light/impactMetal_light_004.ogg",
-     "s": 0.213,
-     "rms": 0.0926,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-light/impactPlate_light_000.ogg",
-     "s": 0.532,
-     "rms": 0.0631,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-light/impactPlate_light_001.ogg",
-     "s": 0.655,
-     "rms": 0.0484,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-light/impactPlate_light_002.ogg",
-     "s": 0.489,
-     "rms": 0.0522,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-light/impactPlate_light_003.ogg",
-     "s": 0.528,
-     "rms": 0.0599,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-light/impactPlate_light_004.ogg",
-     "s": 0.608,
-     "rms": 0.0501,
-     "peak": 0.891
+     "peak": 0.594
     }
    ]
   },
@@ -278,93 +146,21 @@
    "desc": "a proper hit",
    "clips": [
     {
-     "file": "crash-medium/impactMetal_medium_000.ogg",
-     "s": 0.272,
-     "rms": 0.1253,
-     "peak": 0.891
+     "file": "crash-medium/slam-14.ogg",
+     "s": 1.6,
+     "rms": 0.1585,
+     "peak": 0.747
     },
     {
-     "file": "crash-medium/impactMetal_medium_001.ogg",
-     "s": 0.143,
-     "rms": 0.1101,
-     "peak": 0.891
+     "file": "crash-medium/slam-3.ogg",
+     "s": 1.6,
+     "rms": 0.1585,
+     "peak": 0.752
     },
     {
-     "file": "crash-medium/impactMetal_medium_002.ogg",
-     "s": 0.119,
-     "rms": 0.1189,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactMetal_medium_003.ogg",
-     "s": 0.254,
-     "rms": 0.1129,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactMetal_medium_004.ogg",
-     "s": 0.109,
-     "rms": 0.1216,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactPlate_medium_000.ogg",
-     "s": 0.609,
-     "rms": 0.0661,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactPlate_medium_001.ogg",
-     "s": 0.616,
-     "rms": 0.0574,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactPlate_medium_002.ogg",
-     "s": 0.515,
-     "rms": 0.0795,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactPlate_medium_003.ogg",
-     "s": 0.599,
-     "rms": 0.08,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactPlate_medium_004.ogg",
-     "s": 0.534,
-     "rms": 0.0795,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactTin_medium_000.ogg",
-     "s": 0.159,
-     "rms": 0.0752,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactTin_medium_001.ogg",
-     "s": 0.174,
-     "rms": 0.1076,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactTin_medium_002.ogg",
-     "s": 0.134,
-     "rms": 0.1049,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactTin_medium_003.ogg",
-     "s": 0.215,
-     "rms": 0.0832,
-     "peak": 0.891
-    },
-    {
-     "file": "crash-medium/impactTin_medium_004.ogg",
-     "s": 0.179,
-     "rms": 0.1033,
+     "file": "crash-medium/slam-15.ogg",
+     "s": 1.143,
+     "rms": 0.1493,
      "peak": 0.891
     }
    ]
@@ -498,36 +294,6 @@
    "desc": "a missile landing, a car going up",
    "clips": [
     {
-     "file": "explosion/blast-0.ogg",
-     "s": 1.997,
-     "rms": 0.1249,
-     "peak": 0.891
-    },
-    {
-     "file": "explosion/blast-1.ogg",
-     "s": 1.357,
-     "rms": 0.2171,
-     "peak": 0.891
-    },
-    {
-     "file": "explosion/blast-2.ogg",
-     "s": 1.997,
-     "rms": 0.1211,
-     "peak": 0.891
-    },
-    {
-     "file": "explosion/blast-3.ogg",
-     "s": 1.553,
-     "rms": 0.173,
-     "peak": 0.891
-    },
-    {
-     "file": "explosion/blast-4.ogg",
-     "s": 1.997,
-     "rms": 0.2024,
-     "peak": 0.891
-    },
-    {
      "file": "explosion/bang-1807.ogg",
      "s": 1.997,
      "rms": 0.0687,
@@ -540,9 +306,9 @@
      "peak": 0.891
     },
     {
-     "file": "explosion/bang-1806.ogg",
+     "file": "explosion/lowFrequency_explosion_000.ogg",
      "s": 1.997,
-     "rms": 0.0687,
+     "rms": 0.1246,
      "peak": 0.891
     }
    ]
@@ -572,87 +338,111 @@
   },
   "gun.fire": {
    "desc": "one round from the machine gun",
+   "cycle": true,
    "clips": [
     {
-     "file": "gun-fire/bsb0437-0.ogg",
+     "file": "gun-fire/shotgun-0.ogg",
+     "s": 0.8,
+     "rms": 0.0347,
+     "peak": 0.891
+    },
+    {
+     "file": "gun-fire/shotgun-1.ogg",
+     "s": 0.8,
+     "rms": 0.0313,
+     "peak": 0.891
+    },
+    {
+     "file": "gun-fire/shotgun-2.ogg",
+     "s": 0.8,
+     "rms": 0.0315,
+     "peak": 0.891
+    }
+   ]
+  },
+  "gun.fire.rifle": {
+   "desc": "rifle and pistol rounds, for an override",
+   "clips": [
+    {
+     "file": "gun-fire-rifle/bsb0437-0.ogg",
      "s": 0.45,
      "rms": 0.1995,
      "peak": 0.85
     },
     {
-     "file": "gun-fire/bsb0438-0.ogg",
+     "file": "gun-fire-rifle/bsb0438-0.ogg",
      "s": 0.45,
      "rms": 0.1296,
      "peak": 0.891
     },
     {
-     "file": "gun-fire/bsb0397-0.ogg",
+     "file": "gun-fire-rifle/bsb0397-0.ogg",
      "s": 0.45,
      "rms": 0.1625,
      "peak": 0.891
     },
     {
-     "file": "gun-fire/cz-0.ogg",
+     "file": "gun-fire-rifle/cz-0.ogg",
      "s": 0.45,
      "rms": 0.166,
      "peak": 0.891
     },
     {
-     "file": "gun-fire/cz-1.ogg",
+     "file": "gun-fire-rifle/cz-1.ogg",
      "s": 0.45,
      "rms": 0.1995,
      "peak": 0.786
     },
     {
-     "file": "gun-fire/cz-2.ogg",
+     "file": "gun-fire-rifle/cz-2.ogg",
      "s": 0.45,
      "rms": 0.1995,
      "peak": 0.754
     },
     {
-     "file": "gun-fire/cz-3.ogg",
+     "file": "gun-fire-rifle/cz-3.ogg",
      "s": 0.45,
      "rms": 0.1995,
      "peak": 0.751
     },
     {
-     "file": "gun-fire/sks-0.ogg",
+     "file": "gun-fire-rifle/sks-0.ogg",
      "s": 0.45,
      "rms": 0.178,
      "peak": 0.891
     },
     {
-     "file": "gun-fire/sks-1.ogg",
+     "file": "gun-fire-rifle/sks-1.ogg",
      "s": 0.45,
      "rms": 0.1822,
      "peak": 0.891
     },
     {
-     "file": "gun-fire/sks-2.ogg",
+     "file": "gun-fire-rifle/sks-2.ogg",
      "s": 0.45,
      "rms": 0.1832,
      "peak": 0.891
     },
     {
-     "file": "gun-fire/sks-3.ogg",
+     "file": "gun-fire-rifle/sks-3.ogg",
      "s": 0.45,
      "rms": 0.1866,
      "peak": 0.891
     },
     {
-     "file": "gun-fire/mosin-0.ogg",
+     "file": "gun-fire-rifle/mosin-0.ogg",
      "s": 0.45,
      "rms": 0.1995,
      "peak": 0.799
     },
     {
-     "file": "gun-fire/mosin-1.ogg",
+     "file": "gun-fire-rifle/mosin-1.ogg",
      "s": 0.45,
      "rms": 0.1995,
      "peak": 0.814
     },
     {
-     "file": "gun-fire/mosin-2.ogg",
+     "file": "gun-fire-rifle/mosin-2.ogg",
      "s": 0.45,
      "rms": 0.1995,
      "peak": 0.771
@@ -698,66 +488,6 @@
    "desc": "a round landing on a car",
    "clips": [
     {
-     "file": "gun-hit/impactMetal_light_000.ogg",
-     "s": 0.351,
-     "rms": 0.1,
-     "peak": 0.888
-    },
-    {
-     "file": "gun-hit/impactMetal_light_001.ogg",
-     "s": 0.252,
-     "rms": 0.1,
-     "peak": 0.889
-    },
-    {
-     "file": "gun-hit/impactMetal_light_002.ogg",
-     "s": 0.236,
-     "rms": 0.1,
-     "peak": 0.871
-    },
-    {
-     "file": "gun-hit/impactMetal_light_003.ogg",
-     "s": 0.482,
-     "rms": 0.1,
-     "peak": 0.849
-    },
-    {
-     "file": "gun-hit/impactMetal_light_004.ogg",
-     "s": 0.213,
-     "rms": 0.1,
-     "peak": 0.88
-    },
-    {
-     "file": "gun-hit/impactGeneric_light_000.ogg",
-     "s": 0.139,
-     "rms": 0.1,
-     "peak": 0.788
-    },
-    {
-     "file": "gun-hit/impactGeneric_light_001.ogg",
-     "s": 0.118,
-     "rms": 0.097,
-     "peak": 0.891
-    },
-    {
-     "file": "gun-hit/impactGeneric_light_002.ogg",
-     "s": 0.14,
-     "rms": 0.1,
-     "peak": 0.774
-    },
-    {
-     "file": "gun-hit/impactGeneric_light_003.ogg",
-     "s": 0.138,
-     "rms": 0.097,
-     "peak": 0.891
-    },
-    {
-     "file": "gun-hit/impactGeneric_light_004.ogg",
-     "s": 0.14,
-     "rms": 0.0952,
-     "peak": 0.891
-    },
-    {
      "file": "gun-hit/impactgun-1.ogg",
      "s": 0.6,
      "rms": 0.1,
@@ -780,12 +510,6 @@
      "s": 0.6,
      "rms": 0.1,
      "peak": 0.852
-    },
-    {
-     "file": "gun-hit/impactgun-5.ogg",
-     "s": 0.6,
-     "rms": 0.1,
-     "peak": 0.695
     }
    ]
   },
@@ -891,7 +615,14 @@
   },
   "missile.launch": {
    "desc": "a missile leaving the rail",
+   "first": 1,
    "clips": [
+    {
+     "file": "missile-launch/launch-thruster.ogg",
+     "s": 1.6,
+     "rms": 0.1393,
+     "peak": 0.891
+    },
     {
      "file": "missile-launch/launch-0.ogg",
      "s": 1.6,
@@ -902,12 +633,6 @@
      "file": "missile-launch/launch-1.ogg",
      "s": 1.6,
      "rms": 0.1504,
-     "peak": 0.891
-    },
-    {
-     "file": "missile-launch/launch-thruster.ogg",
-     "s": 1.6,
-     "rms": 0.1331,
      "peak": 0.891
     }
    ]

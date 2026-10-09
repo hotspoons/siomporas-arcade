@@ -322,18 +322,11 @@ def slot_tire_skid():
 
 
 def slot_crash(level: str):
-    stems = {
-        'light': [('kenney-impact', 'impactMetal_light'), ('kenney-impact', 'impactPlate_light')],
-        'medium': [('kenney-impact', 'impactMetal_medium'), ('kenney-impact', 'impactPlate_medium'), ('kenney-impact', 'impactTin_medium')],
-        'heavy': [('kenney-impact', 'impactMetal_heavy'), ('kenney-impact', 'impactPlate_heavy')],
-    }[level]
-    files = [f for pack, stem in stems for f in kenney(pack, stem)]
-    clips = one_shots(files, 1.5, 0.2)
-    if level == 'heavy':
-        # Eldritch Grim's bass-boosted slams, the eight strongest: the body-on-body part of a wreck
-        slams = [(f'slam-{i}', cut(trim_end(trim_start(load(source_file('oga-impacts', f'Impact {i}.wav')))), 1.6, 0.4)) for i in range(1, 16)]
-        slams = sorted(slams, key=lambda c: -float(np.sqrt((c[1] ** 2).mean())))[:8]
-        clips += slams
+    """Rich, 2026-10-09, after listening: "use slam-14, slam-3, and slam-15 as random crash noises".
+    The same three at every level; what differs is the loudness LEVELS gives each slot, and the
+    gain the game grades on top. Kenney's tin and plate taps are out."""
+    tail = {'light': 0.25, 'medium': 0.35, 'heavy': 0.45}[level]
+    clips = [(f'slam-{i}', cut(trim_end(trim_start(load(source_file('oga-impacts', f'Impact {i}.wav')))), 1.6, tail)) for i in (14, 3, 15)]
     return clips, {}
 
 
@@ -348,11 +341,11 @@ def slot_crash_soft():
 
 
 def slot_explosion():
-    crunch = one_shots(kenney('kenney-scifi', 'explosionCrunch'), 1.6, 0.4)
+    """Rich's picks: bang-1807, bang-1808 and the low-frequency thump on its own. The sci-fi
+    crunches are out."""
     lows = [trim_start(load(p)) for _, p in kenney('kenney-scifi', 'lowFrequency_explosion', 2)]
-    clips = [(f'blast-{i}', mix((c, 1.0), (lows[i % 2], 0.8))) for i, (_, c) in enumerate(crunch)]
-    for i in ('1807', '1808', '1806'):
-        clips.append((f'bang-{i}', mix((trim_start(load(source_file('bsb', i))), 1.0), (lows[0], 0.5))))
+    clips = [(f'bang-{i}', mix((trim_start(load(source_file('bsb', i))), 1.0), (lows[0], 0.5))) for i in ('1807', '1808')]
+    clips.append(('lowFrequency_explosion_000', lows[0]))
     return clips, {}
 
 
@@ -371,16 +364,27 @@ def slot_missile_launch():
     swooshes = split_shots(load(source_file('ia-sse-swooshes', 'fireworks-launch')), 1.2, 0.4)
     if not swooshes:
         raise SystemExit('missile.launch: no swooshes found in the SSE fireworks file')
+    # Rich's pick: "launch thruster as the rocket noise but a fade at the end" — the thruster over
+    # the motor, the last half second fading out. The swoosh variants stay in the bank, unused by
+    # default, for a slot override to name.
     clips = []
+    thr = cut(trim_start(load(source_file('kenney-scifi', 'thrusterFire_000.ogg'))), 1.4, 0.7)
+    clips.append(('launch-thruster', fades(mix((thr, 1.0), (motor, 0.5), (cut(lows[0], 0.5, 0.3), 0.45)), out_s=0.5)))
     for i, sw in enumerate(swooshes[:5]):
         clips.append((f'launch-{i}', mix((sw, 0.9), (motor, 0.8), (cut(lows[i % 2], 0.5, 0.3), 0.4))))
-    # and the thruster version, so the rail has a sci-fi voice to pick too
-    thr = cut(trim_start(load(source_file('kenney-scifi', 'thrusterFire_000.ogg'))), 1.2, 0.6)
-    clips.append(('launch-thruster', mix((thr, 1.0), (motor, 0.5), (cut(lows[0], 0.5, 0.3), 0.45))))
-    return clips, {}
+    return clips, {'first': 1}
 
 
 def slot_gun_fire():
+    """Rich's pick: "cycle through the 3 shotgun samples for the gunshot sounds" — in order, not at
+    random (`cycle`), so a burst is a rhythm. The rifle and pistol cuts stay in the bank for an
+    override to name."""
+    shots = split_shots(load(source_file('bsb', '0532')), 0.8, 0.25, 4)
+    clips = [(f'shotgun-{k}', s) for k, s in enumerate(shots[:3])]
+    return clips, {'cycle': True}
+
+
+def slot_gun_fire_rifle():
     clips = []
     for i, want in (('0437', 4), ('0438', 3), ('0397', 3)):
         clips += [(f'bsb{i}-{k}', s) for k, s in enumerate(split_shots(load(source_file('bsb', i)), 0.45, 0.15, want))]
@@ -396,9 +400,8 @@ def slot_gun_fire_shotgun():
 
 
 def slot_gun_hit():
-    files = kenney('kenney-impact', 'impactMetal_light') + kenney('kenney-impact', 'impactGeneric_light')
-    clips = one_shots(files, 0.6, 0.1)
-    clips += [(f'impactgun-{i}', cut(trim_end(trim_start(load(source_file('oga-impacts', f'Impact Gun {i}.wav')))), 0.6, 0.15)) for i in range(1, 6)]
+    """Rich's pick: Impact Gun 1–4 for a round landing."""
+    clips = [(f'impactgun-{i}', cut(trim_end(trim_start(load(source_file('oga-impacts', f'Impact Gun {i}.wav')))), 0.6, 0.15)) for i in range(1, 5)]
     return clips, {}
 
 
@@ -418,7 +421,7 @@ LEVELS = {
     'tire.squeal.loop': -22, 'tire.skid': -18,
     'crash.light': -20, 'crash.medium': -16, 'crash.heavy': -12, 'crash.glass': -20, 'crash.soft': -20,
     'explosion': -10, 'explosion.far': -18, 'missile.launch': -15,
-    'gun.fire': -14, 'gun.fire.shotgun': -12, 'gun.hit': -20, 'gun.hit.glass': -20, 'gun.hit.ground': -22,
+    'gun.fire': -14, 'gun.fire.shotgun': -12, 'gun.fire.rifle': -14, 'gun.hit': -20, 'gun.hit.glass': -20, 'gun.hit.ground': -22,
 }
 
 SLOTS = {
@@ -433,6 +436,7 @@ SLOTS = {
     'explosion.far': ('the same, heard from a distance', slot_explosion_far),
     'missile.launch': ('a missile leaving the rail', slot_missile_launch),
     'gun.fire': ('one round from the machine gun', slot_gun_fire),
+    'gun.fire.rifle': ('rifle and pistol rounds, for an override', slot_gun_fire_rifle),
     'gun.fire.shotgun': ('one shotgun blast', slot_gun_fire_shotgun),
     'gun.hit': ('a round landing on a car', slot_gun_hit),
     'gun.hit.glass': ('a round through a window', slot_gun_hit_glass),

@@ -27,7 +27,7 @@ export const SOUND_SLOTS = [
   'tire.squeal.loop', 'tire.skid',
   'crash.light', 'crash.medium', 'crash.heavy', 'crash.glass', 'crash.soft',
   'explosion', 'explosion.far', 'missile.launch',
-  'gun.fire', 'gun.fire.shotgun', 'gun.hit', 'gun.hit.glass', 'gun.hit.ground',
+  'gun.fire', 'gun.fire.shotgun', 'gun.fire.rifle', 'gun.hit', 'gun.hit.glass', 'gun.hit.ground',
 ] as const
 export type SoundSlot = (typeof SOUND_SLOTS)[number]
 
@@ -45,6 +45,7 @@ export const SLOT_HELP: Record<SoundSlot, string> = {
   'missile.launch': 'a missile leaving the rail',
   'gun.fire': 'one round from the machine gun',
   'gun.fire.shotgun': 'one shotgun blast',
+  'gun.fire.rifle': 'rifle and pistol rounds — an override for a car whose gun is not a shotgun',
   'gun.hit': 'a round landing on a car or a structure',
   'gun.hit.glass': 'a round through a window',
   'gun.hit.ground': 'a round into the road or the verge',
@@ -64,6 +65,10 @@ export interface BankSlot {
   loop?: boolean
   /** the clips are levels, not variations: play them in order, never pick one at random */
   ordered?: boolean
+  /** round-robin, not random: a burst is a rhythm (Rich: "cycle through the 3 shotgun samples") */
+  cycle?: boolean
+  /** only the first N clips play by default; the rest are in the bank for an override to name */
+  first?: number
   clips: BankClip[]
 }
 
@@ -163,7 +168,9 @@ export class SoundBank {
       const entries = sc?.[slot as SoundSlot]
       if (entries) return entries.flatMap((e) => this.entry(e, loop, scopes, depth))
     }
-    return (this.manifest.slots[slot]?.clips ?? []).map((c) => ({ url: this.clipUrl(c.file), s: c.s, loop }))
+    const b = this.manifest.slots[slot]
+    const own = b?.first ? (b.clips ?? []).slice(0, b.first) : (b?.clips ?? [])
+    return own.map((c) => ({ url: this.clipUrl(c.file), s: c.s, loop }))
   }
 
   /** one clip for a one-shot slot, not the one that played last */
@@ -172,6 +179,12 @@ export class SoundBank {
     if (!clips.length) return null
     if (clips.length === 1) return clips[0]
     const prev = this.last.get(slot)
+    if (this.manifest.slots[slot]?.cycle) {
+      const i = prev ? clips.findIndex((x) => x.url === prev) : -1
+      const c = clips[(i + 1) % clips.length]
+      this.last.set(slot, c.url)
+      return c
+    }
     let c = clips[Math.floor(Math.random() * clips.length)]
     if (c.url === prev) c = clips[(clips.indexOf(c) + 1 + Math.floor(Math.random() * (clips.length - 1))) % clips.length]
     this.last.set(slot, c.url)

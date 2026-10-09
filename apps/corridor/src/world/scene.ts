@@ -247,7 +247,7 @@ export interface Site {
   /** the lowest elevation (m) among the terrain tiles now held; the sea plane's visibility gate */
   lowestGround: () => number
   /** the lazy grading: how much of the site's strips and buildings exist yet, and what they cost */
-  graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string; long: { key: string; ms: number }[]; unfinishedHere: number; focus: { x: number; z: number } }
+  graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string; long: { key: string; ms: number }[]; unfinishedHere: number; focus: { x: number; z: number }; recent: { key: string; ms: number; wall: number; at: number }[] }
   /**
    * The road/branch streaming queue as the pump sees it: what it is building now, what is queued
    * within `STREAM_BUILD_M` of the eye (broken down by kind), and how much wall time the junction
@@ -1714,7 +1714,7 @@ if (uLodOn > 0.5) {
   }
   // worstMs is the longest unsliced stretch inside a unit — the hitch a frame can feel. A unit's
   // wall time is not a hitch: the fill yields every STREAM_BUDGET_MS.
-  const gradeStats = { built: 0, strips: 0, buildings: 0, ms: 0, worstMs: 0, worst: '', long: [] as { key: string; ms: number }[] }
+  const gradeStats = { built: 0, strips: 0, buildings: 0, ms: 0, worstMs: 0, worst: '', long: [] as { key: string; ms: number }[], recent: [] as { key: string; ms: number; wall: number; at: number }[] }
   // the style's road paint, applied to a road mesh that arrives after the style was set
   let paintNow: { centre: THREE.Color; edge: THREE.Color } | null = null
   const gradeEye = new THREE.Vector3(NaN, NaN, NaN)
@@ -1731,7 +1731,29 @@ if (uLodOn > 0.5) {
    * the pump idle and nothing pending. Rich, 2026-10-07: the outer carriageway of the Capital
    * Beltway was grass where the car stood. One cheap unit, always in range once queued.
    */
-  const unitDist = (u: GradeUnit) => u.key === 'spine-window' ? -Infinity : Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r
+  /** the eye's direction of travel (unit, world x/z) and how far ahead the builders are given credit, m */
+  const gradeDir = { x: 0, z: 0, reach: 0 }
+  /**
+   * How far a unit is from the eye for scheduling, in the direction of travel.
+   *
+   * A unit whose circle covers the eye is at zero or below and always first: the ground the car
+   * is standing on. Past that, a unit AHEAD is credited with how far ahead it is, up to the reach
+   * (STREAM_LEAD_S of travel), so at speed the cell about to be entered ranks as if it were here;
+   * a unit BEHIND counts three times as far, so it waits. The first version ranked everything by
+   * distance to a point 230 m ahead, which put the cell under the wheels outside the build window:
+   * the pump built the road ahead and the car drove on unfinished ground on 20% of frames
+   * (measured under the rig, 2026-10-09). Rich: "render budgets need to be focused in the
+   * direction of travel" — focused, not moved.
+   */
+  const unitDist = (u: GradeUnit) => {
+    if (u.key === 'spine-window') return -Infinity
+    const dx = u.x - gradeEye.x, dz = u.z - gradeEye.z
+    const d = Math.hypot(dx, dz) - u.r
+    if (d <= 0 || gradeDir.reach <= 0) return d
+    const along = dx * gradeDir.x + dz * gradeDir.z
+    if (along < 0) return d * 3
+    return Math.max(0.01, d - Math.min(along, gradeDir.reach))
+  }
   /** the nearest unfinished unit inside STREAM_BUILD_M of the eye, or null */
   const nextUnit = (): GradeUnit | null => {
     let best: GradeUnit | null = null, bd = Infinity
@@ -1770,6 +1792,9 @@ if (uLodOn > 0.5) {
         const slice = budget.finish().worstSliceMs
         gradeStats.built++
         gradeStats.ms += performance.now() - u0
+        // the last units, with their main-thread cost (the budget's slices summed) and wall time
+        gradeStats.recent.push({ key: u.key, ms: Math.round(budget.stats.workMs), wall: Math.round(performance.now() - u0), at: Math.round(performance.now()) })
+        if (gradeStats.recent.length > 30) gradeStats.recent.shift()
         if (slice > gradeStats.worstMs) { gradeStats.worstMs = slice; gradeStats.worst = u.key }
         // the last few units whose longest unsliced stretch would have cost a frame, for a probe
         if (slice >= 12) { gradeStats.long.push({ key: u.key, ms: Math.round(slice) }); if (gradeStats.long.length > 12) gradeStats.long.shift() }
@@ -1779,10 +1804,15 @@ if (uLodOn > 0.5) {
       gradePumping = false
     }
   }
-  const gradeNear = (eye: THREE.Vector3, focus: THREE.Vector3 = eye) => {
-    // the pump ranks by the FOCUS — ahead of the car by STREAM_LEAD_S of travel — so the cell the
-    // car is about to enter is the nearest, and the one it just left is not
-    gradeEye.copy(focus)
+  const gradeNear = (eye: THREE.Vector3, velocity?: THREE.Vector3) => {
+    gradeEye.copy(eye)
+    // the direction of travel and the reach the pump gives credit for (see unitDist)
+    const speed = velocity ? Math.hypot(velocity.x, velocity.z) : 0
+    if (speed > 1) {
+      gradeDir.x = velocity!.x / speed
+      gradeDir.z = velocity!.z / speed
+      gradeDir.reach = speed * Math.max(0, T.STREAM_LEAD_S)
+    } else gradeDir.reach = 0
     if (windowedSpine) {
       const n = nearestSpine(eye.x, eye.z)
       const slide = gradeUnits.find((u) => u.key === 'spine-window')
@@ -4332,7 +4362,7 @@ if (uLodOn > 0.5) {
       }
       const m6 = performance.now()
       for (const tick of signalTicks) tick(time)
-      gradeNear(eye, focus)
+      gradeNear(eye, velocity)
       const m7 = performance.now()
       veg?.update(eye.x, -eye.z)
       const m8 = performance.now()
@@ -4491,7 +4521,8 @@ if (uLodOn > 0.5) {
       // READINESS: units whose circle covers the eye and are not built yet — the ground the car
       // is standing on is still being made. A run at speed wants this at zero every frame.
       unfinishedHere: (() => { let n = 0; for (const u of gradeUnits) if (!u.done && Math.hypot(u.x - lastEyeSeen.x, u.z - lastEyeSeen.z) <= u.r) n++; return n })(),
-      focus: { x: Math.round(gradeEye.x), z: Math.round(gradeEye.z) },
+      focus: { x: Math.round(gradeEye.x + gradeDir.x * gradeDir.reach), z: Math.round(gradeEye.z + gradeDir.z * gradeDir.reach) },
+      recent: [...gradeStats.recent],
     }),
     roadStream: () => {
       const near: { key: string; d: number }[] = []

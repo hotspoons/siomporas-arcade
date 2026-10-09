@@ -58,6 +58,8 @@ const nextSlice = (): Promise<void> => {
 }
 
 export interface BudgetStats {
+  /** main-thread time the work itself took, summed over its slices, ms */
+  workMs: number
   /** how many times the work yielded back to the browser */
   yields: number
   /** total wall-clock across the whole budgeted run, ms */
@@ -73,7 +75,7 @@ export class Budget {
   private onProgress?: (done: number, total: number) => void
   private done = 0
   private total = 0
-  readonly stats: BudgetStats = { yields: 0, elapsedMs: 0, worstSliceMs: 0 }
+  readonly stats: BudgetStats = { workMs: 0, yields: 0, elapsedMs: 0, worstSliceMs: 0 }
 
   /** @param sliceMs how long to work before handing the frame back */
   constructor(sliceMs = 8) {
@@ -110,6 +112,7 @@ export class Budget {
       return
     }
     if (slice > this.stats.worstSliceMs) this.stats.worstSliceMs = slice
+    this.stats.workMs += slice
     sliceStats.ms += slice
     sliceStats.slices++
     this.stats.yields++
@@ -121,6 +124,7 @@ export class Budget {
   /** close the books — `stats.elapsedMs` is wall clock including the time spent yielded */
   finish(): BudgetStats {
     const slice = performance.now() - this.sliceStart
+    this.stats.workMs += slice
     if (slice > this.stats.worstSliceMs) this.stats.worstSliceMs = slice
     this.stats.elapsedMs = Math.round(performance.now() - this.started)
     this.stats.worstSliceMs = Math.round(this.stats.worstSliceMs)

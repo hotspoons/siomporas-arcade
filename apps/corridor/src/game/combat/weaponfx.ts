@@ -213,12 +213,15 @@ export class GunLayer {
   private hitTest: (from: THREE.Vector3, to: THREE.Vector3) => THREE.Vector3 | null
   private groundAt: (x: number, z: number) => number | null
   private onHit: (hit: GunHit) => void
+  /** a round left a muzzle — the sound. Optional: the test rig and the probes fire silently */
+  private onFire: ((from: THREE.Vector3) => void) | null
 
-  constructor(o: { hitTest: GunLayer['hitTest']; groundAt: GunLayer['groundAt']; onHit: GunLayer['onHit'] }) {
+  constructor(o: { hitTest: GunLayer['hitTest']; groundAt: GunLayer['groundAt']; onHit: GunLayer['onHit']; onFire?: (from: THREE.Vector3) => void }) {
     this.group.name = 'gun'
     this.hitTest = o.hitTest
     this.groundAt = o.groundAt
     this.onHit = o.onHit
+    this.onFire = o.onFire ?? null
   }
 
   /** The trigger is held this frame. `muzzles` are world points; `aim` is the unit direction. */
@@ -263,6 +266,7 @@ export class GunLayer {
       const end = at ?? far
       this.tracer(from, end)
       this.flash(from, 0.9)
+      this.onFire?.(from)
       this.fired++
       if (at) {
         this.hits++

@@ -22,6 +22,7 @@
 // arithmetic that turns "78 kg, 1.82 m" into limbs a ragdoll can be built from — so all of it can be
 // checked in a test rather than discovered by shoving somebody down a hill.
 import { HUMANOID_MASS, RAGDOLL_HUMANOID } from '@apex/engine/physics/ragdoll'
+import { validateSoundOverrides, type SoundOverrides } from '../audio/soundbank'
 
 /* ---- the document ---------------------------------------------------------------------------- */
 
@@ -71,6 +72,8 @@ export interface ActorDoc {
   combat: ActorCombat
   /** take bone roles from the asset's own rig binding */
   rig: { from_asset: boolean }
+  /** this actor's own sounds, by slot — the thud when a car meets it, its weapon's report. See VehicleDoc.sounds */
+  sounds?: SoundOverrides
 }
 
 /* ---- defaults, per class ---------------------------------------------------------------------- */
@@ -198,6 +201,7 @@ export function validateActor(a: ActorDoc | null | undefined, opts: { weapons?: 
   if (a.rig?.from_asset && opts.rigRoles && !opts.rigRoles.length) {
     warnings.push('this asset has no rig binding, so nothing knows which bone is a hand — weapons will not attach')
   }
+  errors.push(...validateSoundOverrides(a.sounds))
   return { ok: errors.length === 0, errors, warnings }
 }
 

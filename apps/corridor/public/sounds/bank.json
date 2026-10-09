@@ -1,0 +1,836 @@
+{
+ "version": 1,
+ "slots": {
+  "crash.glass": {
+   "desc": "glazing going, layered over a crash",
+   "clips": [
+    {
+     "file": "crash-glass/impactGlass_light_000.ogg",
+     "s": 0.21,
+     "rms": 0.1006
+    },
+    {
+     "file": "crash-glass/impactGlass_light_001.ogg",
+     "s": 0.21,
+     "rms": 0.0962
+    },
+    {
+     "file": "crash-glass/impactGlass_light_002.ogg",
+     "s": 0.21,
+     "rms": 0.1004
+    },
+    {
+     "file": "crash-glass/impactGlass_light_003.ogg",
+     "s": 0.21,
+     "rms": 0.0942
+    },
+    {
+     "file": "crash-glass/impactGlass_light_004.ogg",
+     "s": 0.21,
+     "rms": 0.1086
+    },
+    {
+     "file": "crash-glass/impactGlass_medium_000.ogg",
+     "s": 0.543,
+     "rms": 0.0659
+    },
+    {
+     "file": "crash-glass/impactGlass_medium_001.ogg",
+     "s": 0.543,
+     "rms": 0.0633
+    },
+    {
+     "file": "crash-glass/impactGlass_medium_002.ogg",
+     "s": 0.543,
+     "rms": 0.0614
+    },
+    {
+     "file": "crash-glass/impactGlass_medium_003.ogg",
+     "s": 0.543,
+     "rms": 0.0695
+    },
+    {
+     "file": "crash-glass/impactGlass_medium_004.ogg",
+     "s": 0.543,
+     "rms": 0.0801
+    },
+    {
+     "file": "crash-glass/impactGlass_heavy_000.ogg",
+     "s": 0.241,
+     "rms": 0.072
+    },
+    {
+     "file": "crash-glass/impactGlass_heavy_001.ogg",
+     "s": 0.429,
+     "rms": 0.0581
+    },
+    {
+     "file": "crash-glass/impactGlass_heavy_002.ogg",
+     "s": 0.247,
+     "rms": 0.0712
+    },
+    {
+     "file": "crash-glass/impactGlass_heavy_003.ogg",
+     "s": 0.172,
+     "rms": 0.0993
+    },
+    {
+     "file": "crash-glass/impactGlass_heavy_004.ogg",
+     "s": 0.399,
+     "rms": 0.0583
+    }
+   ]
+  },
+  "crash.heavy": {
+   "desc": "a wreck: head-on, a roll, a wall at speed",
+   "clips": [
+    {
+     "file": "crash-heavy/impactMetal_heavy_000.ogg",
+     "s": 0.168,
+     "rms": 0.0797
+    },
+    {
+     "file": "crash-heavy/impactMetal_heavy_001.ogg",
+     "s": 0.359,
+     "rms": 0.0625
+    },
+    {
+     "file": "crash-heavy/impactMetal_heavy_002.ogg",
+     "s": 0.117,
+     "rms": 0.0983
+    },
+    {
+     "file": "crash-heavy/impactMetal_heavy_003.ogg",
+     "s": 0.207,
+     "rms": 0.0756
+    },
+    {
+     "file": "crash-heavy/impactMetal_heavy_004.ogg",
+     "s": 0.134,
+     "rms": 0.0918
+    },
+    {
+     "file": "crash-heavy/impactPlate_heavy_000.ogg",
+     "s": 0.489,
+     "rms": 0.0737
+    },
+    {
+     "file": "crash-heavy/impactPlate_heavy_001.ogg",
+     "s": 0.352,
+     "rms": 0.1283
+    },
+    {
+     "file": "crash-heavy/impactPlate_heavy_002.ogg",
+     "s": 0.494,
+     "rms": 0.0828
+    },
+    {
+     "file": "crash-heavy/impactPlate_heavy_003.ogg",
+     "s": 0.347,
+     "rms": 0.1289
+    },
+    {
+     "file": "crash-heavy/impactPlate_heavy_004.ogg",
+     "s": 0.559,
+     "rms": 0.0769
+    },
+    {
+     "file": "crash-heavy/slam-14.ogg",
+     "s": 1.6,
+     "rms": 0.189
+    },
+    {
+     "file": "crash-heavy/slam-3.ogg",
+     "s": 1.6,
+     "rms": 0.1873
+    },
+    {
+     "file": "crash-heavy/slam-15.ogg",
+     "s": 1.143,
+     "rms": 0.1489
+    },
+    {
+     "file": "crash-heavy/slam-8.ogg",
+     "s": 1.306,
+     "rms": 0.0892
+    },
+    {
+     "file": "crash-heavy/slam-1.ogg",
+     "s": 1.6,
+     "rms": 0.085
+    },
+    {
+     "file": "crash-heavy/slam-6.ogg",
+     "s": 1.58,
+     "rms": 0.0789
+    },
+    {
+     "file": "crash-heavy/slam-4.ogg",
+     "s": 1.6,
+     "rms": 0.0782
+    },
+    {
+     "file": "crash-heavy/slam-12.ogg",
+     "s": 1.6,
+     "rms": 0.1441
+    }
+   ]
+  },
+  "crash.light": {
+   "desc": "a tap: kerbs, bollards, the side of a parked car",
+   "clips": [
+    {
+     "file": "crash-light/impactMetal_light_000.ogg",
+     "s": 0.351,
+     "rms": 0.1003
+    },
+    {
+     "file": "crash-light/impactMetal_light_001.ogg",
+     "s": 0.252,
+     "rms": 0.0995
+    },
+    {
+     "file": "crash-light/impactMetal_light_002.ogg",
+     "s": 0.236,
+     "rms": 0.1005
+    },
+    {
+     "file": "crash-light/impactMetal_light_003.ogg",
+     "s": 0.482,
+     "rms": 0.1049
+    },
+    {
+     "file": "crash-light/impactMetal_light_004.ogg",
+     "s": 0.213,
+     "rms": 0.0926
+    },
+    {
+     "file": "crash-light/impactPlate_light_000.ogg",
+     "s": 0.532,
+     "rms": 0.0631
+    },
+    {
+     "file": "crash-light/impactPlate_light_001.ogg",
+     "s": 0.655,
+     "rms": 0.0484
+    },
+    {
+     "file": "crash-light/impactPlate_light_002.ogg",
+     "s": 0.489,
+     "rms": 0.0522
+    },
+    {
+     "file": "crash-light/impactPlate_light_003.ogg",
+     "s": 0.528,
+     "rms": 0.0599
+    },
+    {
+     "file": "crash-light/impactPlate_light_004.ogg",
+     "s": 0.608,
+     "rms": 0.0501
+    }
+   ]
+  },
+  "crash.medium": {
+   "desc": "a proper hit",
+   "clips": [
+    {
+     "file": "crash-medium/impactMetal_medium_000.ogg",
+     "s": 0.272,
+     "rms": 0.1253
+    },
+    {
+     "file": "crash-medium/impactMetal_medium_001.ogg",
+     "s": 0.143,
+     "rms": 0.1101
+    },
+    {
+     "file": "crash-medium/impactMetal_medium_002.ogg",
+     "s": 0.119,
+     "rms": 0.1189
+    },
+    {
+     "file": "crash-medium/impactMetal_medium_003.ogg",
+     "s": 0.254,
+     "rms": 0.1129
+    },
+    {
+     "file": "crash-medium/impactMetal_medium_004.ogg",
+     "s": 0.109,
+     "rms": 0.1216
+    },
+    {
+     "file": "crash-medium/impactPlate_medium_000.ogg",
+     "s": 0.609,
+     "rms": 0.0661
+    },
+    {
+     "file": "crash-medium/impactPlate_medium_001.ogg",
+     "s": 0.616,
+     "rms": 0.0574
+    },
+    {
+     "file": "crash-medium/impactPlate_medium_002.ogg",
+     "s": 0.515,
+     "rms": 0.0795
+    },
+    {
+     "file": "crash-medium/impactPlate_medium_003.ogg",
+     "s": 0.599,
+     "rms": 0.08
+    },
+    {
+     "file": "crash-medium/impactPlate_medium_004.ogg",
+     "s": 0.534,
+     "rms": 0.0795
+    },
+    {
+     "file": "crash-medium/impactTin_medium_000.ogg",
+     "s": 0.159,
+     "rms": 0.0752
+    },
+    {
+     "file": "crash-medium/impactTin_medium_001.ogg",
+     "s": 0.174,
+     "rms": 0.1076
+    },
+    {
+     "file": "crash-medium/impactTin_medium_002.ogg",
+     "s": 0.134,
+     "rms": 0.1049
+    },
+    {
+     "file": "crash-medium/impactTin_medium_003.ogg",
+     "s": 0.215,
+     "rms": 0.0832
+    },
+    {
+     "file": "crash-medium/impactTin_medium_004.ogg",
+     "s": 0.179,
+     "rms": 0.1033
+    }
+   ]
+  },
+  "crash.soft": {
+   "desc": "hitting something that is not metal: a pedestrian, a bush, a bin bag",
+   "clips": [
+    {
+     "file": "crash-soft/impactSoft_medium_000.ogg",
+     "s": 0.118,
+     "rms": 0.1664
+    },
+    {
+     "file": "crash-soft/impactSoft_medium_001.ogg",
+     "s": 0.183,
+     "rms": 0.1721
+    },
+    {
+     "file": "crash-soft/impactSoft_medium_002.ogg",
+     "s": 0.135,
+     "rms": 0.1688
+    },
+    {
+     "file": "crash-soft/impactSoft_medium_003.ogg",
+     "s": 0.14,
+     "rms": 0.1645
+    },
+    {
+     "file": "crash-soft/impactSoft_medium_004.ogg",
+     "s": 0.147,
+     "rms": 0.1601
+    },
+    {
+     "file": "crash-soft/impactSoft_heavy_000.ogg",
+     "s": 0.505,
+     "rms": 0.1332
+    },
+    {
+     "file": "crash-soft/impactSoft_heavy_001.ogg",
+     "s": 0.572,
+     "rms": 0.1309
+    },
+    {
+     "file": "crash-soft/impactSoft_heavy_002.ogg",
+     "s": 0.572,
+     "rms": 0.1343
+    },
+    {
+     "file": "crash-soft/impactSoft_heavy_003.ogg",
+     "s": 0.544,
+     "rms": 0.1461
+    },
+    {
+     "file": "crash-soft/impactSoft_heavy_004.ogg",
+     "s": 0.501,
+     "rms": 0.1412
+    },
+    {
+     "file": "crash-soft/impactPunch_medium_000.ogg",
+     "s": 0.326,
+     "rms": 0.161
+    },
+    {
+     "file": "crash-soft/impactPunch_medium_001.ogg",
+     "s": 0.314,
+     "rms": 0.1647
+    },
+    {
+     "file": "crash-soft/impactPunch_medium_002.ogg",
+     "s": 0.378,
+     "rms": 0.1363
+    },
+    {
+     "file": "crash-soft/impactPunch_medium_003.ogg",
+     "s": 0.321,
+     "rms": 0.1451
+    },
+    {
+     "file": "crash-soft/impactPunch_medium_004.ogg",
+     "s": 0.379,
+     "rms": 0.141
+    },
+    {
+     "file": "crash-soft/impactPunch_heavy_000.ogg",
+     "s": 0.621,
+     "rms": 0.1284
+    },
+    {
+     "file": "crash-soft/impactPunch_heavy_001.ogg",
+     "s": 0.522,
+     "rms": 0.1383
+    },
+    {
+     "file": "crash-soft/impactPunch_heavy_002.ogg",
+     "s": 0.453,
+     "rms": 0.1482
+    },
+    {
+     "file": "crash-soft/impactPunch_heavy_003.ogg",
+     "s": 0.464,
+     "rms": 0.1385
+    },
+    {
+     "file": "crash-soft/impactPunch_heavy_004.ogg",
+     "s": 0.522,
+     "rms": 0.1368
+    }
+   ]
+  },
+  "explosion": {
+   "desc": "a missile landing, a car going up",
+   "clips": [
+    {
+     "file": "explosion/blast-0.ogg",
+     "s": 1.997,
+     "rms": 0.1249
+    },
+    {
+     "file": "explosion/blast-1.ogg",
+     "s": 1.357,
+     "rms": 0.2171
+    },
+    {
+     "file": "explosion/blast-2.ogg",
+     "s": 1.997,
+     "rms": 0.1211
+    },
+    {
+     "file": "explosion/blast-3.ogg",
+     "s": 1.553,
+     "rms": 0.173
+    },
+    {
+     "file": "explosion/blast-4.ogg",
+     "s": 1.997,
+     "rms": 0.2024
+    },
+    {
+     "file": "explosion/bang-1807.ogg",
+     "s": 1.997,
+     "rms": 0.0687
+    },
+    {
+     "file": "explosion/bang-1808.ogg",
+     "s": 1.997,
+     "rms": 0.0693
+    },
+    {
+     "file": "explosion/bang-1806.ogg",
+     "s": 1.997,
+     "rms": 0.0687
+    }
+   ]
+  },
+  "explosion.far": {
+   "desc": "the same, heard from a distance",
+   "clips": [
+    {
+     "file": "explosion-far/far-1023.ogg",
+     "s": 2.125,
+     "rms": 0.0317
+    },
+    {
+     "file": "explosion-far/lowFrequency_explosion_000.ogg",
+     "s": 1.997,
+     "rms": 0.1246
+    },
+    {
+     "file": "explosion-far/lowFrequency_explosion_001.ogg",
+     "s": 0.997,
+     "rms": 0.1627
+    }
+   ]
+  },
+  "gun.fire": {
+   "desc": "one round from the machine gun",
+   "clips": [
+    {
+     "file": "gun-fire/bsb0437-0.ogg",
+     "s": 0.45,
+     "rms": 0.2092
+    },
+    {
+     "file": "gun-fire/bsb0438-0.ogg",
+     "s": 0.45,
+     "rms": 0.1296
+    },
+    {
+     "file": "gun-fire/bsb0397-0.ogg",
+     "s": 0.45,
+     "rms": 0.1625
+    },
+    {
+     "file": "gun-fire/cz-0.ogg",
+     "s": 0.45,
+     "rms": 0.166
+    },
+    {
+     "file": "gun-fire/cz-1.ogg",
+     "s": 0.45,
+     "rms": 0.2262
+    },
+    {
+     "file": "gun-fire/cz-2.ogg",
+     "s": 0.45,
+     "rms": 0.2359
+    },
+    {
+     "file": "gun-fire/cz-3.ogg",
+     "s": 0.45,
+     "rms": 0.2366
+    },
+    {
+     "file": "gun-fire/sks-0.ogg",
+     "s": 0.45,
+     "rms": 0.178
+    },
+    {
+     "file": "gun-fire/sks-1.ogg",
+     "s": 0.45,
+     "rms": 0.1822
+    },
+    {
+     "file": "gun-fire/sks-2.ogg",
+     "s": 0.45,
+     "rms": 0.1832
+    },
+    {
+     "file": "gun-fire/sks-3.ogg",
+     "s": 0.45,
+     "rms": 0.1866
+    },
+    {
+     "file": "gun-fire/mosin-0.ogg",
+     "s": 0.45,
+     "rms": 0.2225
+    },
+    {
+     "file": "gun-fire/mosin-1.ogg",
+     "s": 0.45,
+     "rms": 0.2184
+    },
+    {
+     "file": "gun-fire/mosin-2.ogg",
+     "s": 0.45,
+     "rms": 0.2308
+    }
+   ]
+  },
+  "gun.fire.shotgun": {
+   "desc": "one shotgun blast",
+   "clips": [
+    {
+     "file": "gun-fire-shotgun/shotgun-0.ogg",
+     "s": 0.8,
+     "rms": 0.0347
+    },
+    {
+     "file": "gun-fire-shotgun/shotgun-1.ogg",
+     "s": 0.8,
+     "rms": 0.0313
+    },
+    {
+     "file": "gun-fire-shotgun/shotgun-2.ogg",
+     "s": 0.8,
+     "rms": 0.0315
+    },
+    {
+     "file": "gun-fire-shotgun/shotgun-3.ogg",
+     "s": 0.8,
+     "rms": 0.0293
+    },
+    {
+     "file": "gun-fire-shotgun/shotty.ogg",
+     "s": 0.698,
+     "rms": 0.2196
+    }
+   ]
+  },
+  "gun.hit": {
+   "desc": "a round landing on a car",
+   "clips": [
+    {
+     "file": "gun-hit/impactMetal_light_000.ogg",
+     "s": 0.351,
+     "rms": 0.1004
+    },
+    {
+     "file": "gun-hit/impactMetal_light_001.ogg",
+     "s": 0.252,
+     "rms": 0.1003
+    },
+    {
+     "file": "gun-hit/impactMetal_light_002.ogg",
+     "s": 0.236,
+     "rms": 0.1023
+    },
+    {
+     "file": "gun-hit/impactMetal_light_003.ogg",
+     "s": 0.482,
+     "rms": 0.105
+    },
+    {
+     "file": "gun-hit/impactMetal_light_004.ogg",
+     "s": 0.213,
+     "rms": 0.1012
+    },
+    {
+     "file": "gun-hit/impactGeneric_light_000.ogg",
+     "s": 0.139,
+     "rms": 0.1131
+    },
+    {
+     "file": "gun-hit/impactGeneric_light_001.ogg",
+     "s": 0.118,
+     "rms": 0.097
+    },
+    {
+     "file": "gun-hit/impactGeneric_light_002.ogg",
+     "s": 0.14,
+     "rms": 0.1151
+    },
+    {
+     "file": "gun-hit/impactGeneric_light_003.ogg",
+     "s": 0.138,
+     "rms": 0.097
+    },
+    {
+     "file": "gun-hit/impactGeneric_light_004.ogg",
+     "s": 0.14,
+     "rms": 0.0952
+    },
+    {
+     "file": "gun-hit/impactgun-1.ogg",
+     "s": 0.6,
+     "rms": 0.1103
+    },
+    {
+     "file": "gun-hit/impactgun-2.ogg",
+     "s": 0.6,
+     "rms": 0.1044
+    },
+    {
+     "file": "gun-hit/impactgun-3.ogg",
+     "s": 0.6,
+     "rms": 0.1195
+    },
+    {
+     "file": "gun-hit/impactgun-4.ogg",
+     "s": 0.6,
+     "rms": 0.1046
+    },
+    {
+     "file": "gun-hit/impactgun-5.ogg",
+     "s": 0.6,
+     "rms": 0.1282
+    }
+   ]
+  },
+  "gun.hit.glass": {
+   "desc": "a round through a window",
+   "clips": [
+    {
+     "file": "gun-hit-glass/impactGlass_light_000.ogg",
+     "s": 0.21,
+     "rms": 0.1147
+    },
+    {
+     "file": "gun-hit-glass/impactGlass_light_001.ogg",
+     "s": 0.21,
+     "rms": 0.1102
+    },
+    {
+     "file": "gun-hit-glass/impactGlass_light_002.ogg",
+     "s": 0.21,
+     "rms": 0.1105
+    },
+    {
+     "file": "gun-hit-glass/impactGlass_light_003.ogg",
+     "s": 0.21,
+     "rms": 0.1064
+    },
+    {
+     "file": "gun-hit-glass/impactGlass_light_004.ogg",
+     "s": 0.21,
+     "rms": 0.1227
+    }
+   ]
+  },
+  "gun.hit.ground": {
+   "desc": "a round into the road or the verge",
+   "clips": [
+    {
+     "file": "gun-hit-ground/impactMining_000.ogg",
+     "s": 0.5,
+     "rms": 0.1254
+    },
+    {
+     "file": "gun-hit-ground/impactMining_001.ogg",
+     "s": 0.5,
+     "rms": 0.1157
+    },
+    {
+     "file": "gun-hit-ground/impactMining_002.ogg",
+     "s": 0.5,
+     "rms": 0.0889
+    },
+    {
+     "file": "gun-hit-ground/impactMining_003.ogg",
+     "s": 0.5,
+     "rms": 0.0928
+    },
+    {
+     "file": "gun-hit-ground/impactMining_004.ogg",
+     "s": 0.5,
+     "rms": 0.1308
+    },
+    {
+     "file": "gun-hit-ground/footstep_concrete_000.ogg",
+     "s": 0.106,
+     "rms": 0.1039
+    },
+    {
+     "file": "gun-hit-ground/footstep_concrete_001.ogg",
+     "s": 0.108,
+     "rms": 0.1019
+    },
+    {
+     "file": "gun-hit-ground/footstep_concrete_002.ogg",
+     "s": 0.113,
+     "rms": 0.092
+    },
+    {
+     "file": "gun-hit-ground/footstep_concrete_003.ogg",
+     "s": 0.11,
+     "rms": 0.1034
+    },
+    {
+     "file": "gun-hit-ground/footstep_concrete_004.ogg",
+     "s": 0.114,
+     "rms": 0.1067
+    }
+   ]
+  },
+  "missile.launch": {
+   "desc": "a missile leaving the rail",
+   "clips": [
+    {
+     "file": "missile-launch/launch-0.ogg",
+     "s": 1.2,
+     "rms": 0.1387
+    },
+    {
+     "file": "missile-launch/launch-1.ogg",
+     "s": 1.2,
+     "rms": 0.1599
+    },
+    {
+     "file": "missile-launch/launch-2.ogg",
+     "s": 1.2,
+     "rms": 0.1318
+    },
+    {
+     "file": "missile-launch/launch-3.ogg",
+     "s": 1.2,
+     "rms": 0.179
+    },
+    {
+     "file": "missile-launch/launch-4.ogg",
+     "s": 1.2,
+     "rms": 0.1343
+    }
+   ]
+  },
+  "tire.skid": {
+   "desc": "a skid that starts and stops: lock-ups, handbrake turns",
+   "clips": [
+    {
+     "file": "tire-skid/skid-2368.ogg",
+     "s": 2.137,
+     "rms": 0.1981
+    },
+    {
+     "file": "tire-skid/skid-2369.ogg",
+     "s": 2.226,
+     "rms": 0.1727
+    },
+    {
+     "file": "tire-skid/skid-2370.ogg",
+     "s": 2.062,
+     "rms": 0.2012
+    },
+    {
+     "file": "tire-skid/skid-long.ogg",
+     "s": 6.0,
+     "rms": 0.1172
+    }
+   ]
+  },
+  "tire.squeal.loop": {
+   "desc": "light \u2192 heavy squeal loops, crossfaded by slip",
+   "loop": true,
+   "ordered": true,
+   "clips": [
+    {
+     "file": "tire-squeal-loop/squeal-light.ogg",
+     "s": 2.5,
+     "rms": 0.0923
+    },
+    {
+     "file": "tire-squeal-loop/squeal-medium.ogg",
+     "s": 2.5,
+     "rms": 0.1177
+    },
+    {
+     "file": "tire-squeal-loop/squeal-heavy.ogg",
+     "s": 2.5,
+     "rms": 0.1385
+    }
+   ]
+  }
+ },
+ "formats": [
+  "ogg",
+  "mp3"
+ ]
+}

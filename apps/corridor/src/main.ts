@@ -95,6 +95,8 @@ import { GamePolicy, resolveUiMode, type UiMode } from './game/session/gamepolic
 import { GameHud } from './ui/gamehud'
 import { GameMenu } from './ui/gamemenu'
 import { UiSound } from './ui/uisound'
+import { Sfx } from './game/audio/sfx'
+import { crashSlot } from './game/audio/soundbank'
 import { downloadJSON, readJSONFile } from './ui/files'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -267,6 +269,14 @@ const policy = new GamePolicy()
 const input = new GameInput(settings.data.keys, settings.data.pad)
 input.attach(window)
 const sounds = new UiSound()
+/**
+ * THE SAMPLED EFFECTS: tyres, crashes, guns, missiles — the bank under public/sounds, placed in
+ * the world (game/audio/sfx.ts). Its context is made from the same gesture as the engine's.
+ */
+const sfx = new Sfx()
+void sfx.loadBank('/sounds/bank.json', (id, file) => assetsvc.fileUrl(id, `sounds/${file}`))
+/** the player's tyre squeal, a levelled loop; made when the car first moves, dropped with the car */
+let squeal: ReturnType<Sfx['loop']> | null = null
 const uiParam = new URLSearchParams(location.search).get('ui')
 let uiMode: UiMode = resolveUiMode({ param: uiParam, stored: settings.data.ui, prod: import.meta.env.PROD })
 /**
@@ -565,6 +575,7 @@ function applyAudio() {
   const a = settings.data.audio
   engineSound.setUserAudio(engineGain({ ...a, muted: false }), a.muted)
   sounds.gain = sfxGain(a)
+  sfx.setUserAudio(sfxGain({ ...a, muted: false }), a.muted)
 }
 /** the bindings, the pad switch and the rumble strength, at the input */
 function applyBindings() {
@@ -992,7 +1003,7 @@ addEventListener('visibilitychange', () => { if (document.visibilityState === 'h
  * never fires `blur`, so a flag that starts false would be wrong from the first frame.
  */
 const listening = () => document.visibilityState === 'visible' && document.hasFocus() && !paused
-const syncAudible = () => engineSound.setMuted(!listening())
+const syncAudible = () => { const off = !listening(); engineSound.setMuted(off); sfx.setMuted(off) }
 for (const ev of ['visibilitychange', 'blur', 'focus'] as const) {
   addEventListener(ev, syncAudible, ev === 'visibilitychange' ? undefined : true)
 }
@@ -1036,6 +1047,8 @@ async function loadSite(slug: string) {
     scene.remove(drive.car.mesh)
     ;(drive.car as { free?: () => void }).free?.()
     drive.car = null
+    squeal?.stop()
+    squeal = null
   }
   // The physics world belongs to the SITE. A new site is a new world, not one carrying the old
   // world's heightfield tiles at the old site's origin — which would be ground in the right place
@@ -1737,6 +1750,8 @@ async function openLevel(id: string) {
     scene.remove(drive.car.mesh)
     ;(drive.car as { free?: () => void }).free?.()
     drive.car = null
+    squeal?.stop()
+    squeal = null
     if (wasDriving) setDrive(true)
   }
   // the level's start (its point, else the world's home) in its mode — the level's `mode` was
@@ -1787,6 +1802,27 @@ async function buildTraffic(want: TrafficSpec): Promise<void> {
     if (!trafficHitFns.size) return
     const info: TrafficHitInfo = { entity: ev.e, effect: ev.effect, force: ev.force, weapon: ev.weapon, at: { x: ev.at.x, y: -ev.at.z, z: ev.at.y } }
     for (const fn of trafficHitFns) fn(info)
+  })
+  /*
+   * THE TRAFFIC'S CRASHES, placed where they happen, in each car's own voice, and rationed: a
+   * pile-up reports hundreds of contacts a second and SFX_TRAFFIC_CRASH_PER_S of them are heard.
+   * The player's own contacts are left to `watchPlayerImpacts`, which already plays them —
+   * anything within three metres of the player's car is taken to be one of those.
+   */
+  let crashTokens = 0
+  let crashTokensAt = performance.now()
+  traffic.onCrash((ev) => {
+    const now = performance.now()
+    crashTokens = Math.min(T.SFX_TRAFFIC_CRASH_PER_S, crashTokens + ((now - crashTokensAt) / 1000) * T.SFX_TRAFFIC_CRASH_PER_S)
+    crashTokensAt = now
+    if (crashTokens < 1) return
+    const c = crashSlot(ev.peak, T.CRASH_LIGHT_NS, T.CRASH_HEAVY_NS)
+    if (!c) return
+    const p = drive.car?.pos
+    if (p && Math.hypot(p.x - ev.at.x, p.z - ev.at.z) < 3) return
+    crashTokens -= 1
+    sfx.play(c.slot, { at: ev.at, gain: c.gain, scopes: [ev.sounds], ref: c.slot === 'crash.heavy' ? 25 : undefined })
+    if (c.glass) sfx.play('crash.glass', { at: ev.at, gain: 0.6, scopes: [ev.sounds] })
   })
   try {
     const n = await traffic.load(site.manifest.slug, want)
@@ -1929,8 +1965,17 @@ function fireGun(dt: number): void {
       // a round that lands on a car knocks it loose and shoves it; one on a soft prop breaks it
       onHit: ({ at, dir }) => {
         const w = weaponsNow()
-        if (!traffic?.shoot(at, dir, w.gunImpulse, 0.35, w.gunDamage)) physics?.explode(at, { radius: 0.8, impulse: 0.5, breakAt: 1 })
+        if (traffic?.shoot(at, dir, w.gunImpulse, 0.35, w.gunDamage)) {
+          sfx.play('gun.hit', { at })
+        } else {
+          physics?.explode(at, { radius: 0.8, impulse: 0.5, breakAt: 1 })
+          // the road, or something standing on it: a round within a hand of the ground is dirt
+          const g = site?.groundAt(at.x, at.z) ?? null
+          sfx.play(g !== null && at.y - g < 0.35 ? 'gun.hit.ground' : 'gun.hit', { at, gain: 0.8 })
+        }
       },
+      // the report is the player's own: unplaced, at the gain the knob says, in this car's voice
+      onFire: () => sfx.play('gun.fire', { gain: T.SFX_GUN_GAIN, scopes: [playerVehicle?.sounds] }),
     })
     scene.add(gun.group)
   }
@@ -1939,6 +1984,7 @@ function fireGun(dt: number): void {
   gun.fire(from, playerAim(drive.car, 'gun'), dt)
 }
 let offPlayerImpact: (() => void) | null = null
+let lastPlayerCrashAt = 0
 
 /**
  * A blast at a point: the traffic within reach is knocked loose first — a car on rails ignores an
@@ -1951,6 +1997,9 @@ function boom(at: { x: number; y: number; z: number }, opts: { radius: number; i
   // under the test rig the player's own body feels nothing: it fires every half second at the
   // car in front, and a blast under its own bonnet would end the drive it exists to repeat
   const exclude = rig.on && rig.shield && drive.car instanceof RapierCar ? drive.car.bodyHandle : undefined
+  // two layers: the crack, heard to a street away, and the low roll that carries across the map
+  sfx.play('explosion', { at, ref: 35 })
+  sfx.play('explosion.far', { at, ref: 150, gain: 0.7 })
   return cars + (physics ? physics.explode(at, { ...opts, exclude }) : 0)
 }
 
@@ -2039,6 +2088,7 @@ function fireMissile(aim?: THREE.Vector3): boolean {
   if (launcher) { launcher.updateWorldMatrix(true, false); from = launcher.getWorldPosition(new THREE.Vector3()).addScaledVector(dir, 1.0) }
   else from = car.pos.clone().add(car.forward.clone().multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.15, 0))
   layer.fire(from, dir, Math.max(0, car.speed))
+  sfx.play('missile.launch', { scopes: [playerVehicle?.sounds] })
   return true
 }
 
@@ -2056,6 +2106,16 @@ function watchPlayerImpacts(): void {
     // 6 kN·s is about the car into a wall at 30 mph — everything above that is 'all of it'
     const hit = Math.min(1, im.peak / 6000)
     if (hit > 0.04) input.haptics.rumble(hit, Math.min(1, hit * 1.5), 90 + hit * 260)
+    // the sound of it, graded off the same impulse. A scrape along a wall reports a contact
+    // every step; one tap a sixth of a second is a scrape, sixty is a drum roll. A wreck always plays.
+    const c = crashSlot(im.peak, T.CRASH_LIGHT_NS, T.CRASH_HEAVY_NS)
+    const now = performance.now()
+    if (c && (c.slot === 'crash.heavy' || now - lastPlayerCrashAt > 160)) {
+      lastPlayerCrashAt = now
+      const scopes = [playerVehicle?.sounds]
+      sfx.play(c.slot, { gain: c.gain, scopes })
+      if (c.glass) sfx.play('crash.glass', { gain: 0.7, scopes })
+    }
     if (!playerModel) return
     if (im.a.handle === mine) dentObject(playerModel.object, im, false)
     else dentObject(playerModel.object, im, true)
@@ -2485,6 +2545,20 @@ function programHost(): ProgramHost {
     } },
     setTime: (hhmm) => { worldClock.setLocal(siteZone(), undefined, hhmm); applySky(season, false) },
     setWeather: (w) => setWeatherSelection(w as Weather),
+    // THE PROGRAM SPEAKS SITE METRES here as well: x east, y north, z up → three's x, z = -y, y = z
+    audio: {
+      play: (slot, o) => sfx.play(slot, { gain: o?.gain, rate: o?.rate, at: o?.at ? { x: o.at.x, y: o.at.z, z: -o.at.y } : undefined }),
+      loop: (slot) => {
+        const h = sfx.loop(slot)
+        return { set: (l, at) => h.set(l, at ? { x: at.x, y: at.z, z: -at.y } : undefined), stop: () => h.stop() }
+      },
+      override: (slot, clips) => {
+        const w = { ...(sfx.worldScope ?? {}) } as Record<string, string[] | undefined>
+        if (clips === null) delete w[slot]; else w[slot] = clips
+        sfx.worldScope = Object.keys(w).length ? (w as typeof sfx.worldScope) : null
+      },
+      slots: () => sfx.bank?.slots() ?? [],
+    },
     physics: {
       setProfile: (id, overrides) => {
         if (drive.car instanceof RapierCar) drive.car.setProfile(driveProfile(id, overrides))
@@ -2781,6 +2855,9 @@ function setDrive(on: boolean) {
       engineSound.setVoiced(playerEngine)
     }
     void engineSound.start()
+    sfx.unlock()
+    // decode what this car is about to need, before the first shot rather than 30 ms after it
+    sfx.warm(['gun.fire', 'gun.hit', 'gun.hit.ground', 'missile.launch', 'explosion', 'explosion.far', 'crash.light', 'crash.medium', 'crash.heavy', 'crash.glass', 'tire.squeal.loop'], [playerVehicle?.sounds])
   }
   if (on && fly?.walk) fly.setWalk(false)
   orbit.enabled = !on
@@ -3477,6 +3554,7 @@ function applySeasonKnob() {
 function onTuneChange() {
   // the screen stays on while the knob says so (a soak test); released the moment it is off
   void setWakeLock(T.SCREEN_WAKE_LOCK > 0)
+  sfx.refreshGain()
   // TRAFFIC_DENSITY is a switch as well as a level: raised on a world with no traffic simulation,
   // it builds one on the spot. Lowering it, or nudging any other knob, leaves the layer alone.
   if (T.TRAFFIC_DENSITY !== lastDensityKnob) {
@@ -3848,7 +3926,7 @@ const HELD_ACTIONS: Action[] = ['throttle', 'brake', 'steerLeft', 'steerRight', 
 // THE FIRST GESTURE STARTS THE SOUND. A level that puts the player in the car at load builds the
 // engine's AudioContext before any click or key, and the browser holds it suspended until one
 // (Rich, 2026-09-30: "no sound"). Any key or pointer, anywhere, is the gesture.
-for (const ev of ['pointerdown', 'keydown'] as const) addEventListener(ev, () => engineSound.unlock(), { capture: true, passive: true })
+for (const ev of ['pointerdown', 'keydown'] as const) addEventListener(ev, () => { engineSound.unlock(); sfx.unlock() }, { capture: true, passive: true })
 
 addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement
@@ -4273,6 +4351,18 @@ function frame() {
       engineSound.syncFromCar(playerEngine, car, drive.input.throttle, dt)
     }
     /*
+     * THE SQUEAL, by how hard the tyres are being asked. The physics car reports `slip` (the
+     * corner past what the tyres hold) and `wheelslip` (drive they refused); the arcade car has
+     * its own `slip`. Nothing on grass — tyres do not squeal on grass — and nothing crawling.
+     */
+    {
+      const st = (car as { state?: { slip: number; wheelslip: number } }).state
+      const slip = st ? Math.max(st.slip, st.wheelslip * 0.8) : ((car as { slip?: number }).slip ?? Math.min(1, Math.abs(car.slide) / 6))
+      const span = Math.max(0.01, T.SQUEAL_SLIP_FULL - T.SQUEAL_SLIP_ON)
+      const level = paused || car.onGrass || Math.abs(car.speed) < T.SQUEAL_MIN_MPS ? 0 : Math.min(1, Math.max(0, (slip - T.SQUEAL_SLIP_ON) / span))
+      if (level > 0 || squeal) (squeal ??= sfx.loop('tire.squeal.loop', [playerVehicle?.sounds])).set(level, car.pos)
+    }
+    /*
      * WHICH WAY IS UP FOR THE CAMERA. Rich, 2026-09-29, first time round the loop: *"when the car
      * went upside down the camera stayed right side up and I got disoriented and drove off the
      * loop."* So the camera's up follows the CAR's up — `CHASE_ROLL` of it, smoothed by
@@ -4423,12 +4513,14 @@ function frame() {
    * vector comes off the quaternion rather than being assumed to be world up: corridor does not
    * roll today, and a camera that does is then right for free.
    */
+  camera.getWorldDirection(earDir)
+  earUp.copy(UP_LOCAL).applyQuaternion(camera.quaternion)
+  // the effects hear from the camera too, in three's frame — no conversion, the impacts are in it
+  sfx.setListener(camera.position, earDir, earUp)
   if (playerEngine) {
     // Nobody has their foot on it while you are off flying, so let it settle to idle where it
     // stands rather than holding the revs it had when you stepped out.
     if (!(drive.on && drive.car)) engineSound.coast(playerEngine, dt)
-    camera.getWorldDirection(earDir)
-    earUp.copy(UP_LOCAL).applyQuaternion(camera.quaternion)
     engineSound.update(actors.world, {
       position: { x: camera.position.x, y: -camera.position.z, z: camera.position.y },
       forward: { x: earDir.x, y: -earDir.z, z: earDir.y },
@@ -4806,6 +4898,10 @@ registerBridgeContext({
   /** the test rig: `rig.start({ speed, fireEvery, lane })`, `rig.stop()`, `rig.stats()` */
   get rig() {
     return rig
+  },
+  /** the sampled effects: `sfx.stats()`, `sfx.play('crash.heavy')`, `sfx.bank?.slots()` */
+  get sfx() {
+    return sfx
   },
   /** the screen wake lock's state: wanted (the knob), held (the browser agreed), supported */
   wakeLock: () => wakeLockState(),

@@ -128,6 +128,7 @@ const TYPES = {
   '.json': 'application/json', '.fbx': 'application/octet-stream', '.obj': 'text/plain',
   '.dae': 'model/vnd.collada+xml', '.stl': 'model/stl', '.ply': 'application/octet-stream',
   '.usdz': 'model/vnd.usdz+zip',
+  '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.webm': 'audio/webm', '.flac': 'audio/flac',
 }
 
 /**
@@ -139,6 +140,9 @@ const TYPES = {
  * `spec`. A catalog entry that looks meshed and fails at load is worse than one that says it
  * needs converting.
  */
+/** what a build's own sound may be uploaded as; the browser decodes these (wav/ogg/mp3 everywhere, m4a/webm/flac most places) */
+const SOUND_FORMATS = ['.ogg', '.mp3', '.wav', '.m4a', '.webm', '.flac']
+
 const MODEL_FORMATS = {
   '.glb': { loadable: true, note: 'what the game loads' },
   '.gltf': { loadable: true, note: 'glTF, unpacked — its .bin and textures must come too' },
@@ -438,6 +442,26 @@ const server = http.createServer(async (req, res) => {
         const dest = ext === '.glb' ? 'mesh.glb' : `source${ext}`
         await catalog.writeFileFor(id, dest, buf, { step: 'import', format: ext, originalName: name, bytes: buf.length })
         return json(res, 200, { id, stored: dest, format: ext, bytes: buf.length, loadable: MODEL_FORMATS[ext].loadable })
+      }
+
+      /*
+       * A SOUND OF ITS OWN. Rich, 2026-10-09: "the ability to provide custom sounds for any
+       * vehicle, actor, etc." A clip is stored under the asset as sounds/<name> and the build's
+       * document names it `asset:<id>/<name>` in one of its sound slots (soundbank.ts). Raw bytes
+       * in a PUT, one file a request, like the model and the material maps.
+       */
+      if (seg.length >= 4 && seg[2] === 'sound' && req.method === 'PUT') {
+        const name = seg.slice(3).map(decodeURIComponent).join('/')
+        if (!/^[a-z0-9][a-z0-9_. -]{0,79}$/i.test(name) || name.includes('..') || name.includes('/')) {
+          return json(res, 400, { error: `bad sound name ${JSON.stringify(name)} — letters, digits, dots, dashes, one path segment` })
+        }
+        const ext = path.extname(name).toLowerCase()
+        if (!SOUND_FORMATS.includes(ext)) return json(res, 400, { error: `${ext || 'no extension'} is not a sound format this holds`, accepted: SOUND_FORMATS })
+        const buf = await body(req, 24 * 2 ** 20)
+        if (!buf.length) return json(res, 400, { error: 'empty upload' })
+        const dest = `sounds/${name}`
+        await catalog.writeFileFor(id, dest, buf, { step: 'sound', originalName: name, bytes: buf.length })
+        return json(res, 200, { id, stored: dest, entry: `asset:${id}/${name}`, bytes: buf.length })
       }
 
       if (seg.length >= 3 && seg[2] === 'file') {

@@ -82,3 +82,10 @@ packages/enginesim/packs/
 tools/assetsvc/data/
 probes/.build/
 .mcp.json
+
+# corridor sound bank: the tool venv and the downloaded source packs (rebuildable; the cuts under
+# apps/corridor/public/sounds ARE committed)
+tools/sounds/.venv/
+tools/sounds/.venv
+tools/sounds/.cache/
+tools/sounds/.cache

@@ -18,6 +18,7 @@ import { weaponPresetDoc, weaponPresetsFor } from '../../game/combat/weaponprese
 import { CLASSES_BY_TYPE } from '../../assets/classes'
 import type { AssetDetailCtx } from './assets'
 import { buildScreen, type BuildPreset, type BuildSpec } from './buildscreen'
+import { clipField } from './soundpicker'
 import { bodyOf, group, readout, select, setGroupError, slider, textField } from '../../ui/controls'
 import { el, type Tab } from '../../ui/shell'
 
@@ -30,6 +31,8 @@ export interface WeaponFormOpts {
   rigRoles?: string[]
   onChange: (doc: WeaponDoc, live: boolean) => void
   onReport?: (errors: number) => void
+  /** the catalog asset the build is on — where an uploaded clip is stored. Null: no model yet */
+  assetId?: string | null
 }
 
 /**
@@ -111,8 +114,9 @@ export function weaponForm(host: HTMLElement, getDoc: () => WeaponDoc, opts: Wea
     } else {
       hb.append(textField({ label: 'Attaches to', value: doc.attach, note: 'a bone role on whoever carries it — this asset has no rig bound, so it is not checked', onChange: (v) => { doc.attach = v.trim(); stage() } }))
     }
-    hb.append(textField({ label: 'Fire sound', value: doc.audio.fire ?? '', onChange: (v) => { doc.audio.fire = v.trim() || undefined; stage() } }))
-    hb.append(textField({ label: 'Reload sound', value: doc.audio.reload ?? '', onChange: (v) => { doc.audio.reload = v.trim() || undefined; stage() } }))
+    // its sounds: a bank clip, a URL or an upload, heard before it is saved (soundpicker.ts)
+    hb.append(clipField({ label: 'Fire sound', value: doc.audio.fire, assetId: opts.assetId ?? null, slot: 'gun.fire', onChange: (v) => { doc.audio.fire = v; stage() } }))
+    hb.append(clipField({ label: 'Reload sound', value: doc.audio.reload, assetId: opts.assetId ?? null, slot: 'crash.light', onChange: (v) => { doc.audio.reload = v; stage() } }))
     body.append(hold)
 
   }
@@ -180,7 +184,7 @@ export const WEAPON_BUILD: BuildSpec<WeaponDoc> = {
     if (d.impulse > 0) out.push({ text: `${d.impulse} N·s`, cls: 'ok' })
     return out
   },
-  form: (host, getDoc, onChange) => void weaponForm(host, getDoc, { onChange: (doc) => onChange(doc) }),
+  form: (host, getDoc, onChange, asset) => void weaponForm(host, getDoc, { onChange: (doc) => onChange(doc), assetId: asset?.id ?? null }),
   errors: (d) => validateWeapon(d).errors,
 }
 

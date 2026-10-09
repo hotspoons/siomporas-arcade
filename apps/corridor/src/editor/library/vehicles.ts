@@ -35,6 +35,7 @@ import {
 import { presetDoc, presetsFor } from '../../game/vehicle/vehiclepresets'
 import type { AssetDetailCtx } from './assets'
 import { bench, engineChoices, engineSetups, type ListenState } from './enginelisten'
+import { soundsGroup } from './soundpicker'
 import { bodyOf, group, readout, select, slider, textField, toggle } from '../../ui/controls'
 import { button, el, type Tab } from '../../ui/shell'
 import { icon } from '../../ui/icons'
@@ -60,6 +61,8 @@ export interface FormOpts {
    * Omitted means the caller does not know, and both stay open too.
    */
   meshes?: { finished: boolean; raw: boolean } | null
+  /** the catalog asset the build is on — where its own sound clips are uploaded. Null: no model yet */
+  assetId?: string | null
   /** called on every edit. `live` is true for a drag, where the form must NOT be rebuilt */
   onChange: (doc: VehicleDoc, live: boolean) => void
 }
@@ -97,7 +100,8 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
     { id: 'basic', label: 'Basic', icon: 'cube' as const },
     { id: 'finish', label: 'Finish', icon: 'swatch' as const },
     { id: 'engine', label: 'Engine & gearing', icon: 'bolt' as const },
-    { id: 'sound', label: 'Sound', icon: 'play' as const },
+    { id: 'sound', label: 'Engine sound', icon: 'play' as const },
+    { id: 'sounds', label: 'Sounds', icon: 'speaker-wave' as const },
     { id: 'other', label: 'Weapons & overrides', icon: 'adjustments-horizontal' as const },
   ]
   let section = 'basic'
@@ -493,6 +497,9 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
     ab.append(status)
     put('sound', audio)
 
+    /* ---- the sampled sounds: crashes, squeal, guns, by slot ------------------------------- */
+    if (section === 'sounds') put('sounds', soundsGroup({ get: () => doc.sounds, set: (o) => { if (o) doc.sounds = o; else delete doc.sounds; stage() }, assetId: opts.assetId ?? null }))
+
     /* ---- mounted weapons -------------------------------------------------------------------- */
     const arms = group(`Weapons${doc.mounts?.length ? ` — ${doc.mounts.length}` : ''}`, {
       collapsed: !doc.mounts?.length,
@@ -648,6 +655,7 @@ export const VEHICLE_BUILD: BuildSpec<VehicleDoc> = {
   tags: (d) => [{ text: `${d.engine.gears.length}-speed` }, { text: d.profile.base }],
   form: (host, getDoc, onChange, asset) => void dynamicsForm(host, getDoc, {
     meshes: asset ? { finished: !!asset.finished, raw: !!asset.mesh } : null,
+    assetId: asset?.id ?? null,
     onChange: (doc) => onChange(doc),
   }),
   errors: (d) => validateVehicle(d, { audioSetups: engineSetups() }).errors,

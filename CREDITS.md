@@ -125,6 +125,21 @@ CC0 waives the attribution requirement. [Kenney](https://kenney.nl) asks for
 credit anyway and has earned it — these kits are the reason the game had
 roadside scenery on day one. [ambientCG](https://ambientcg.com) likewise.
 
+## Sounds
+
+The corridor game's effects — `apps/corridor/public/sounds/` — are cut by
+`tools/sounds/build.py` from recordings that are all CC0 (public domain
+dedication); the cuts are CC0 too. None of them requires attribution and it is
+given anyway. The per-file provenance is generated into
+`apps/corridor/public/sounds/CREDITS.md` from `tools/sounds/sources.json`.
+
+| source | author | licence |
+| --- | --- | --- |
+| [Impact Sounds](https://kenney.nl/assets/impact-sounds), [Sci-fi Sounds](https://kenney.nl/assets/sci-fi-sounds) | Kenney | CC0 1.0 |
+| [tire squeal #0500](https://bigsoundbank.com/tire-squeal-s0500.html), screeching tires #2368–2371, explosions #1023/#1806–1808, shots #0397/#0437/#0438/#0532 | Joseph Sardin, BigSoundBank | CC0 1.0 (marked per file) |
+| [Gunshot sounds](https://opengameart.org/content/gunshot-sounds) | Tabasco | CC0 1.0 |
+| [Impacts and guns SFX](https://opengameart.org/content/impactsgunsfx) | Eldritch Grim | CC0 1.0 |
+
 ## Fonts
 
 Each app bundles latin `woff2` subsets pulled from Google Fonts by
@@ -152,9 +167,10 @@ served with them. No font is sold by itself or renamed.
 ## Made here
 
 - **All game code**, the engine, the shell and the track editor.
-- **Every sound.** There is not an audio file in the repository. Engines, tyres,
-  impacts, lasers and the radio are synthesised in WebAudio at runtime by each
-  game's `src/audio/AudioWorld.ts`.
+- **Every sound in the arcade games.** Engines, tyres, impacts, lasers and the
+  radio there are synthesised in WebAudio at runtime by each game's
+  `src/audio/AudioWorld.ts`. The corridor game's engine is synthesised too
+  (engine-sim, above); its effects are recordings — see **Sounds**.
 - **Every texture the games actually draw** — road surfaces, skies, tunnels and
   the CRT treatment are procedural, written as shaders.
 - **The cabinet artwork** in `apps/arcade/public/cabinets/`, generated to the

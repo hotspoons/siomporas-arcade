@@ -42,3 +42,16 @@ test('the engine-sound list is read from the catalog beside the wasm', async () 
   assert.ok(e.length >= 20)
   assert.ok(e.every((x) => x.setup.startsWith('engines/') && x.setup.endsWith('.mr')))
 })
+
+test('the sound slots come from the bank the app ships, and the app plays every one of them', async () => {
+  const slots = await V.soundSlots()
+  assert.ok(slots.length >= 10, 'the bank manifest is present')
+  const app = list('game/audio/soundbank.ts', 'SOUND_SLOTS')
+  assert.deepEqual(slots.map((s) => s.slot).sort(), [...app].sort())
+  for (const s of slots) {
+    assert.ok(s.desc && s.clips.length, `${s.slot} has a description and clips`)
+    for (const c of s.clips) assert.match(c, /^[a-z0-9-]+\/[A-Za-z0-9_.-]+$/)
+  }
+  const v = await V.vocab()
+  assert.equal(v.sounds.slots.length, slots.length)
+})

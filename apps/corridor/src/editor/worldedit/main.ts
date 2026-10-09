@@ -38,6 +38,7 @@ import { GitPanel } from './gitpanel'
 import { dockWidth } from '../chrome/dockwidth'
 import { actorExtension } from '../library/actors'
 import { weaponExtension } from '../library/weapons'
+import { soundsExtension } from '../library/sounds'
 import { vehicleExtension } from '../library/vehicles'
 import { worldThings, type PlacementDoc } from '../../game/world/worldthings'
 import type { ZoneDoc } from '../../game/world/zones'
@@ -571,6 +572,8 @@ const assets = new AssetCatalog({
       current: () => (selected ? loadFixtures(selected) : Promise.resolve({ version: 1 as const, choices: {} })),
       save: async (doc) => { if (!selected) throw new Error('no world selected'); await saveFixtures(selected, doc) },
     }),
+    // the sound bank, slot by slot, with a Listen on everything (src/editor/library/sounds.ts)
+    soundsExtension(),
   ],
   /*
    * PLACEABLE IS A TICK BOX, not a second screen.

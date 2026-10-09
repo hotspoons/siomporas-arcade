@@ -25,6 +25,7 @@
 // flattened copy of all forty numbers is forty numbers that silently stop tracking, and nothing ever
 // says so.
 import { DRIVE_PROFILE_NUMBER_KEYS, PROFILES, profile, type DriveProfile } from '@apex/engine/physics/profiles'
+import { validateSoundOverrides, type SoundOverrides } from '../audio/soundbank'
 import type { VehicleSpec } from '@apex/engine/physics/vehicle'
 
 /* ---- the document ---------------------------------------------------------------------------- */
@@ -232,6 +233,13 @@ export interface VehicleDoc {
    * GUN_TURRET_* / MISSILE_TURRET_* knobs, which also cap whatever a document says.
    */
   turret?: { gun_yaw_deg?: number; gun_pitch_deg?: number; missile_yaw_deg?: number; missile_pitch_deg?: number }
+  /**
+   * This car's own sounds, by slot (`soundbank.ts` SOUND_SLOTS): its crashes, its squeal, its
+   * guns. Absent slots play the bank's clips; an empty list is silence. An entry is a bank clip
+   * (`crash-heavy/slam-3`), another slot (`slot:gun.fire.shotgun`), a file uploaded to this
+   * build's asset (`asset:<id>/<file>`) or a URL. The editor's Sounds tab writes these.
+   */
+  sounds?: SoundOverrides
   /**
    * Finished is the simplified mesh. Raw is the reconstruction, with many more triangles.
    * Absent, the world draws finished when that file exists.
@@ -510,6 +518,7 @@ export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWhe
     const val = v.turret?.[k]
     if (val !== undefined && !(Number.isFinite(val) && val >= 0 && val <= 180)) errors.push(`turret.${k} must be a number from 0 (fixed) to 180`)
   }
+  errors.push(...validateSoundOverrides(v.sounds))
 
   return { ok: errors.length === 0, errors, warnings }
 }

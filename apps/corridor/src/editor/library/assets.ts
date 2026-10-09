@@ -20,6 +20,7 @@ import { actorExtension } from './actors'
 import { weaponExtension } from './weapons'
 import { vehicleExtension } from './vehicles'
 import { trafficExtension } from './trafficsets'
+import { soundsExtension } from './sounds'
 
 /**
  * WHAT SORT OF THING IT IS, and where the list of sorts comes from.
@@ -2101,5 +2102,5 @@ function promptField(label: string, value: string, onChange: (v: string) => void
 
 /** Where the drawer entry and the keyboard shortcut land. */
 export function installAssetCatalog(): AssetCatalog {
-  return new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension(), trafficExtension()] })
+  return new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension(), trafficExtension(), soundsExtension()] })
 }

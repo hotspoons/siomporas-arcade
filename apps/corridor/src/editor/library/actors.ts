@@ -24,6 +24,7 @@ import { actorPresetDoc, actorPresetsFor } from '../../game/actors/actorpresets'
 import { CLASSES_BY_TYPE } from '../../assets/classes'
 import type { AssetDetailCtx } from './assets'
 import { buildScreen, type BuildPreset, type BuildSpec } from './buildscreen'
+import { soundsGroup } from './soundpicker'
 import { bodyOf, group, readout, select, setGroupError, slider, textField, toggle } from '../../ui/controls'
 import { button, el, type Tab } from '../../ui/shell'
 
@@ -43,6 +44,8 @@ export interface ActorFormOpts {
   onChange: (doc: ActorDoc, live: boolean) => void
   /** somewhere to put "N problems", when the caller has a group heading to put it on */
   onReport?: (errors: number) => void
+  /** the catalog asset the build is on — where its own sound clips are uploaded. Null: no model yet */
+  assetId?: string | null
 }
 
 /**
@@ -161,6 +164,9 @@ export function actorForm(host: HTMLElement, getDoc: () => ActorDoc, opts: Actor
       ab.append(el('div', 'field-note', 'nothing here knows this model’s rig, so no bone is claimed for the weapon to hang off'))
     }
     host.append(arms)
+
+    // the sampled sounds: the thud when a car meets it, by slot. Only the slots an actor has a say in
+    host.append(soundsGroup({ get: () => doc.sounds, set: (o) => { if (o) doc.sounds = o; else delete doc.sounds; stage() }, assetId: opts.assetId ?? null, slots: ['crash.soft', 'crash.light', 'gun.hit', 'gun.fire', 'explosion'] }))
   }
 
   render()
@@ -240,7 +246,7 @@ export const ACTOR_BUILD: BuildSpec<ActorDoc> = {
     if (!d.body.ragdoll) out.push({ text: 'no ragdoll', cls: 'none' })
     return out
   },
-  form: (host, getDoc, onChange) => void actorForm(host, getDoc, { onChange: (doc) => onChange(doc) }),
+  form: (host, getDoc, onChange, asset) => void actorForm(host, getDoc, { onChange: (doc) => onChange(doc), assetId: asset?.id ?? null }),
   errors: (d) => validateActor(d).errors,
 }
 

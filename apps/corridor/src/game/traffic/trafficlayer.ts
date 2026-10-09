@@ -40,6 +40,7 @@ import { assetsvc, type Build } from '../../assets/assetsvc'
 import { EMPTY_SET, pick, type TrafficSetDoc } from './trafficsets'
 import { loadCarModel } from '../vehicle/carmodel'
 import { defaultVehicle, lampCounts, lampOffsets, type VehicleDoc } from '../vehicle/vehicles'
+import type { SoundOverrides } from '../audio/soundbank'
 import type { Site } from '../../world/scene'
 import type { CorridorPhysics } from '../world/physics'
 import * as T from '../../tuning'
@@ -93,6 +94,20 @@ interface Shown {
   heatAt: number
   /** the detail it was last set to (lod/simplify.ts `setDetail`); 0 = never set */
   lodWant?: number
+  /** the build's own sounds, for the crash it is about to have */
+  sounds?: SoundOverrides
+}
+
+/** A traffic car hit something — the other car, the ground, a prop, the player. For the sound. */
+export interface TrafficCrashEvent {
+  e: number
+  /** three's world frame, where the contact was */
+  at: { x: number; y: number; z: number }
+  /** the contact's peak impulse, N·s — what grades it */
+  peak: number
+  impulse: number
+  /** the car's own sound overrides, when its build has any */
+  sounds?: SoundOverrides
 }
 
 /** What a hit did to a car, mildest first. */
@@ -316,6 +331,7 @@ export class TrafficLayer {
   private dentedCars = new Set<Shown>()
   /** who wants to hear about hits: the program, the HUD */
   private hitFns = new Set<(ev: TrafficHitEvent) => void>()
+  private crashFns = new Set<(ev: TrafficCrashEvent) => void>()
   private sinceDentSweep = 0
   /** wrecks straightened out and sent back into traffic; a probe reads it */
   recycled = 0
@@ -525,7 +541,7 @@ export class TrafficLayer {
       this.group.add(mesh)
       const half = { x: (m.doc.spec.length ?? 4.4) / 2, y: (m.doc.spec.height ?? 1.4) / 2, z: (m.doc.spec.width ?? 1.8) / 2 }
       const body = this.physics ? this.physics.spawnKinematic(half) : null
-      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey, lamps: trafficLamps(mesh, m.doc), swerve: 0, swerveV: 0, heat: 0, heatAt: 0 }
+      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey, lamps: trafficLamps(mesh, m.doc), swerve: 0, swerveV: 0, heat: 0, heatAt: 0, sounds: m.doc.sounds }
       if (body) this.byCollider.set(body.colliderHandle, shown)
       this.shown.push(shown)
     }
@@ -536,6 +552,11 @@ export class TrafficLayer {
     const b = this.byCollider.get(im.b.handle)
     if (!a && !b) return
     this.stats.impacts++
+    if (this.crashFns.size) {
+      const s = a ?? b!
+      const ev: TrafficCrashEvent = { e: s.e, at: { x: im.x, y: im.y, z: im.z }, peak: im.peak, impulse: im.impulse, sounds: s.sounds }
+      for (const fn of this.crashFns) fn(ev)
+    }
     for (const [s, other] of [[a, true], [b, false]] as const) {
       if (!s) continue
       if (im.impulse >= T.TRAFFIC_WAKE_NS) this.wake(s, 'impact', im.impulse)
@@ -742,6 +763,12 @@ export class TrafficLayer {
       for (const fn of this.hitFns) fn(ev)
     }
     return effect
+  }
+
+  /** be told about every contact a traffic car makes — the crash sounds; returns the unsubscribe */
+  onCrash(fn: (ev: TrafficCrashEvent) => void): () => void {
+    this.crashFns.add(fn)
+    return () => this.crashFns.delete(fn)
   }
 
   /** be told about every hit; returns the unsubscribe */

@@ -35,6 +35,7 @@ nothing gracefully.
 | stunts | `api.stunts.ids()`, `.show(id, on)`, `.visible(id)`, `.where(id)` | the Stunts mode — `stunts.json` |
 | placements | `api.placed(id)`, `api.placedWith(tag)`, `api.placements()` | the Place mode — `placements.json` |
 | physics | `api.physics.explode/impulse/break/ray/profile` | the Rapier world, when one is running |
+| sound | `api.audio.play(slot, { at, gain })`, `.loop(slot)`, `.override(slot, clips)`, `.slots()` | the sound bank — `public/sounds`, docs/corridor/SOUNDS.md |
 | the world | `api.world`, `api.actors` | the ECS itself, for anything the above cannot say |
 
 A race starts on its own when the player drives into its ring; `api.races.start(id)` is for starting

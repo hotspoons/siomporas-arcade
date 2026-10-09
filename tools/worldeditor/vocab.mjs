@@ -14,6 +14,8 @@ import { MODES, PROFILES } from './levels.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 /** the engine-sound catalog, committed with the wasm it belongs to */
 const ENGINES = path.resolve(HERE, '../../packages/enginesim/wasm/engines.json')
+/** the sampled effects bank, written by tools/sounds/build.py; its slots are what a document's `sounds` may name */
+const SOUND_BANK = path.resolve(HERE, '../../apps/corridor/public/sounds/bank.json')
 
 export const WEATHERS = ['clear', 'rain', 'sleet', 'snow', 'ice']
 export const SEASONS = ['winter', 'spring', 'summer', 'autumn']
@@ -25,7 +27,7 @@ export const HUD_PARTS = ['speed', 'gear', 'heading', 'road', 'elevation', 'obje
 export const FREEDOMS = ['developer', 'teleport', 'transport']
 export const SETTING_TABS = ['display', 'layers', 'audio', 'controls', 'site', 'game']
 export const SETTING_CONTROLS = [
-  'display.season', 'display.style', 'display.relief', 'display.trees', 'display.weather', 'display.perf', 'display.aa', 'display.theme', 'display.interface', 'display.units',
+  'display.season', 'display.style', 'display.relief', 'display.trees', 'display.weather', 'display.perf', 'display.aa', 'display.detail', 'display.theme', 'display.interface', 'display.units',
   'layers.imagery', 'layers.horizon', 'layers.canopy', 'layers.trees', 'layers.splats', 'layers.grass', 'layers.rocks', 'layers.water',
   'layers.road', 'layers.structures', 'layers.barriers', 'layers.sidewalks', 'layers.parking',
   'layers.buildings', 'layers.power', 'layers.furniture', 'layers.signals', 'layers.stopbars', 'layers.blades',
@@ -49,9 +51,23 @@ export async function engineSounds() {
   }
 }
 
+/**
+ * Every sound slot a vehicle's or actor's `sounds` may override, with what it is for and the
+ * bank's own clips (which an override may also name, as `<folder>/<clip>`).
+ */
+export async function soundSlots() {
+  try {
+    const bank = JSON.parse(await readFile(SOUND_BANK, 'utf8'))
+    return Object.entries(bank.slots).map(([slot, s]) => ({ slot, desc: s.desc, loop: !!s.loop, clips: s.clips.map((c) => c.file.replace(/\.ogg$/, '')) }))
+  } catch {
+    return []
+  }
+}
+
 /** the whole vocabulary, as `level_vocab` answers */
 export async function vocab() {
   const engines = await engineSounds()
+  const sounds = await soundSlots()
   return {
     level: {
       keys: 'see level_validate — a key outside its list is warned about',
@@ -64,6 +80,10 @@ export async function vocab() {
     },
     points: { kind: POINT_KINDS, mode: POINT_MODES },
     vehicle: { kinds: VEHICLE_KINDS, drive: DRIVES, audio_setup: engines.map((e) => e.setup), engines },
+    sounds: {
+      note: 'a vehicle or actor document may carry `sounds: { <slot>: [clips] }`; a clip is a bank clip below, `slot:<other slot>`, `asset:<id>/<file>` (PUT /assetsvc/catalog/<id>/sound/<file>) or a URL. An empty list is silence. Programs: api.audio.play(slot, { at, gain, rate }), api.audio.override(slot, clips)',
+      slots: sounds,
+    },
     program: {
       hideable: HIDEABLE,
       transport: TRANSPORT,

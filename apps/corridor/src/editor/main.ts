@@ -101,6 +101,7 @@ import { actorExtension } from './library/actors'
 import { weaponExtension } from './library/weapons'
 import { vehicleExtension } from './library/vehicles'
 import { trafficExtension } from './library/trafficsets'
+import { soundsExtension } from './library/sounds'
 import { ZoneMode } from './author/zones'
 import { StuntMode } from './author/stuntmode'
 import { CourseMode } from './author/coursemode'
@@ -117,7 +118,7 @@ let mode: Mode = (hashMode === 'races' ? 'points' : hashMode === 'grow' ? 'place
 restoreTheme()
 const assets = new AssetCatalog({
   extensions: [
-    vehicleExtension(), actorExtension(), weaponExtension(), trafficExtension(),
+    vehicleExtension(), actorExtension(), weaponExtension(), trafficExtension(), soundsExtension(),
     fixturesExtension({
       slug: () => site?.manifest.slug ?? null,
       current: () => (site ? loadFixtures(site.manifest.slug) : Promise.resolve({ version: 1 as const, choices: {} })),

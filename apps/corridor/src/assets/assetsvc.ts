@@ -238,6 +238,18 @@ export const assetsvc = {
     return body
   },
 
+  /**
+   * A sound of the build's own, stored under its asset as sounds/<name>. The answer's `entry` is
+   * what goes into a document's `sounds` slot (`asset:<id>/<name>`); `soundbank.ts` resolves it
+   * back to `fileUrl(id, 'sounds/<name>')`.
+   */
+  uploadSound: async (id: string, file: File): Promise<{ stored: string; entry: string; bytes: number }> => {
+    const r = await fetch(`${ASSETSVC}/catalog/${encodeURIComponent(id)}/sound/${encodeURIComponent(file.name)}`, { method: 'PUT', body: file })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(body.error ?? `HTTP ${r.status}`)
+    return body
+  },
+
   image: (id: string, opts: { prompt?: string; negative?: string; size?: string; steps?: number; seed?: number } = {}) =>
     call<AssetJob>(`/catalog/${encodeURIComponent(id)}/image`, { method: 'POST', body: JSON.stringify(opts) }),
 

@@ -533,6 +533,28 @@ export let GUN_DAMAGE = 0.12
 /** spread, as a fraction of the aim: 0.015 is a hand-span at 50 m */
 export let GUN_SPREAD = 0.015
 
+// --- sound effects (game/audio/sfx.ts, the bank under public/sounds) ----------------------------
+/** the effects bus, under the player's master × sfx sliders. 0 silences every sample; the engine is its own bus */
+export let SFX_MASTER = 1
+/** a placed sound is at full level within this many metres of the camera, falling off as 1/d beyond */
+export let SFX_REF_M = 10
+/** beyond this it does not get any quieter (m) */
+export let SFX_MAX_M = 600
+/** the squeal starts when the tyres' slip (0 gripping … 1 gone) passes this */
+export let SQUEAL_SLIP_ON = 0.12
+/** and is at its heaviest here */
+export let SQUEAL_SLIP_FULL = 0.85
+/** no squeal below this speed (m/s) — a stationary car with the wheel turned is not a squeal */
+export let SQUEAL_MIN_MPS = 2.5
+/** a contact under this (N·s) is a tap (crash.light); 6 kN·s is about the car into a wall at 30 mph */
+export let CRASH_LIGHT_NS = 1200
+/** over this (N·s) it is a wreck (crash.heavy), with glass over the top at 1.5× */
+export let CRASH_HEAVY_NS = 6000
+/** the traffic's own crashes, at most this many a second — a pile-up is one roar, not sixty taps */
+export let SFX_TRAFFIC_CRASH_PER_S = 8
+/** the gun's report, 0…1 — fourteen a second is a lot of anything */
+export let SFX_GUN_GAIN = 0.55
+
 // --- trees --------------------------------------------------------------------------------------
 /**
  * near-field radius (procedural models) — beyond it, impostors.
@@ -2696,6 +2718,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 80], 1, 'm/s a car at the centre of the blast is given'),
           tune('MISSILE_LIFT', () => MISSILE_LIFT, (v) => (MISSILE_LIFT = v), [0, 3], 0.05, 'how much of the throw points up'),
           tune('MISSILE_DAMAGE', () => MISSILE_DAMAGE, (v) => (MISSILE_DAMAGE = v), [0, 1], 0.05, 'the dent at the centre of a missile blast'),
+          tune('SFX_GUN_GAIN', () => SFX_GUN_GAIN, (v) => (SFX_GUN_GAIN = v), [0, 1], 0.05, 'how loud the gun’s report is, over the clip'),
           tune('GUN_TURRET_YAW_DEG', () => GUN_TURRET_YAW_DEG, (v) => (GUN_TURRET_YAW_DEG = v), [0, 180], 5, 'how far the guns turn to follow the camera, degrees each way. 0 = fixed along the nose'),
           tune('GUN_TURRET_PITCH_DEG', () => GUN_TURRET_PITCH_DEG, (v) => (GUN_TURRET_PITCH_DEG = v), [0, 180], 5, 'how far the guns tilt up and down, degrees'),
           tune('MISSILE_TURRET_YAW_DEG', () => MISSILE_TURRET_YAW_DEG, (v) => (MISSILE_TURRET_YAW_DEG = v), [0, 180], 5, 'how far the launcher turns to follow the camera, degrees each way. 0 = fixed'),
@@ -2978,6 +3001,24 @@ export const TUNE_TABS: TuneTab[] = [
           tune('ENGINE_INDEX', () => ENGINE_INDEX, (v) => (ENGINE_INDEX = v), [0, 19], 1, 'index into the catalog; 5 is the Subaru EJ25'),
           tune('ENGINE_MASTER', () => ENGINE_MASTER, (v) => (ENGINE_MASTER = v), [0, 1], 0.05, 'master gain'),
           tune('ENGINE_SIM_HZ', () => ENGINE_SIM_HZ, (v) => (ENGINE_SIM_HZ = v), [0, 48000], 500, 'physics steps/s; 0 = whatever the script asked for', { scope: 'machine' }),
+        ],
+      },
+      {
+        // the sampled effects — the bank under public/sounds, played by game/audio/sfx.ts. The
+        // engine above is synthesised and has its own bus; these are the tyres, the crashes and
+        // the guns (Rich, 2026-10-09: "different levels of tire squeal based on turning force")
+        title: 'sound effects',
+        scope: 'world',
+        keys: [
+          tune('SFX_MASTER', () => SFX_MASTER, (v) => (SFX_MASTER = v), [0, 1], 0.05, 'the effects bus, under the player’s sliders'),
+          tune('SFX_REF_M', () => SFX_REF_M, (v) => (SFX_REF_M = v), [1, 50], 1, 'full level within this far of the camera (m)'),
+          tune('SFX_MAX_M', () => SFX_MAX_M, (v) => (SFX_MAX_M = v), [50, 3000], 50, 'no quieter past this (m)'),
+          tune('SQUEAL_SLIP_ON', () => SQUEAL_SLIP_ON, (v) => (SQUEAL_SLIP_ON = v), [0, 1], 0.01, 'tyre slip (0 gripping … 1 gone) where the squeal starts'),
+          tune('SQUEAL_SLIP_FULL', () => SQUEAL_SLIP_FULL, (v) => (SQUEAL_SLIP_FULL = v), [0.05, 1], 0.01, 'and where it is heaviest'),
+          tune('SQUEAL_MIN_MPS', () => SQUEAL_MIN_MPS, (v) => (SQUEAL_MIN_MPS = v), [0, 15], 0.5, 'no squeal below this speed (m/s)'),
+          tune('CRASH_LIGHT_NS', () => CRASH_LIGHT_NS, (v) => (CRASH_LIGHT_NS = v), [100, 10000], 100, 'a contact under this many N·s is a tap; a third of it is nothing at all'),
+          tune('CRASH_HEAVY_NS', () => CRASH_HEAVY_NS, (v) => (CRASH_HEAVY_NS = v), [1000, 40000], 250, 'over this it is a wreck, with glass at 1.5×'),
+          tune('SFX_TRAFFIC_CRASH_PER_S', () => SFX_TRAFFIC_CRASH_PER_S, (v) => (SFX_TRAFFIC_CRASH_PER_S = v), [0, 40], 1, 'the traffic’s own crashes, at most this many a second'),
         ],
       },
       {

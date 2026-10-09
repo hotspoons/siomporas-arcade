@@ -60,6 +60,12 @@ const TYPES = {
   '.wasm': 'application/wasm',
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
+  '.ogg': 'audio/ogg',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.webm': 'audio/webm',
+  '.flac': 'audio/flac',
   '.ttf': 'font/ttf',
   '.txt': 'text/plain',
   '.md': 'text/markdown',
@@ -328,6 +334,23 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
       const body = JSON.stringify({ [kind]: used })
       add({ key: `assetsvc/${kind}`, body, bytes: Buffer.byteLength(body), contentType: 'application/json', group: 'assets' })
     }
+    /*
+     * THE SOUNDS A USED BUILD UPLOADED. A document's `sounds` slots may name `asset:<id>/<file>`
+     * (soundbank.ts); the file sits under the asset as sounds/<file> and the viewer fetches it by
+     * the same /file/ route as a mesh. Without this the deployed car crashes in silence where the
+     * local one had its own clip, and nothing says why.
+     */
+    const soundFiles = new Map()
+    for (const b of usedBuilds.values()) {
+      for (const entries of Object.values(b.build?.doc?.sounds ?? {})) {
+        for (const e of Array.isArray(entries) ? entries : []) {
+          const m = typeof e === 'string' && /^asset:([^/]+)\/(.+)$/.exec(e)
+          if (!m) continue
+          if (!soundFiles.has(m[1])) soundFiles.set(m[1], new Set())
+          soundFiles.get(m[1]).add(`sounds/${m[2]}`)
+        }
+      }
+    }
     for (const [id, it] of assets.items) {
       const rec = JSON.stringify(it)
       add({ key: `assetsvc/catalog/${id}`, body: rec, bytes: Buffer.byteLength(rec), contentType: 'application/json', group: 'assets' })
@@ -338,6 +361,7 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
       else if (it.mesh) files.push('mesh.glb')
       if (it.glass) files.push('mesh.glass.glb')
       if (!files.length) warnings.push(`${id} is used but has no mesh yet (${it.state ?? 'no state'})`)
+      files.push(...(soundFiles.get(id) ?? []))
       for (const f of files) {
         const url = `${assetsvc}/catalog/${encodeURIComponent(id)}/file/${f}`
         let bytes = 0

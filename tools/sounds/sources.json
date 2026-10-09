@@ -1,0 +1,64 @@
+{
+  "_": "Every source the corridor sound bank is cut from. All CC0 — verified on each page on 2026-10-09 (BigSoundBank states the licence per file; Kenney and the two OpenGameArt packs per pack). Keep this list honest: build.py writes apps/corridor/public/sounds/CREDITS.md from it.",
+  "sources": {
+    "kenney-impact": {
+      "title": "Impact Sounds",
+      "author": "Kenney",
+      "url": "https://kenney.nl/assets/impact-sounds",
+      "download": "https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip",
+      "licence": "CC0 1.0",
+      "kind": "zip",
+      "root": "Audio"
+    },
+    "kenney-scifi": {
+      "title": "Sci-fi Sounds",
+      "author": "Kenney",
+      "url": "https://kenney.nl/assets/sci-fi-sounds",
+      "download": "https://kenney.nl/media/pages/assets/sci-fi-sounds/6b296f9ecf-1677589334/kenney_sci-fi-sounds.zip",
+      "licence": "CC0 1.0",
+      "kind": "zip",
+      "root": "Audio"
+    },
+    "oga-gunshots": {
+      "title": "Gunshot sounds (CZ-52, Mosin Nagant, SKS, shotgun, recorded at a range)",
+      "author": "Tabasco",
+      "url": "https://opengameart.org/content/gunshot-sounds",
+      "download": "https://opengameart.org/sites/default/files/sounds.zip",
+      "licence": "CC0 1.0",
+      "kind": "zip",
+      "root": "sounds"
+    },
+    "oga-impacts": {
+      "title": "Impacts and guns SFX",
+      "author": "Eldritch Grim",
+      "url": "https://opengameart.org/content/impactsgunsfx",
+      "download": "https://opengameart.org/sites/default/files/impacts.zip",
+      "licence": "CC0 1.0",
+      "kind": "zip",
+      "root": "Impacts"
+    },
+    "bsb": {
+      "title": "BigSoundBank (individual files, each marked CC0 on its page)",
+      "author": "Joseph Sardin",
+      "url": "https://bigsoundbank.com",
+      "licence": "CC0 1.0",
+      "kind": "files",
+      "files": {
+        "0500": { "name": "Tire squeal", "url": "https://bigsoundbank.com/tire-squeal-s0500.html" },
+        "2368": { "name": "Screeching Tires #1", "url": "https://bigsoundbank.com/screeching-tires-1-s2368.html" },
+        "2369": { "name": "Screeching Tires #2", "url": "https://bigsoundbank.com/screeching-tires-2-s2369.html" },
+        "2370": { "name": "Screeching Tires #3", "url": "https://bigsoundbank.com/screeching-tires-3-s2370.html" },
+        "2371": { "name": "Screeching Tires #4", "url": "https://bigsoundbank.com/screeching-tires-4-s2371.html" },
+        "1807": { "name": "Explosion #1", "url": "https://bigsoundbank.com/explosion-1-s1807.html" },
+        "1808": { "name": "Explosion #2", "url": "https://bigsoundbank.com/explosion-2-s1808.html" },
+        "1806": { "name": "Explosion far away #2", "url": "https://bigsoundbank.com/explosion-far-away-2-s1806.html" },
+        "1023": { "name": "Explosion far away #1", "url": "https://bigsoundbank.com/explosion-far-away-s1023.html" },
+        "0437": { "name": "Shot Beretta M12 9mm", "url": "https://bigsoundbank.com/shot-beretta-m12-9-mm-s0437.html" },
+        "0438": { "name": "Shot in .357 Magnum", "url": "https://bigsoundbank.com/shot-in-357-magnum-9-mm-s0438.html" },
+        "0397": { "name": "Shot of Winchester Magnum XTR", "url": "https://bigsoundbank.com/shot-of-winchester-magnum-xtr-s0397.html" },
+        "0532": { "name": "Shotgun: Shots", "url": "https://bigsoundbank.com/shotgun-shots-s0532.html" }
+      },
+      "download": "https://bigsoundbank.com/UPLOAD/mp3/{id}.mp3"
+    }
+  }
+}

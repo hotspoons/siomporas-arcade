@@ -130,6 +130,8 @@ export interface ProgramHost {
   physics?: PhysicsHost
   /** weapons and damage, when the app has them */
   combat?: CombatHost
+  /** the sound bank: crashes, guns, squeal, and a program's own cues */
+  audio?: AudioHost
   /** the traffic zones and stunt fixtures this world was authored with */
   layers?: WorldLayersHost
   /** the interface: which one, what the player may change, what the HUD shows */
@@ -395,6 +397,21 @@ export interface WorldLayersHost {
  * the library with a document beside it (`src/weapons.ts`) — so a program says which weapon rather
  * than restating one, and the two cannot drift.
  */
+/**
+ * THE SOUND BANK, when the app has one (game/audio/sfx.ts). Site metres in, like everything else
+ * a program says; the host converts. Absent in a dry run: every `api.audio` call is a no-op.
+ */
+export interface AudioHost {
+  /** one of a slot's clips, now. False when nothing played */
+  play: (slot: string, opts?: { at?: Vec3; gain?: number; rate?: number }) => boolean
+  /** a levelled loop — the squeal shape: `set(level 0…1, at?)`, `stop()` */
+  loop: (slot: string) => { set(level: number, at?: Vec3): void; stop(): void }
+  /** the world's own clips for a slot, under every vehicle's and actor's. null puts the bank back */
+  override: (slot: string, clips: string[] | null) => void
+  /** every slot, with what it is for and how many clips the bank has */
+  slots: () => { slot: string; desc: string; clips: number; loop: boolean }[]
+}
+
 export interface CombatHost {
   /** give an entity a weapon by asset id. False when there is no such weapon */
   arm?: (entity: number, weaponId: string) => boolean
@@ -686,6 +703,30 @@ export interface GameApi {
   }
 
   /**
+   * SOUND. The bank's slots — `api.audio.slots()` lists them: `crash.heavy`, `gun.fire`,
+   * `explosion`, `tire.squeal.loop` and the rest — play on the effects bus, placed in the world
+   * when `at` is given (site metres) and at the player when it is not. The game already plays the
+   * tyres, the crashes and the weapons by itself; this is for a program's own cues — a bang when
+   * a door is kicked in, a distant explosion to send the player somewhere — and for a level that
+   * wants every car's crash to sound a certain way (`override`, which lies under each vehicle's
+   * and actor's own `sounds` and goes back to the bank when the program stops).
+   *
+   * Clips are named as a vehicle document names them: a bank clip (`crash-heavy/slam-3`), another
+   * slot (`slot:gun.fire.shotgun`), a file on a catalog asset (`asset:<id>/<file>`) or a URL.
+   * Harmless with no audio host: `play` returns false, `loop` is inert, nothing throws.
+   */
+  readonly audio: {
+    /** one of the slot's clips, now. `gain` 0…1 over the clip, `rate` 1 = as recorded */
+    play(slot: string, opts?: { at?: Vec3; gain?: number; rate?: number }): boolean
+    /** a levelled loop: `set(0…1)` fades it, `stop()` ends it. Stopped for you when the program stops */
+    loop(slot: string): { set(level: number, at?: Vec3): void; stop(): void }
+    /** the world's clips for a slot, under every vehicle's own; null puts the bank back */
+    override(slot: string, clips: string[] | null): void
+    /** every slot the bank has, with what it is for */
+    slots(): { slot: string; desc: string; clips: number; loop: boolean }[]
+  }
+
+  /**
    * THE OBJECTIVE LIST. The HUD draws it, the D-pad (and Q / E) page through it, and the arrow
    * points at whichever is selected. `set` replaces the list and keeps the selection when its id
    * survives; `complete` strikes one out and moves the selection on. An explicit `waypoint()`
@@ -767,6 +808,12 @@ export class GameRun {
   /** what to undo when the program stops: hit listeners, weapon overrides */
   private cleanups: (() => void)[] = []
   private readonly resetWeapons = (): void => { this.host.physics?.weapons?.(null) }
+  /** the slots this program overrode, put back when it stops */
+  private readonly audioOverrides = new Set<string>()
+  private readonly resetAudio = (): void => {
+    for (const slot of this.audioOverrides) this.host.audio?.override(slot, null)
+    this.audioOverrides.clear()
+  }
 
   private t = 0
   private travelled = 0
@@ -886,6 +933,34 @@ export class GameRun {
       armed: (e) => H.combat?.armed?.(e) ?? null,
       fire: (e, dir) => (H.combat?.fire && vec(dir) ? H.combat.fire(e, dir) : null),
       hurt: (e, amount) => (H.combat?.damage && finite(amount) ? H.combat.damage(e, amount) : 0),
+
+      audio: {
+        play: (slot, opts) => {
+          if (!H.audio || typeof slot !== 'string') return false
+          const o: { at?: Vec3; gain?: number; rate?: number } = {}
+          if (opts?.at && vec(opts.at)) o.at = opts.at
+          if (finite(opts?.gain)) o.gain = opts!.gain
+          if (finite(opts?.rate)) o.rate = opts!.rate
+          return H.audio.play(slot, o)
+        },
+        loop: (slot) => {
+          if (!H.audio || typeof slot !== 'string') return { set: () => {}, stop: () => {} }
+          const h = H.audio.loop(slot)
+          const stop = () => h.stop()
+          this.cleanups.push(stop)
+          return { set: (l, at) => h.set(finite(l) ? l : 0, at && vec(at) ? at : undefined), stop }
+        },
+        override: (slot, clips) => {
+          if (!H.audio || typeof slot !== 'string') return
+          if (clips !== null && !(Array.isArray(clips) && clips.every((c) => typeof c === 'string'))) return
+          if (!this.audioOverrides.has(slot)) {
+            this.audioOverrides.add(slot)
+            if (!this.cleanups.includes(this.resetAudio)) this.cleanups.push(this.resetAudio)
+          }
+          H.audio.override(slot, clips)
+        },
+        slots: () => H.audio?.slots() ?? [],
+      },
 
       placed: (id) => this.entityFor(id),
       placedWith: (tag) => (H.placements?.() ?? []).filter((p) => p.tags.includes(tag)).map((p) => this.entityFor(p.id)).filter((e): e is number => e !== null),

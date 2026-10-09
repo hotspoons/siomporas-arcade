@@ -279,7 +279,8 @@ export class Catalog {
   }
 
   async writeFileFor(id, name, buf, meta) {
-    await mkdir(this.dir(id), { recursive: true })
+    // `name` may carry a folder (sounds/<file>); the item's directory and that folder both exist after this
+    await mkdir(path.dirname(path.join(this.dir(id), name)), { recursive: true })
     await writeFile(path.join(this.dir(id), name), buf)
     if (meta) await this.record(id, { step: meta.step ?? 'file', file: name, ...meta })
   }

@@ -237,3 +237,22 @@
 .bld-gear { display: flex; align-items: flex-start; gap: var(--s2); }
 .bld-gear .field { flex: 1 1 auto; min-width: 0; margin: 0; }
 .bld-gear .btn { flex: 0 0 auto; margin-top: 2px; }
+
+/* ---- the sound picker (soundpicker.ts) and the bank tab (sounds.ts) ---------------------------- */
+.snd-row { padding: 6px 0; border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.2)); }
+.snd-row:last-child { border-bottom: 0; }
+.snd-head { display: flex; align-items: center; gap: 10px; }
+.snd-name { flex: 1; min-width: 0; }
+.snd-name code { font-size: 12px; }
+.snd-name .field-note { margin: 1px 0 0; }
+.snd-state { font-size: 11px; opacity: 0.7; white-space: nowrap; }
+.snd-state.own { opacity: 1; color: var(--accent, #6cf); }
+.snd-state.silent { opacity: 1; color: var(--warn, #e9a23b); }
+.snd-acts { margin: 0; flex: none; }
+.snd-edit { margin: 6px 0 2px 12px; padding: 6px 10px; border-left: 2px solid var(--line, rgba(128, 128, 128, 0.3)); }
+.snd-entry { margin: 2px 0; align-items: center; }
+.snd-entry-name { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snd-clipfield .panel-actions { margin: 4px 0; }
+.snd-bank-slot { padding: 8px 0; border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.2)); }
+.snd-bank-clips { display: flex; flex-wrap: wrap; gap: 2px 4px; margin-top: 4px; }
+.snd-bank-clips .btn { font-size: 11px; }

@@ -161,12 +161,12 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
 | cost | where | what to do |
 |---|---|---|
 | 16 ms, on a cell with water arriving | `nearPerf.water`: the water layer merges a whole per-look bucket (every stream seen so far) when a cell adds to it | bucket per (look, 1 km cell) so a merge is one cell's geometry |
-| 4–6 ms, every ~350 m (every 5 s at speed) | `nearPerf.treesPlant`: the replant's `plantMoved` walks all 60k records (2 ms) and drops the leavers from two grids (1–2 ms) | slice `plantMoved` over frames; keep records per 1 km cell so a replant is a cell swap |
+| 2–7 ms, on a replant that evicts a kilometre of woods | `nearPerf.treesPlant`: the leavers' drops from the collision grid (`grid`, 7 ms for 19k) and the impostor reseat; the walk itself is per block now (below) | drop a whole block from the grids at once instead of a tree at a time |
 | 2–3 ms/frame at speed | `physics.stats().parts.terrain`: the sliced tile sampling at `PHYS_TILE_MS` — by design, the ring must keep ahead of 75 m/s | the graded-ground raster from the bake (below) makes a tile a copy |
 | 4.5 ms/frame CPU at Ultra | `fp.render`: 500–780 draw calls submitted (traffic at full detail is a draw per part per car) | instanced traffic; merge street furniture per cell |
 | reversed depth | 24-bit canvas depth when post AA is off; shadow, mirror and probe targets untested for z-fighting at distance | a RenderPass + OutputPass composer with a FloatType depth texture whenever reversed is on; then make it the default |
 | 6–11 ms, rare | `nearPerf.pyr`: `PyramidStream.update` on a tile landing (select, diff, release, fetch) | profile `select`/`diff`; move the quadtree walk to the decode worker |
-| 10–12 ms, rare | `render` on the frame a pyramid tile's JPEG texture first draws (upload + mipmaps of a 4096² RGBA) | KTX2 (GPU-compressed, pre-mipped) tiles from the bake; `createImageBitmap` off-thread; `renderer.initTexture` on arrival |
+| 10–12 ms, rare | `render` on the frame a pyramid tile's JPEG texture first draws (upload + mipmaps of a 4096² RGBA) | the bake now writes a KTX2 twin per tile and the viewer takes it (below); to be re-measured on Rich's card on a re-baked site; `renderer.initTexture` on arrival is still open |
 | 1.5 ms/frame | `physics.update`: 2 steps × 0.7–0.9 ms with 4,300 bodies; the step cost does not track the traffic bodies enabled | `PHYS_HZ` 60 when the frame is over target; measure what the step spends on with the Rapier profiler |
 | 1.1 ms/frame | `traffic.tick`: `place` walks all 4,000 cars a frame | a coarse grid so only cars near the draw radius are visited |
 | 2.2 ms/frame | `render` CPU: ~590 draw calls | instanced traffic (one draw per model, not per car); merge static street furniture per cell |
@@ -178,11 +178,14 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
   bake knows every road's grade; writing the graded DEM into each tile (or a second channel) makes
   a physics tile a copy, not 4,225 samples, and the strips a lookup.
 - **Pyramid imagery as KTX2** (the tile format already supports it): no JPEG decode, no upload
-  spikes, a quarter of the GPU memory.
+  spikes, a quarter of the GPU memory. Done 2026-10-10 (below).
 - **Grass eligibility per cell** (road distance, canopy, slope, shelf, zone): the generator asks
   the same five questions of the same ground every time a tile is planted. A per-tile bitmask from
-  the bake leaves only the per-blade jitter at run time.
+  the bake leaves only the per-blade jitter at run time. Measured 2026-10-10 and NOT built — the
+  questions are a quarter of a 2.5 ms generator; below.
 - **Tree records per 1 km cell** so a replant is a cell swap, not a walk over every record.
+  Done 2026-10-10, viewer-side (below): the bake never held tree records, the viewer grows them
+  from the canopy raster, so the cell is the planter's.
 
 ### What landed: the graded ground raster (2026-10-09, branch `agent/graded-dem`)
 
@@ -317,3 +320,93 @@ error. The new probe does not abort it.
   1,038; the served world is the editor's 5.26 km site (14.2 × 13.7 km DEM, primary MD 3/MD 450,
   NOAA 10311 lidar) and the on-disk intermediates are sites.json's 2.6 km Crofton Parkway entry
   (8.7 × 8.1 km). 404 of the 617 extra branches lie outside the Sep-26 footprint altogether.
+
+### What landed: the tree records per block (2026-10-10, branch `agent/bake-phases`)
+
+The fourth item, and it was never a bake change: the bake exports no tree records — `flora.py`
+writes species and climate, and the viewer grows every tree from the canopy raster at run time
+(`props.treesFromCanopy`) — so "records per 1 km cell" is the planter's own index. The planter
+now keeps its records per world-aligned 100 m block (`BLOCK_M`), and `plantMoved` decides per
+BLOCK: a block whose answers did not change is not visited, a block that fell wholly outside the
+context ring is emptied in one go, a block that crossed the draw radius flips its trees' spare
+flag together. The draw rim is blocky by ±70 m at 1,400 m out, where a tree is a pixel and the far
+cards carry the woods; the context rim keeps a tree until its whole block is outside, never
+sooner. The slot a tree holds, the near set, the collision grid and the impostor slots are
+untouched — the patch note is the same shape, only shorter.
+
+Two things the measurement found on the way. A streamed world replants far more often than
+every `TREE_REPLANT_M`: every branch cell that arrives asks for one (`adoptArriving`), 65–86 in
+forty seconds at 78 m/s on crofton-triangle, most of them with the centre barely moved — those
+now walk nothing. And `plant()` itself still walked the array once more, `records.some(...)`
+looking for a record without a cell, 0.5–1 ms over 42k that the block index had just saved;
+a flag now.
+
+Measured (`probes/corridor-bakephases.mjs crofton-triangle --phase cpu`, 78 m/s, 40 s, the
+renderer stubbed so the loop runs at ~58 Hz on this box, 960 px wide so the site is the full
+120k-tree budget):
+
+| replant's `plant` part | n | p50 | p90 | p99 | max | records walked / held |
+|---|---|---|---|---|---|---|
+| before | 68 | 4.7 ms | 12.8 | 21.1 | 21.1 | 1.00 |
+| after | 75 | **0.3 ms** | 1.6 | 4.0 | 4.0 | p50 0.01, p90 0.06, max 0.26 |
+
+The walk itself (`treePlanting().movedMs`) is 1–2 ms only on the replants that cross a full
+kilometre of woods (10–33k records in a block sweep after a jump); what remains of a heavy
+replant is the leavers' drops from the collision grid (`grid`: 7 ms for 19k leavers, one tree at
+a time) and the impostor reseat — the first row of "what is left". The probe's negative
+(`--prove`, `TREE_REPLANT_M` at a billion metres) must fail its own checks; it does.
+
+### Measured, not built: the grass eligibility mask (2026-10-10)
+
+The third item was measured before it was baked, and the number says to leave it. The generator
+now counts what its per-cell questions cost (`grass.perf.questionsMs`, `cellsAsked`,
+`cellsRejected`, against `genTotalMs`, since boot), and the same rig run reads them: at 78 m/s on
+crofton-triangle, 40 s, the questions — the road field, the canopy, the three ground reads for
+the slope, the bare earth for the shelf — are **25 % of the generator**: 13.0 µs a cell on the
+graded scratch bake (1,722 ms of 6,808), 14.7 µs on the served one (1,450 of 5,833), with 69–75 %
+of the cells asked rejected. The generator itself is ~2.5 ms of a frame (`genMs` p50 2.4–2.8) and
+is governed, so a mask that answered every rejected cell for free would hand back ~0.5–0.6 ms a
+frame — and it could not answer them all: a 2.3 m pyramid pixel cannot say what a 1 m cell at a
+kerb, a driveway mouth or a parking apron is without the run-time question being asked there
+anyway, the mask would be baked for tuning.ts's defaults the way the graded raster is (a moved
+`GRASS_SLOPE_MAX` or `GRASS_MAX_FROM_ROAD` then disagrees with it), and it would be a raster per
+tile on the wire. On a graded bake the ground reads are already raster reads, which is where the
+13 µs comes from. Not worth a bake format for; the counters stay so it can be re-measured when
+the generator is next on the table.
+
+### What landed: the pyramid's imagery as KTX2 (2026-10-10, branch `agent/bake-phases`)
+
+`pyramid.encode_twins` writes a `.ktx2` (ETC1S, with its mip chain) beside every pyramid tile's
+`.jpg` after the pool has written every level — the serial loop, the forked pool and a shard's
+bake all land there — and sets `layers.pyramid.texture_ktx2 = "ktx2"` only when every jpg has a
+twin. `PyramidStream` goes through the same `loadBakedTexture` the overview uses, prefers the
+twin when the flag is there, and keeps the jpg path for an older bake (and for a twin that fails
+to load — the fallback used to copy an image that had not arrived yet and never told the caller;
+it loads into the caller's texture now). `pyramid().compressedHeld` against `photosHeld` says
+which path a tab is on.
+
+Cost on crofton-triangle: 271 tiles in 24 s wall (88 s of encoder CPU over eight processes),
+17.0 MiB of jpg → 11.7 MiB of ktx2 on the wire, added beside the jpg: +13 MB on a `web/pyr` of
+88 MB (the graded bake's `bare.png` twins are the rest of the scratch bake's growth, to 151 MB). Re-bake: `python -m corridor export <slug>` with
+`ktx` on the path (`scripts/fetch_ktx.sh`, or `CORRIDOR_KTX`).
+
+**Measured headlessly** (`probes/corridor-bakephases.mjs crofton-triangle-bp --phase ktx2`, a
+scratch bake of crofton-triangle with the twins; the jpg-only copy of the same bake as the
+control, on which the probe's "resident photos are ktx2" check must fail, and does): the one
+operation the format changes, `renderer.initTexture` (decode done, upload + mipmaps) on twelve
+leaf tiles, **jpg p50 1.7 ms, p90 2.2–3.0, max 4.0; ktx2 p50 0.1–0.2 ms, max 0.3** — swiftshader,
+on this bake's 512² tiles, so a tenth of the operation, not the Beltway's 4096² on a card. The
+per-frame `render` on a photo-arrival frame could not be told from the rest here (1.6 against
+1.5 ms p50 at 320 × 200); the 10–12 ms frame in the table above is Rich's measurement and wants
+re-reading on his card once a site is re-baked with the twins.
+
+**The twin is stored bottom-up, and every earlier twin was mirrored.** three uploads the jpg with
+`flipY` (row 0 at v = 1; the terrain's UVs put north at v = 1), a compressed texture cannot be
+flipped on upload, and three's KTX2Loader ignores the file's orientation metadata — so a twin
+written top-down, as `ktx create` does by default and as `ktx2.py` did, draws mirrored
+north–south. Drawn through three's own loaders onto a quad and compared row by row
+(`--phase orient`): correlation with the jpg −0.08, with the jpg reversed 0.906; with
+`--convert-texcoord-origin bottom-left` at encode, 0.903 and −0.08. The overview, horizon and
+flat-tile twins of every bake before this are mirrored the same way — the pyramid draws over the
+overview near the eye, which is how it went unnoticed — and a re-export rewrites them. The viewer
+did not change for it.

@@ -331,6 +331,22 @@ export class Grass {
   // ~1 frame per 10 s at Rich's density), so the only honest frame-time number we can take here
   // is the CPU half — tile generation and buffer assembly. probes/corridor-grasscpu.mjs reads it.
   private genMs = 0
+  /*
+   * THE ELIGIBILITY QUESTIONS, COUNTED — since boot, so a probe can take a difference over a run.
+   *
+   * PERF-RIG.md proposed baking "may grass grow here" per pyramid tile so the generator stops
+   * asking the road field, the canopy, the slope and the shelf of the same ground every time a
+   * tile is planted. Measured before building it (probes/corridor-bakephases.mjs --phase cpu,
+   * 2026-10-10, 78 m/s on crofton-triangle): the questions are 25 % of the generator — 13 µs a
+   * cell on a graded bake, 15 on the served one — and the generator is ~2.5 ms of a frame, so a
+   * mask that answered every rejected cell for free would return ~0.5 ms a frame, and a 2.3 m
+   * raster cannot answer a 1 m cell at a kerb or a driveway mouth without being asked again
+   * there. Not worth a bake format for; these counters stay so the next person can re-measure.
+   */
+  private questionsMs = 0
+  private cellsAsked = 0
+  private cellsRejected = 0
+  private genTotalMs = 0
   /** the longest single generator step this frame, ms: how far one cell can push past the share */
   private maxStepMs = 0
   private asmMs = 0
@@ -1104,6 +1120,7 @@ export class Grass {
       this.dirty = this.pending.length > 0
     }
     this.genMs = t1 - t0
+    this.genTotalMs += t1 - t0
     this.asmMs = performance.now() - t1
     this.madeThisFrame = made
     /*
@@ -1354,8 +1371,10 @@ export class Grass {
     for (let cx = x0; cx < x0 + TILE; cx += cell) {
       for (let cz = z0; cz < z0 + TILE; cz += cell) {
         const wx = cx + 0.5 * cell, wz = cz + 0.5 * cell
+        const q0 = performance.now()
+        this.cellsAsked++
         const roadD = this.roadDistance(wx, wz)
-        if (roadD < this.pavedHalf + T.GRASS_ROAD_CLEAR) continue // pavement
+        if (roadD < this.pavedHalf + T.GRASS_ROAD_CLEAR) { this.questionsMs += performance.now() - q0; this.cellsRejected++; continue } // pavement
         /*
          * "Spend the budget on the verge, where the eye is" -- true of a CORRIDOR, false of a
          * WORLD.
@@ -1370,20 +1389,21 @@ export class Grass {
          * The budget is not at risk either way: the ring radius and the LOD rings are already
          * eye-relative and the blade count is capped, so a bigger area is spread, not added.
          */
-        if (!this.world && roadD > this.pavedHalf + T.GRASS_MAX_FROM_ROAD) continue
-        if (this.canopyAt(wx, -wz) > 3.0) continue // a real crown
+        if (!this.world && roadD > this.pavedHalf + T.GRASS_MAX_FROM_ROAD) { this.questionsMs += performance.now() - q0; this.cellsRejected++; continue }
+        if (this.canopyAt(wx, -wz) > 3.0) { this.questionsMs += performance.now() - q0; this.cellsRejected++; continue } // a real crown
         // slope rejection: a cut face or a steep embankment is rock and scrub, not turf
         const ci = cx - x0, cj = cz - z0
         const gy0 = gyAt(ci, cj)
         const slope = Math.max(Math.abs(gyAt(ci + 1, cj) - gy0), Math.abs(gyAt(ci, cj + 1) - gy0))
-        if (slope > T.GRASS_SLOPE_MAX) continue
+        if (slope > T.GRASS_SLOPE_MAX) { this.questionsMs += performance.now() - q0; this.cellsRejected++; continue }
         // NOTHING GROWS ON A SHELF. Past the strip's blend band the strip IS the DEM — both come
         // from the same raster — so any real gap there means this ground is not sitting on the
         // world: a bridge verge at deck height over a valley, a retaining wall, a deck that has
         // been widened. Grass standing on it is grass in the air. Inside the band the strip is
         // between road grade and the DEM by construction, and a fill embankment lives there
         // legitimately, so the test only applies once the blend has finished.
-        if (this.demAt && T.GRASS_MAX_SHELF > 0 && roadD > this.pavedHalf + 8 && gy0 - this.demAt(wx, -wz) > T.GRASS_MAX_SHELF) continue
+        if (this.demAt && T.GRASS_MAX_SHELF > 0 && roadD > this.pavedHalf + 8 && gy0 - this.demAt(wx, -wz) > T.GRASS_MAX_SHELF) { this.questionsMs += performance.now() - q0; this.cellsRejected++; continue }
+        this.questionsMs += performance.now() - q0
         // bare patches: low-frequency hash noise thins the field where soil shows
         const patch = hash(Math.floor(cx / patchCells) * 971 + Math.floor(cz / patchCells) * 337)
         if (patch < T.GRASS_PATCHINESS) continue
@@ -1607,7 +1627,7 @@ export class Grass {
    * however deep the queue is: the tiles behind it are card-only tiles at the rim, where the size
    * fade has already taken the cards to nothing.
    */
-  get perf(): { genMs: number; maxStepMs: number; asmMs: number; made: number; triangles: number; nearestEmpty: number; nearestUpgrade: number; pendingEmpty: number } {
+  get perf(): { genMs: number; maxStepMs: number; asmMs: number; made: number; triangles: number; nearestEmpty: number; nearestUpgrade: number; pendingEmpty: number; genTotalMs: number; questionsMs: number; cellsAsked: number; cellsRejected: number } {
     // Two very different things sit in the queue and only one of them can show bare ground:
     //   EMPTY    no tile cached at all — nothing is drawn there
     //   UPGRADE  a card-only tile that has come inside the blade ring and wants blades too; the
@@ -1626,6 +1646,11 @@ export class Grass {
       genMs: this.genMs,
       asmMs: this.asmMs,
       made: this.madeThisFrame,
+      // since boot: the generator's total, and the per-cell eligibility questions' share of it
+      genTotalMs: this.genTotalMs,
+      questionsMs: this.questionsMs,
+      cellsAsked: this.cellsAsked,
+      cellsRejected: this.cellsRejected,
       // a blade is (SEGMENTS - 1) quads plus a tip triangle; a card is a quad. Both are DoubleSide.
       triangles: this.bladeGeo.instanceCount * (SEGMENTS * 2 - 1) + this.cardGeo.instanceCount * 2,
     }

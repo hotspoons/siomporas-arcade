@@ -79,6 +79,15 @@ export interface PyrIndex {
   graded?: boolean
   /** which levels were graded; coarser ones are bare (a 10–40 m pixel cannot hold a 7 m verge) */
   graded_levels?: number[]
+  /** the tile photo's extension under `dir/<z>/<x>_<y>.` (`jpg`) */
+  texture?: string
+  /**
+   * The GPU-compressed twin's extension (`ktx2`), when the bake encoded one beside EVERY tile's
+   * jpg — see tools/corridor/corridor/ktx2.py and pyramidstream.ts. It carries its own mip chain
+   * and uploads as blocks, so the frame a photo first draws costs no decode, no mipmap pass and a
+   * quarter of the memory. Absent on an older bake, or one made without the encoder: the jpg path.
+   */
+  texture_ktx2?: string
   list: PyrEntry[]
 }
 

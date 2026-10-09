@@ -115,4 +115,55 @@ describe('crescent replant', () => {
     expect(stillThere).toBe(false)
     expect(t.stats().count).toBeLessThan(before)
   })
+
+  it('replants by block: a block that stays is not walked, one that crosses the draw radius flips its trees together', () => {
+    // 100 m blocks over a 10 m lattice, a 150 m draw radius and a 150 m spare ring: a 120 m move
+    // keeps most of the disc where it was. Before the block index every record was visited on
+    // every replant; now only the blocks that crossed a radius are.
+    knobs.TREE_PLANT_RADIUS_M = 150
+    knobs.TREE_SPARE_M = 150
+    const chm = new Float32Array(4)
+    const t = treesFromCanopy(chm, [2, 2], [-600, -600, 600, 600], 10, () => 0, 20000, 3, () => false, undefined, {
+      canopyAt: () => 8,
+      centre: [0, 0],
+      cellM: 10,
+      radius: 150,
+    })
+    drain(t)
+    const s0 = t.stats()
+    expect(s0.pending).toBe(0)
+    expect(s0.blocks).toBeGreaterThan(4)
+    expect(s0.records).toBe(t.records.length)
+    // a tree 205 m east sits in the block centred (250, 50): 255 m from the eye it is spare,
+    // and 139 m from an eye at (120, 0) its whole block is drawn
+    const far = t.records.findIndex((r) => Number.isFinite(r.x) && r.ci === 20 && r.cj === 0)
+    expect(far).toBeGreaterThanOrEqual(0)
+    expect(t.records[far].spare).toBe(true)
+    t.plant(120, 0)
+    const s1 = t.stats()
+    expect(s1.walked).toBeGreaterThan(0)
+    expect(s1.walked).toBeLessThan(s0.records * 0.6)
+    const note = t.patch()
+    expect(note.shown).toContain(far)
+    expect(t.records[far].spare).toBe(false)
+    // every tree of that block changed together: none of its siblings is still spare
+    for (const r of t.records) {
+      if (!Number.isFinite(r.x)) continue
+      if (Math.floor(r.x / 100) === 2 && Math.floor(-r.z / 100) === 0) expect(r.spare).toBe(false)
+    }
+    // the trees that left the context ring went out as whole blocks, with their positions for the grids
+    expect(note.removed.length).toBeGreaterThan(0)
+    expect(note.removed.length * 2).toBe(note.removedAt.length)
+    expect(note.removed.every((i) => !Number.isFinite(t.records[i].x))).toBe(true)
+    // and a block still inside the ring kept every tree, even past the old per-record rim: the
+    // block centred (-150, 50) is 275 m from the new eye, inside the 300 m context ring, so its
+    // tree at x = -195 stays although it is now 315 m out
+    const kept = t.records.filter((r) => Number.isFinite(r.x) && Math.floor(r.x / 100) === -2 && Math.floor(-r.z / 100) === 0)
+    expect(kept.length).toBeGreaterThan(0)
+    expect(kept.some((r) => Math.hypot(r.x - 120, r.z) > 300)).toBe(true)
+    // a replant that does not move the centre (a branch arriving asks for one) walks nothing
+    t.plant(120, 0)
+    expect(t.stats().walked).toBe(0)
+    expect(t.patch().removed).toEqual([])
+  })
 })

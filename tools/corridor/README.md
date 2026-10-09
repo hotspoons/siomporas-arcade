@@ -97,6 +97,45 @@ active) and the `GRASS_LIFT_M` turf lip (a knob, default 0).
     tools/corridor/.venv/bin/python -m corridor export <slug>          # re-bake web/, graded
     tools/corridor/.venv/bin/python -m pytest tools/corridor/tests/test_grade.py
 
+## The pyramid's imagery as KTX2 (web/pyr, 2026-10-10)
+
+Every pyramid tile's `.jpg` now gets a `.ktx2` twin beside it (ETC1S, with its mip chain), the
+same way the flat `tiles` layer has had one since the tile format landed, and the manifest says so
+with `layers.pyramid.texture_ktx2 = "ktx2"`. The viewer prefers the twin when the flag is there
+and keeps the jpg path for a bake without it — `pyramidstream.ts` goes through the same
+`loadBakedTexture` the overview uses, which also falls back to the jpg if a twin fails to load.
+What it buys: the frame a tile's photo first draws no longer decodes a JPEG, uploads a full RGBA
+image and generates its mipmaps on the main thread (PERF-RIG.md's 10–12 ms `render` frame on the
+Beltway); a ktx2 uploads as blocks it already carries, at a quarter of the GPU memory. Measured
+headlessly on crofton-triangle's 512² tiles, `renderer.initTexture` (upload + mips) p50 1.7 ms
+on the jpg against 0.2 ms on the twin, p90 3.0 against 0.3.
+
+The encode runs ONCE per bake, in `pyramid.encode_twins`, after the pool has written every
+level — so the serial loop, the forked pool and a shard's bake (shards.py merges the twins with
+the tiles, and the finalizer's own bake re-runs the encode, which skips a twin that is already
+current) all land in the same place. Cost on crofton-triangle: 271 tiles in 24 s wall (88 s of CPU
+over eight encoder processes), 17.0 MiB of jpg → 11.7 MiB of ktx2 on the wire — the twins are
+ADDED, the jpg stays, so a site's `web/pyr` grows by the twins (13 MB on crofton-triangle's 88 MB). The flag is written only when every
+jpg has a twin; one failed encode keeps the whole layer on the jpg path rather than make the
+viewer ask per tile. Without the `ktx` binary (`scripts/fetch_ktx.sh`, or `CORRIDOR_KTX`) the
+bake says so and carries on.
+
+**The twin is stored bottom-up**, and this is new for every twin this bake writes, not only the
+pyramid's. three uploads a plain image with `flipY` — row 0 of the jpg lands at v = 1 — and the
+terrain's UVs are written against that (north is v = 1). A compressed texture cannot be flipped
+on upload, and three's KTX2Loader ignores the file's orientation metadata, so a twin written
+top-down (what `ktx create` does by default, and what `ktx2.py` did until now) draws MIRRORED
+north–south. Measured on a pyramid tile drawn through three's own loaders
+(`probes/corridor-bakephases.mjs crofton-triangle-bp --phase orient`): row-profile correlation
+with the jpg −0.08, with the jpg reversed 0.906; with `--convert-texcoord-origin bottom-left` the
+twin and the jpg agree. The overview, horizon and flat-tile twins of every earlier bake are
+mirrored in the same way (the pyramid draws over the overview near the eye, which is how it went
+unnoticed); a re-export rewrites them, and the viewer did not change.
+
+    tools/corridor/.venv/bin/python -m pytest tools/corridor/tests/test_pyramid_twins.py
+    node probes/corridor-bakephases.mjs <slug> --phase ktx2        # the viewer takes the twins; the upload cost
+    node probes/corridor-bakephases.mjs <slug> --phase orient      # the same way up as the jpg
+
 ## Network sites
 
 A `sites.json` entry with `kind: "network"`, a `roads` list (OSM names or refs), a `primary` road,

@@ -9,6 +9,7 @@ import type { StuntDoc } from './game/stunt/stunts'
 import { loadRaceWorld, type RaceWorld } from './game/race/raceworld'
 import { nextGate } from './game/race/racerun'
 import { PerfMeter, short } from './game/session/perf'
+import { ktx2Loader } from './assets/textures'
 import { GpuProfiler } from './game/session/gpuprofile'
 import { assistAt, lookAhead, pullFor } from './game/stunt/stuntassist'
 import { PerfHud } from './ui/perfhud'
@@ -4955,6 +4956,8 @@ registerBridgeContext({
   get framePerf() {
     return framePerf
   },
+  /** the page's own KTX2 loader (transcoder + detectSupport done), so a probe can time an upload the way the stream does */
+  ktx2Loader: () => ktx2Loader(renderer),
   perf: (frames = 30) =>
     new Promise<unknown>((resolve) => {
       const t: number[] = []

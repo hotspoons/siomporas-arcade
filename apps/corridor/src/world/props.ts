@@ -600,7 +600,7 @@ export function treesFromCanopy(
      */
     seedM?: number
   } = {},
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number; pump: { cells: number; measured: number; placed: number; measureMaxMs: number; nextMs: number; ms: number } } } {
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number; walked: number; movedMs: number; blocks: number; records: number; pump: { cells: number; measured: number; placed: number; measureMaxMs: number; nextMs: number; ms: number } } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
@@ -636,6 +636,66 @@ export function treesFromCanopy(
   type Rec = TreeRecord & { rad: number; hue: number; ci: number; cj: number; spare: boolean }
   const records: Rec[] = []
   const free: number[] = []
+  /*
+   * THE RECORDS, BY BLOCK. A replant used to walk every record to ask two distances of each —
+   * out of the context ring? past the draw radius? — 2 ms over the Beltway's 60k, on every
+   * replant, and a streamed world replants far more often than every TREE_REPLANT_M: every branch
+   * cell that arrives asks for one (`adoptArriving`), 86 in forty seconds at 78 m/s on
+   * crofton-triangle (2026-10-10). The two answers are the same for every tree in a block of
+   * `BLOCK_M` metres, give or take the block's half-diagonal at the rim, so the records are
+   * kept per world-aligned block and a replant decides per BLOCK: a block that stays where it
+   * was is not visited, a block that left the ring is emptied, a block that crossed the draw
+   * radius has its trees' spare flag flipped. The draw rim is therefore blocky by ±70 m at
+   * 1,400 m out, where a tree is a pixel and the far cards carry the woods anyway; the context
+   * rim keeps a tree until its whole block is outside, never sooner. The slot a tree holds, the
+   * near set, the collision grid and the impostor slots are all exactly as before.
+   */
+  const BLOCK_M = 100
+  const BLOCK_R = BLOCK_M * Math.SQRT1_2
+  type Block = { slots: number[]; spare: boolean; cx: number; cy: number }
+  const blocks = new Map<string, Block>()
+  /** the block a cell belongs to, made on first use with its spare flag decided for `(cx, cy)` */
+  const blockFor = (ci: number, cj: number, cellM: number, cx: number, cy: number, drawR: number): Block => {
+    const bi = Math.floor(((ci + 0.5) * cellM) / BLOCK_M), bj = Math.floor(((cj + 0.5) * cellM) / BLOCK_M)
+    const key = `${bi},${bj}`
+    let b = blocks.get(key)
+    if (!b) {
+      const bx = (bi + 0.5) * BLOCK_M, by = (bj + 0.5) * BLOCK_M
+      b = { slots: [], spare: Math.hypot(bx - cx, by - cy) > drawR, cx: bx, cy: by }
+      blocks.set(key, b)
+    }
+    return b
+  }
+  /** a freed slot leaves its block; the last one out deletes the block */
+  const unblock = (r: Rec, i: number, cellM: number) => {
+    const bi = Math.floor(((r.ci + 0.5) * cellM) / BLOCK_M), bj = Math.floor(((r.cj + 0.5) * cellM) / BLOCK_M)
+    const key = `${bi},${bj}`
+    const b = blocks.get(key)
+    if (!b) return
+    const at = b.slots.indexOf(i)
+    if (at >= 0) {
+      b.slots[at] = b.slots[b.slots.length - 1]
+      b.slots.pop()
+    }
+    if (!b.slots.length) blocks.delete(key)
+  }
+  /** the whole index from the records, each tree's spare flag taken from its block */
+  const rebuildBlocks = (cellM: number, cx: number, cy: number, drawR: number) => {
+    blocks.clear()
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i]
+      if (!Number.isFinite(r.x) || !Number.isFinite(r.ci)) continue
+      const b = blockFor(r.ci, r.cj, cellM, cx, cy, drawR)
+      b.slots.push(i)
+      r.spare = b.spare
+    }
+  }
+  /** what the last plantMoved visited: records walked, so a probe can hold it against the total */
+  let lastWalked = 0
+  /** every live record carries its cell (`ci`, `cj`): true after a patch plant, false after the old whole-disc one */
+  let cellsKnown = false
+  /** what the last plantMoved took, ms — the replant's own walk, apart from whatever shares its frame */
+  let lastMovedMs = 0
   const cellCache = new Map<string, { x: number; y: number; rec: Rec | null }>()
   let cacheStamp = ''
   let centre: [number, number] = opts.centre ?? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
@@ -707,8 +767,10 @@ export function treesFromCanopy(
     if (useCache) cellCache.set(key, { x: x0, y: y0, rec })
     return rec
   }
-  const adopt = (cx: number, cy: number, cellM: number, contextR: number) => {
+  const adopt = (cx: number, cy: number, cellM: number, contextR: number, drawR: number) => {
     liveKeys.clear()
+    rebuildBlocks(cellM, cx, cy, drawR)
+    tally()
     let max2 = 0
     for (const r of records) {
       if (!Number.isFinite(r.x) || !Number.isFinite(r.ci)) continue
@@ -751,38 +813,48 @@ export function treesFromCanopy(
    * Measuring it happens in `pump`, a few milliseconds a frame.
    */
   const plantMoved = (cx: number, cy: number, cellM: number, drawR: number, contextR: number): number => {
-    const draw2 = drawR * drawR
-    const context2 = contextR * contextR
     const removed: number[] = []
     const removedAt: number[] = []
     const shown: number[] = []
     const hidden: number[] = []
     const ox = settled![0], oy = settled![1]
     const settled2 = settledR * settledR
-    for (let i = 0; i < records.length; i++) {
-      const r = records[i]
-      if (!Number.isFinite(r.x)) continue
-      const x0 = (r.ci + 0.5) * cellM, y0 = (r.cj + 0.5) * cellM
-      const dx = x0 - cx, dy = y0 - cy
-      const d2 = dx * dx + dy * dy
-      if (d2 > context2) {
-        if (r.spare) spareCount--
-        liveCount--
-        liveKeys.delete(`${r.ci},${r.cj}`)
-        removedAt.push(r.x, r.z)
-        r.x = NaN
-        free.push(i)
-        removed.push(i)
+    const context2 = contextR * contextR
+    let walked = 0
+    for (const [key, b] of blocks) {
+      const d = Math.hypot(b.cx - cx, b.cy - cy)
+      if (d - BLOCK_R > contextR) {
+        // the whole block is outside the context ring: every tree in it leaves
+        for (const i of b.slots) {
+          const r = records[i]
+          walked++
+          if (!Number.isFinite(r.x)) continue
+          if (r.spare) spareCount--
+          liveCount--
+          liveKeys.delete(`${r.ci},${r.cj}`)
+          removedAt.push(r.x, r.z)
+          r.x = NaN
+          free.push(i)
+          removed.push(i)
+        }
+        blocks.delete(key)
         continue
       }
-      const spare = d2 > draw2
-      if (r.spare !== spare) {
+      const spare = d > drawR
+      if (spare === b.spare) continue
+      // the block crossed the draw radius: its trees change between drawn and spare together
+      b.spare = spare
+      for (const i of b.slots) {
+        const r = records[i]
+        walked++
+        if (!Number.isFinite(r.x) || r.spare === spare) continue
         spareCount += spare ? 1 : -1
         r.spare = spare
         if (spare) hidden.push(i)
         else shown.push(i)
       }
     }
+    lastWalked = walked
     // restart the cursor at the new centre. Cells already planted are in liveKeys; ones measured
     // empty are in the cache. Either way the walk does not rebuild the list it has already passed.
     const j0 = Math.floor((cy - contextR) / cellM)
@@ -870,7 +942,6 @@ export function treesFromCanopy(
   const pump = (budgetMs: number): boolean => {
     if (!scan || !settled) return false
     const drawR = T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
-    const draw2 = drawR * drawR
     const deadline = performance.now() + Math.max(0.25, budgetMs)
     const cellM = scan.cellM
     const scx = scan.cx
@@ -911,13 +982,15 @@ export function treesFromCanopy(
         capped = true
         break
       }
-      const spare = d2 > draw2
+      const b = blockFor(c.i, c.j, cellM, scx, scy, drawR)
+      const spare = b.spare
       const copy = { ...rec, spare }
       let i = free.pop()
       if (i === undefined) {
         i = records.length
         records.push(copy)
       } else records[i] = copy
+      b.slots.push(i)
       liveKeys.add(key)
       liveCount++
       if (spare) spareCount++
@@ -959,14 +1032,21 @@ export function treesFromCanopy(
       cacheStamp = stamp
       records.length = 0
       free.length = 0
+      blocks.clear()
       liveKeys.clear()
       scan = null
       hold = null
       settled = null
       settledR = 0
     }
-    if (patch && settled && records.length > 0 && !records.some((r) => Number.isFinite(r.x) && !Number.isFinite(r.ci))) {
-      return plantMoved(cx, cy, cellM, drawR, contextR)
+    // `cellsKnown`, not a scan: `records.some(...)` here walked every record looking for one
+    // without a cell on every replant that found none — the whole array, 0.5–1 ms over 42k,
+    // after the block index had taken the walk itself to nothing (2026-10-10)
+    if (patch && settled && records.length > 0 && cellsKnown) {
+      const m0 = performance.now()
+      const n = plantMoved(cx, cy, cellM, drawR, contextR)
+      lastMovedMs = performance.now() - m0
+      return n
     }
     // The first plant measures a seed disc. pump() already walks the crescent out to the draw
     // radius a few milliseconds at a time; doing the whole disc here is the startup hitch.
@@ -1001,8 +1081,9 @@ export function treesFromCanopy(
       patchNote = { rebuilt: true, changed: [], removed: [], removedAt: [], shown: [], hidden: [] }
       lastChanged = records.length
       lastEvicted = 0
+      cellsKnown = false
       tally()
-      adopt(cx, cy, cellM, contextR)
+      adopt(cx, cy, cellM, contextR, Infinity)
       return liveCount
     }
     records.length = 0
@@ -1011,8 +1092,9 @@ export function treesFromCanopy(
     patchNote = { rebuilt: true, changed: [], removed: [], removedAt: [], shown: [], hidden: [] }
     lastChanged = records.length
     lastEvicted = 0
+    cellsKnown = true
     tally()
-    adopt(cx, cy, cellM, contextR)
+    adopt(cx, cy, cellM, contextR, drawR)
     if (measureR < contextR) {
       settledR = measureR
       plantMoved(cx, cy, cellM, drawR, contextR)
@@ -1090,6 +1172,7 @@ export function treesFromCanopy(
       if (!Number.isFinite(r.x) || r.x < ax0 || r.x > ax1 || r.z < az0 || r.z > az1) continue
       cellCache.delete(`${r.ci},${r.cj}`)
       liveKeys.delete(`${r.ci},${r.cj}`)
+      unblock(r, i, cellM)
       if (r.spare) spareCount--
       liveCount--
       r.x = NaN
@@ -1103,6 +1186,7 @@ export function treesFromCanopy(
   const invalidateAll = () => {
     cellCache.clear()
     trimIter = null
+    blocks.clear()
     for (let i = 0; i < records.length; i++) {
       const r = records[i]
       if (!Number.isFinite(r.x)) continue
@@ -1116,7 +1200,7 @@ export function treesFromCanopy(
     scan = null
     hold = null
   }
-  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0), pump: { ...pumpStats } }) }
+  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0), walked: lastWalked, movedMs: +lastMovedMs.toFixed(2), blocks: blocks.size, records: records.length, pump: { ...pumpStats } }) }
 }
 
 /**

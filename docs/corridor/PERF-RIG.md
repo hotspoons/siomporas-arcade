@@ -106,7 +106,7 @@ What was found:
    renderer-wide**: every overdrawn fragment (leaves behind leaves, the ground under the road, cars
    behind cars) is shaded in full and then rejected. Flat-shading everything saved 8–12 of 16 ms;
    the trees' leaf shading alone was 4.8 ms. → a **reversed float depth buffer**
-   (`?depth=reversed`: three's `reversedDepthBuffer` + `EXT_clip_control`). GPU at Ultra, same
+   (three's `reversedDepthBuffer` + `EXT_clip_control`; the default since 2026-10-09, `?depth=log` is the old path, and a browser without the extension keeps it). GPU at Ultra, same
    drive: **p50 18.4 → 7.6 ms, p95 23 → 11.4**. Four things had to move with it: a bare
    `THREE.Camera` in the water-probe pass (three calls `updateProjectionMatrix` on every camera
    now), a raw `gl.clearDepth` in the road cover (bypasses three's inverted clear cache), the

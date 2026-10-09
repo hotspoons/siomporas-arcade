@@ -118,11 +118,27 @@ const antialias = antialiasFor(bootSlug())
  * keeps the precision across 60 km without touching gl_FragDepth, so early-Z is back. The post
  * composer's render target carries a FloatType depth texture for it (a 24-bit fixed-point buffer
  * reversed is no more precise than it was forwards). Shadow maps, the mirror and the probes keep
- * their own buffers. Behind a URL parameter while it is measured against the logarithmic path.
+ * their own buffers. THE DEFAULT since 2026-10-09 (Rich played a level through on it: GPU p50
+ * 18 → 7.6 ms at Ultra, nothing wrong on screen); `?depth=log` is the old path, for an A/B.
+ *
+ * Where EXT_clip_control is missing (swiftshader, an old driver) three would quietly draw with a
+ * plain forward 24-bit buffer — 60 km of z-fighting — so the extension is asked for FIRST, on a
+ * throwaway context, and the logarithmic path is kept where it is not there.
  */
-const reversedDepth = new URLSearchParams(location.search).get('depth') === 'reversed'
+const depthParam = new URLSearchParams(location.search).get('depth')
+const clipControl = (() => {
+  if (depthParam === 'log') return false
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2')
+    return !!gl?.getExtension('EXT_clip_control')
+  } catch {
+    return false
+  }
+})()
+const reversedDepth = depthParam === 'reversed' || (depthParam !== 'log' && clipControl)
 const renderer = new THREE.WebGLRenderer({ canvas, antialias, logarithmicDepthBuffer: !reversedDepth, reversedDepthBuffer: reversedDepth })
-if (reversedDepth && !renderer.capabilities.reversedDepthBuffer) console.warn('corridor: ?depth=reversed asked for, but EXT_clip_control is missing; a plain 24-bit depth buffer is drawing this')
+if (reversedDepth && !renderer.capabilities.reversedDepthBuffer) console.warn('corridor: reversed depth asked for, but EXT_clip_control is missing; a plain 24-bit depth buffer is drawing this')
+if (!reversedDepth) console.info(`corridor: logarithmic depth (${depthParam === 'log' ? '?depth=log' : 'no EXT_clip_control here'}) — early-Z is off`)
 if (renderer.capabilities.reversedDepthBuffer) {
   /*
    * THREE REVERSES THE WHOLE RENDER LIST under a reversed depth buffer — renderOrder and all — so

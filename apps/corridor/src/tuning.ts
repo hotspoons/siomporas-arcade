@@ -1096,7 +1096,7 @@ export let STREAM_SCALE_MIN = 0.3
  * compete with the ones beside and behind it, and lost (Rich, 2026-10-09: "render budgets need to
  * be focused in the direction of travel"). At rest the focus is the eye.
  */
-export let STREAM_LEAD_S = 3
+export let STREAM_LEAD_S = 8
 // trees (props.treesFromCanopy): a FIXED cell so density does not depend on how big the site is,
 // the budget spent within TREE_PLANT_RADIUS_M of the eye, replanted when the eye leaves that
 // centre by TREE_REPLANT_M
@@ -2604,7 +2604,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('STREAM_GOVERNOR', () => STREAM_GOVERNOR, (v) => (STREAM_GOVERNOR = v), [0, 1], 1, 'scale the builders’ per-frame budgets (grass, trees, grading) to the CPU time the frame has left; 0 = every budget is the full knob'),
           tune('STREAM_TARGET_MS', () => STREAM_TARGET_MS, (v) => (STREAM_TARGET_MS = v), [4, 16], 0.5, 'the frame CPU time the governor steers toward, ms'),
           tune('STREAM_SCALE_MIN', () => STREAM_SCALE_MIN, (v) => (STREAM_SCALE_MIN = v), [0.05, 1], 0.05, 'the smallest share of their budgets the builders keep while the frame is over'),
-          tune('STREAM_LEAD_S', () => STREAM_LEAD_S, (v) => (STREAM_LEAD_S = v), [0, 8], 0.5, 'the builders rank their work by distance to a point this many seconds of travel ahead of the car'),
+          tune('STREAM_LEAD_S', () => STREAM_LEAD_S, (v) => (STREAM_LEAD_S = v), [0, 15], 0.5, 'the grading pump gives a unit credit for being up to this many seconds of travel ahead of the car (a dense 1 km cell is ~7 s of its work); the tiles use at most 2 s'),
         ],
       },
       {

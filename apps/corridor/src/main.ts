@@ -4126,7 +4126,8 @@ function frame() {
   if (physics && !paused) {
     // the tiles ahead first: the car's own velocity, STREAM_LEAD_S of travel out
     const c = drive.car
-    const lead = c && drive.on ? { x: c.pos.x + c.forward.x * c.speed * T.STREAM_LEAD_S, z: c.pos.z + c.forward.z * c.speed * T.STREAM_LEAD_S } : undefined
+    const leadS = Math.min(2, T.STREAM_LEAD_S)
+    const lead = c && drive.on ? { x: c.pos.x + c.forward.x * c.speed * leadS, z: c.pos.z + c.forward.z * c.speed * leadS } : undefined
     physics.update(c?.pos ?? camera.position, real, lead)
   }
   fpMark('physics')

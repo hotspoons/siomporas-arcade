@@ -140,7 +140,21 @@ pyramid's loads and the physics tiles rank by a **focus** `STREAM_LEAD_S` (3 s) 
 the eye (the eye's own velocity; the eye itself at rest), the governor floor is 0.3 and its target
 13 ms. `graded().unfinishedHere` counts the units covering the eye that are still being built —
 the number a run at speed wants at zero; `aheadrun.js` (scratchpad) samples it per frame with
-`STREAM_LEAD_S` 0 against 3. Not yet measured on Rich's machine: his tab was hidden.
+`STREAM_LEAD_S` 0 against 3.
+
+Measured, then corrected. The first cut ranked everything by distance to a point 230 m ahead,
+which put the cell under the wheels *outside* the build window: 20% of frames on unfinished
+ground against 0.5% with no lead. The rule that works: a unit whose circle covers the eye is
+always first; a unit ahead is credited with how far ahead it is, up to the lead; a unit behind
+counts three times as far. Then the lead itself: a dense 1 km cell is ~7 s of pump work (twenty
+branch units of ~25 ms plus the street and the buildings) and the pump gets ~1.8 ms a frame at
+the governor floor, so a 3 s lead starts it too late. On the same dense stretch (s 27.5–31 km,
+74 m/s): lead 3 s → 5.3% of frames unfinished, 7.3 units pending; **lead 8 s → 0.2%, 2.3
+pending**. The pyramid tiles were never late (`tileBelowWantedFrac` 0 throughout) and keep a 2 s
+focus, as do the physics tiles. Two things that did NOT help, for the record: slices in
+`requestIdleCallback` (a 12 ms main thread has no idle time Chrome admits to) and slices yielded
+through a `MessageChannel` (twice the pump's frame cost at the floor, wall/work unchanged — a
+branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, not the yield).
 
 ## What is left (measured, not yet fixed)
 

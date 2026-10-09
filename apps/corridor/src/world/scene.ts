@@ -4248,7 +4248,9 @@ if (uLodOn > 0.5) {
         } else velocity.set(0, 0, 0)
         prevEye.copy(eye)
         prevTime = time
-        focus.copy(eye).addScaledVector(velocity, Math.max(0, T.STREAM_LEAD_S))
+        // the tiles' focus: two seconds out at most — further and the tile under the car would
+        // load after the ones ahead of it. The pump takes the whole lead (gradeNear).
+        focus.copy(eye).addScaledVector(velocity, Math.max(0, Math.min(2, T.STREAM_LEAD_S)))
       }
       lastEyeSeen.copy(eye)
       roadCover?.refresh(road, eye)

@@ -932,7 +932,14 @@ if (uLodOn > 0.5) {
         m.polygonOffsetUnits = -bias
         return m
       },
-      textureFor: (t) => (t.hasNaip ? `${DATA_BASE}${base}${L.pyramid!.dir}/${t.z}/${t.x}_${t.y}.jpg` : null),
+      // the jpg, and the ktx2 twin when the bake says every tile has one (`texture_ktx2`)
+      textureFor: (t) => {
+        if (!t.hasNaip) return null
+        const P = L.pyramid!
+        const stem = `${DATA_BASE}${base}${P.dir}/${t.z}/${t.x}_${t.y}.`
+        return { file: `${stem}${P.texture ?? 'jpg'}`, ktx2: P.texture_ktx2 ? `${stem}${P.texture_ktx2}` : undefined }
+      },
+      renderer,
       fovY: (60 * Math.PI) / 180,
       viewportH: renderer?.domElement.height ?? 1080,
       budgetBytes: lite ? 96 * 1024 * 1024 : 256 * 1024 * 1024,

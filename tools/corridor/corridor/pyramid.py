@@ -577,4 +577,45 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
         px = sum(int(e.get("graded_px") or 0) for e in entries)
         print(f"  grade   {n_graded} tiles graded, {px:,} pixels touched, {grade_ms / 1000:.1f} s of worker time", flush=True)
         out.pop("grade_ms", None)
+    encode_twins(web, out)
     return out
+
+
+def encode_twins(web, out: dict) -> dict:
+    """A `.ktx2` twin beside every tile's `.jpg`, and `texture_ktx2` in the block when all have one.
+
+    The frame a pyramid tile's photo first draws was a 10–12 ms `render` on the jpg path: the
+    decode, the upload of a full RGBA image and three's mipmap pass, on the main thread, on one
+    frame (PERF-RIG.md). A ktx2 carries its mip chain and uploads as compressed blocks — no decode,
+    no mipmap pass, a quarter of the memory — and `ktx2.py` already makes the twins for the flat
+    `tiles` layer. Here it runs over `web/pyr` ONCE, in the parent, after the workers have written
+    every level: the serial loop and the forked pool both land here, and so does a shard's bake
+    (shards.py merges the twins with the tiles, and the finalizer's own bake re-runs this, which
+    skips a twin that is already current). Purely additive: the jpg stays as the fallback, and the
+    flag is written only when EVERY jpg has a twin, so a viewer never has to ask per tile.
+
+    The twin is written with its first row at the BOTTOM (`--convert-texcoord-origin
+    bottom-left`): a compressed texture cannot be flipped on upload, and the jpg is uploaded with
+    three's `flipY`; the terrain's UVs were written against the latter. ktx2.py explains.
+    """
+    import time
+
+    from . import ktx2
+
+    tk0 = time.perf_counter()
+    kk = ktx2.encode_dir(web / "pyr", "*.jpg")
+    if kk.get("status") != "ok":
+        print(f"  ktx2    pyramid twins skipped ({kk.get('status')}) — scripts/fetch_ktx.sh; the .jpg path still works", flush=True)
+        return kk
+    jpgs = list((web / "pyr").rglob("*.jpg"))
+    missing = [p for p in jpgs if not p.with_suffix(".ktx2").exists()]
+    if jpgs and not missing:
+        out["texture_ktx2"] = "ktx2"
+        kb = sum(p.with_suffix(".ktx2").stat().st_size for p in jpgs)
+        jb = sum(p.stat().st_size for p in jpgs)
+        print(f"  ktx2    {len(jpgs)} pyramid twins ({kk['ok']} encoded, {kk['skip']} current) in {time.perf_counter() - tk0:.1f} s: "
+              f"{jb / 2**20:.1f} MiB jpg -> {kb / 2**20:.1f} MiB ktx2 on the wire, 8x less on the GPU", flush=True)
+    else:
+        out.pop("texture_ktx2", None)
+        print(f"  ktx2    {len(missing)} of {len(jpgs)} pyramid tiles have NO twin ({kk.get('fail', 0)} failed) — the manifest keeps the jpg path", flush=True)
+    return kk

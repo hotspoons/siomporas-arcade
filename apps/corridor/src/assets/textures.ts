@@ -17,6 +17,9 @@ let ktx2: KTX2Loader | null = null
 let ktx2Broken = false
 
 /** The shared KTX2 loader. Needs the renderer to know which compressed formats the GPU has. */
+export function ktx2Loader(renderer: THREE.WebGLRenderer): KTX2Loader | null {
+  return loader(renderer)
+}
 function loader(renderer: THREE.WebGLRenderer): KTX2Loader | null {
   if (ktx2Broken) return null
   if (!ktx2) {
@@ -74,9 +77,14 @@ export function loadBakedTexture(base: string, choice: TexChoice, renderer?: THR
     undefined,
     (e) => {
       console.warn(`ktx2 ${choice.ktx2} failed, using ${choice.file}`, e)
-      const f = jpg()
-      out.image = f.image
-      out.needsUpdate = true
+      // into the SAME texture the caller already holds, once the image is there — `jpg()`
+      // returned a fresh texture whose image was still undefined, so the fallback copied nothing
+      // and the caller was never told (2026-10-10, found wiring the pyramid)
+      new THREE.TextureLoader().load(base + choice.file, (f) => {
+        out.image = f.image
+        out.needsUpdate = true
+        onLoad?.(out)
+      })
     },
   )
   return out

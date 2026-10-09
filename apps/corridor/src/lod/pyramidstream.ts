@@ -26,6 +26,7 @@ import * as THREE from 'three'
 import type { Anchor } from '@apex/engine/geo/wgs84'
 import { childrenOf, diff, holdWhileRefining, tileBoundsOf, tileKey, tileMetres, type TileId } from '@apex/engine/geo/pyramid'
 import { PyramidSet, loadPyrTile, type PyrEntry, type PyrIndex, type PyrTile } from './tiles'
+import { loadBakedTexture, type TexChoice } from '../assets/textures'
 import * as T from '../tuning'
 
 export interface PyramidStreamOpts {
@@ -50,9 +51,17 @@ export interface PyramidStreamOpts {
   /**
    * The tile's own photo, or null when the bake has none. The mesh is born wearing the overview
    * and this replaces it — the same split trailworks uses, where the coarse ring paints first
-   * and the leaf's texture arrives with the tile.
+   * and the leaf's texture arrives with the tile. `ktx2` names the compressed twin when the
+   * bake's index says every tile has one (`texture_ktx2`); it is preferred, and the jpg is the
+   * fallback inside `loadBakedTexture` itself.
    */
-  textureFor?: (t: PyrTile) => string | null
+  textureFor?: (t: PyrTile) => TexChoice | null
+  /**
+   * The renderer, for the KTX2 transcoder's `detectSupport`. Without one `loadBakedTexture`
+   * silently takes the jpg — the same trap tiles.ts notes — so a stream built without a renderer
+   * is an uncompressed stream, which the panel's `compressed` count will say.
+   */
+  renderer?: THREE.WebGLRenderer
   /**
    * Vertex ceiling for a terrain grid. The decode worker builds the grid now, so this is how the
    * main thread tells it how fine to make one; it is the same `lite ? 4_000 : 14_000` that used to
@@ -90,6 +99,8 @@ interface Held {
   mat: THREE.MeshStandardMaterial
   /** the tile's own photo, disposed with the mesh. The overview map is shared and is not. */
   photo: THREE.Texture | null
+  /** that photo came back as a ktx2 (GPU-compressed) rather than a decoded jpg */
+  compressed: boolean
   /** which child quadrants are currently dropped, so a repeat seat is a no-op */
   mask: number
   /** the drop distance last written into this mesh, so the knob can move it again */
@@ -99,7 +110,7 @@ interface Held {
 }
 
 export class PyramidStream {
-  private readonly o: Required<Omit<PyramidStreamOpts, 'index' | 'anchor' | 'set' | 'group' | 'geometryFor' | 'materialFor' | 'base' | 'textureFor'>> & PyramidStreamOpts
+  private readonly o: Required<Omit<PyramidStreamOpts, 'index' | 'anchor' | 'set' | 'group' | 'geometryFor' | 'materialFor' | 'base' | 'textureFor' | 'renderer'>> & PyramidStreamOpts
   private readonly entries = new Map<string, PyrEntry>()
   private readonly roots: TileId[] = []
   private readonly held = new Map<string, Held>()
@@ -133,6 +144,9 @@ export class PyramidStream {
   loads = 0
   drops = 0
   errors = 0
+  /** photos that have arrived, and how many of those came back as ktx2 rather than jpg */
+  photos = 0
+  compressed = 0
 
   constructor(opts: PyramidStreamOpts) {
     this.o = {
@@ -369,7 +383,7 @@ export class PyramidStream {
         mesh.renderOrder = -tile.z
         this.o.group.add(mesh)
         this.o.set.add(tile)
-        const held: Held = { tile, mesh, geo, mat, photo: null, mask: 0, drop: -1, basePos: null }
+        const held: Held = { tile, mesh, geo, mat, photo: null, compressed: false, mask: 0, drop: -1, basePos: null }
         this.held.set(k, held)
         this.loads++
         this.paint(held)
@@ -380,19 +394,32 @@ export class PyramidStream {
         // for the queue: a car parked at the spawn would take one batch of tiles and then leave
         // the rest of the ground to the coarse overview, which stands up through the road.
         this.pump()
-        const url = this.o.textureFor?.(tile) ?? null
-        if (url) {
-          new THREE.TextureLoader().load(url, (tex) => {
+        const choice = this.o.textureFor?.(tile) ?? null
+        if (choice) {
+          // The ktx2 twin when the bake made one, the jpg otherwise — and the jpg if the twin
+          // fails, inside the loader. A ktx2 carries its mip chain and uploads as blocks: the
+          // frame it first draws pays no decode and no mipmap pass, which on the jpg path was
+          // the 10–12 ms `render` frame of PERF-RIG.md. The compressed texture cannot be
+          // flipped on upload, so the bake writes it bottom-up (ktx2.py) to match the jpg's
+          // flipY — measured, not assumed: probes/corridor-bakephases.mjs --phase ktx2.
+          const tex = loadBakedTexture('', choice, this.o.renderer, () => {
             if (this.disposed || this.held.get(k) !== held) {
               tex.dispose()
               return
             }
-            tex.colorSpace = THREE.SRGBColorSpace
+            const compressed = !!(tex as unknown as { isCompressedTexture?: boolean }).isCompressedTexture
             tex.anisotropy = 8
-            tex.generateMipmaps = true
-            tex.minFilter = THREE.LinearMipmapLinearFilter
+            if (!compressed) {
+              // only the jpg needs mips generated; the twin brought its own and asking three for
+              // more drops them (loadBakedTexture already set generateMipmaps = false on it)
+              tex.generateMipmaps = true
+              tex.minFilter = THREE.LinearMipmapLinearFilter
+            }
             tex.needsUpdate = true
             held.photo = tex
+            held.compressed = compressed
+            this.photos++
+            if (compressed) this.compressed++
             mat.map = tex
             mat.color.setRGB(1, 1, 1)
             this.paint(held)
@@ -580,8 +607,16 @@ export class PyramidStream {
     let bytes = 0
     for (const h of this.held.values()) bytes += h.tile.bytes
     const levels: Record<number, number> = {}
-    for (const h of this.held.values()) levels[h.tile.z] = (levels[h.tile.z] ?? 0) + 1
-    return { held: this.held.size, pending: this.pending.size, bytes, levels, loads: this.loads, drops: this.drops, errors: this.errors }
+    let photosHeld = 0
+    let compressedHeld = 0
+    for (const h of this.held.values()) {
+      levels[h.tile.z] = (levels[h.tile.z] ?? 0) + 1
+      if (h.photo) photosHeld++
+      if (h.compressed) compressedHeld++
+    }
+    // `photos`/`compressed` count arrivals over the run; `photosHeld`/`compressedHeld` are the
+    // resident set now — the pair a probe reads to say whether the ktx2 path is the one running
+    return { held: this.held.size, pending: this.pending.size, bytes, levels, loads: this.loads, drops: this.drops, errors: this.errors, photos: this.photos, compressed: this.compressed, photosHeld, compressedHeld }
   }
 
   dispose() {

@@ -15,6 +15,17 @@ Purely additive. The .jpg stays as the universal fallback — a client that cann
 bake run where the tool is missing, still works. That is also why the texture is NOT inside the
 tile pack (see pack.py): it has to be independently selectable.
 
+THE TWIN IS STORED BOTTOM-UP. three uploads a plain image with `flipY` (row 0 of the jpg lands at
+v = 1) and the terrain's UVs were written against that: north is v = 1 (gridarrays.ts, `1 - v`).
+A compressed texture cannot be flipped on upload — three's KTX2Loader hands back `flipY = false`
+and ignores the file's KTXorientation — so a twin written top-down, as `ktx create` does by
+default, draws MIRRORED north–south under the roads. Measured 2026-10-10 on a crofton-triangle
+pyramid tile drawn through three's own paths (probes/corridor-bakephases.mjs --phase orient):
+row-profile correlation with the jpg −0.08, with the jpg reversed 0.906. `--convert-texcoord-origin
+bottom-left` flips the rows at encode so the two draw the same way up (0.903 after, the twin being ETC1S). Every twin
+this module has written before that date — the overview, the horizon, the flat tiles — is
+mirrored, and a re-export rewrites them; the viewer never changed.
+
 The encoder is Khronos' `ktx` (KTX-Software >= 4.3). It is NOT vendored — it is a 7 MB binary with
 shared libraries and the repo should not carry one. `scripts/fetch_ktx.sh` puts it in
 tools/corridor/.bin, and CORRIDOR_KTX overrides the path. Absent, encoding is skipped with a note
@@ -66,7 +77,11 @@ def encode(src: Path, exe: Path | None = None, force: bool = False) -> tuple[str
         return ("skip", 0, 0)
     r = subprocess.run(
         [str(exe), "create", "--format", "R8G8B8_SRGB", "--encode", "basis-lz",
-         "--generate-mipmap", "--assign-tf", "srgb", str(src), str(out)],
+         "--generate-mipmap", "--assign-tf", "srgb",
+         # bottom-up, to match three's flipY upload of the jpg (the module docstring: a top-down
+         # twin draws mirrored, and the transcoder cannot flip it)
+         "--convert-texcoord-origin", "bottom-left",
+         str(src), str(out)],
         capture_output=True, env=_env(exe),
     )
     if r.returncode != 0:

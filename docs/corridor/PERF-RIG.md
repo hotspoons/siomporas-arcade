@@ -166,7 +166,7 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
 | 4.5 ms/frame CPU at Ultra | `fp.render`: 500–780 draw calls submitted (traffic at full detail is a draw per part per car) | instanced traffic; merge street furniture per cell |
 | reversed depth | 24-bit canvas depth when post AA is off; shadow, mirror and probe targets untested for z-fighting at distance | a RenderPass + OutputPass composer with a FloatType depth texture whenever reversed is on; then make it the default |
 | 6–11 ms, rare | `nearPerf.pyr`: `PyramidStream.update` on a tile landing (select, diff, release, fetch) | profile `select`/`diff`; move the quadtree walk to the decode worker |
-| 10–12 ms, rare | `render` on the frame a pyramid tile's JPEG texture first draws (upload + mipmaps of a 4096² RGBA) | KTX2 (GPU-compressed, pre-mipped) tiles from the bake; `createImageBitmap` off-thread; `renderer.initTexture` on arrival |
+| 10–12 ms, rare | `render` on the frame a pyramid tile's JPEG texture first draws (upload + mipmaps of a 4096² RGBA) | the bake now writes a KTX2 twin per tile and the viewer takes it (below); to be re-measured on Rich's card on a re-baked site; `renderer.initTexture` on arrival is still open |
 | 1.5 ms/frame | `physics.update`: 2 steps × 0.7–0.9 ms with 4,300 bodies; the step cost does not track the traffic bodies enabled | `PHYS_HZ` 60 when the frame is over target; measure what the step spends on with the Rapier profiler |
 | 1.1 ms/frame | `traffic.tick`: `place` walks all 4,000 cars a frame | a coarse grid so only cars near the draw radius are visited |
 | 2.2 ms/frame | `render` CPU: ~590 draw calls | instanced traffic (one draw per model, not per car); merge static street furniture per cell |
@@ -178,7 +178,7 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
   bake knows every road's grade; writing the graded DEM into each tile (or a second channel) makes
   a physics tile a copy, not 4,225 samples, and the strips a lookup.
 - **Pyramid imagery as KTX2** (the tile format already supports it): no JPEG decode, no upload
-  spikes, a quarter of the GPU memory.
+  spikes, a quarter of the GPU memory. Done 2026-10-10 (below).
 - **Grass eligibility per cell** (road distance, canopy, slope, shelf, zone): the generator asks
   the same five questions of the same ground every time a tile is planted. A per-tile bitmask from
   the bake leaves only the per-blade jitter at run time. Measured 2026-10-10 and NOT built — the
@@ -341,3 +341,40 @@ anyway, the mask would be baked for tuning.ts's defaults the way the graded rast
 tile on the wire. On a graded bake the ground reads are already raster reads, which is where the
 13 µs comes from. Not worth a bake format for; the counters stay so it can be re-measured when
 the generator is next on the table.
+
+### What landed: the pyramid's imagery as KTX2 (2026-10-10, branch `agent/bake-phases`)
+
+`pyramid.encode_twins` writes a `.ktx2` (ETC1S, with its mip chain) beside every pyramid tile's
+`.jpg` after the pool has written every level — the serial loop, the forked pool and a shard's
+bake all land there — and sets `layers.pyramid.texture_ktx2 = "ktx2"` only when every jpg has a
+twin. `PyramidStream` goes through the same `loadBakedTexture` the overview uses, prefers the
+twin when the flag is there, and keeps the jpg path for an older bake (and for a twin that fails
+to load — the fallback used to copy an image that had not arrived yet and never told the caller;
+it loads into the caller's texture now). `pyramid().compressedHeld` against `photosHeld` says
+which path a tab is on.
+
+Cost on crofton-triangle: 271 tiles in 24 s wall (88 s of encoder CPU over eight processes),
+17.0 MiB of jpg → 11.7 MiB of ktx2 on the wire, added beside the jpg: +13 MB on a `web/pyr` of
+88 MB (the graded bake's `bare.png` twins are the rest of the scratch bake's growth, to 151 MB). Re-bake: `python -m corridor export <slug>` with
+`ktx` on the path (`scripts/fetch_ktx.sh`, or `CORRIDOR_KTX`).
+
+**Measured headlessly** (`probes/corridor-bakephases.mjs crofton-triangle-bp --phase ktx2`, a
+scratch bake of crofton-triangle with the twins; the jpg-only copy of the same bake as the
+control, on which the probe's "resident photos are ktx2" check must fail, and does): the one
+operation the format changes, `renderer.initTexture` (decode done, upload + mipmaps) on twelve
+leaf tiles, **jpg p50 1.7 ms, p90 2.2–3.0, max 4.0; ktx2 p50 0.1–0.2 ms, max 0.3** — swiftshader,
+on this bake's 512² tiles, so a tenth of the operation, not the Beltway's 4096² on a card. The
+per-frame `render` on a photo-arrival frame could not be told from the rest here (1.6 against
+1.5 ms p50 at 320 × 200); the 10–12 ms frame in the table above is Rich's measurement and wants
+re-reading on his card once a site is re-baked with the twins.
+
+**The twin is stored bottom-up, and every earlier twin was mirrored.** three uploads the jpg with
+`flipY` (row 0 at v = 1; the terrain's UVs put north at v = 1), a compressed texture cannot be
+flipped on upload, and three's KTX2Loader ignores the file's orientation metadata — so a twin
+written top-down, as `ktx create` does by default and as `ktx2.py` did, draws mirrored
+north–south. Drawn through three's own loaders onto a quad and compared row by row
+(`--phase orient`): correlation with the jpg −0.08, with the jpg reversed 0.906; with
+`--convert-texcoord-origin bottom-left` at encode, 0.903 and −0.08. The overview, horizon and
+flat-tile twins of every bake before this are mirrored the same way — the pyramid draws over the
+overview near the eye, which is how it went unnoticed — and a re-export rewrites them. The viewer
+did not change for it.

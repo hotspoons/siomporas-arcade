@@ -242,8 +242,12 @@ export interface Site {
   vtileCache: () => number
   /** accumulated building-build timings, so a probe can see massing vs dressing vs normals */
   buildingsTiming: () => typeof buildTiming
-  /** ground height (m) at site x,y from the DEM layer */
+  /** ground height (m) at site x,y from the DEM layer — the GRADED ground on a graded bake */
   heightAt: (x: number, y: number) => number
+  /** the bare earth at site x,y: `bare.png` on a graded bake, the same function as `heightAt` otherwise */
+  bareAt: (x: number, y: number) => number
+  /** true when `physGroundAt` and the strips read the bake's graded raster instead of grading at run time */
+  gradedBake: boolean
   /** the lowest elevation (m) among the terrain tiles now held; the sea plane's visibility gate */
   lowestGround: () => number
   /** the lazy grading: how much of the site's strips and buildings exist yet, and what they cost */
@@ -626,6 +630,39 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
   }
   const heightAt = pyrSet ? pyrSet.heightAt : tileSet ? tileSet.heightAt : overviewHeight
+  /**
+   * THE BARE EARTH. On a graded bake the pyramid's `dem` carries the road folded in
+   * (tools/corridor/corridor/grade.py), so anything asking "how high is the GROUND, not the road"
+   * — the deck tests, a road's own fallback grade, the overpass piers, the strip's blend — reads
+   * this. On an older bake it is `heightAt` under another name, and nothing changes.
+   */
+  const bareAt: (x: number, y: number) => number = pyrSet ? pyrSet.bareAt : heightAt
+  /**
+   * THE GROUND IS A RASTER, NOT A FORMULA, on a graded bake: `physGroundAt` and the strips read
+   * the pyramid height directly instead of running `gradedHeight` per sample (~4 µs each, and a
+   * physics tile asks 1,089 times; PERF-RIG.md § "For the bake"). The raster was written with the
+   * same formula, so this is a lookup of the answer rather than a different answer.
+   *
+   * Two things keep the run-time path: `?grade=runtime`, so a probe can hold the raster against
+   * the formula on the same world (probes/corridor-gradedraster.mjs), and active adjustments —
+   * the editor's `ground_offset_m` is authored outside the bake, and the raster cannot carry it.
+   */
+  /** the bake graded this pyramid (and wrote its deck runs and driveway heights to match) */
+  const bakeGraded = !!(pyrSet && L.pyramid?.graded)
+  const gradedBake = bakeGraded && !adjustments.active && new URLSearchParams(location.search).get('grade') !== 'runtime'
+  /**
+   * A RASTER CANNOT HOLD A STEP. The formula is discontinuous wherever two carriageways at
+   * different heights stand within a pixel of each other — an interchange ramp on its main line,
+   * a frontage road under an embankment — and a bilinear read smears that step over one cell:
+   * 1.4 m measured beside Route 3 at s = 2840 on crofton-triangle, where a branch runs 2.7 m
+   * below the spine four metres away. So a sample whose four pixels span more than this many
+   * metres is not read; it is computed, exactly as before. A natural bank steeper than this
+   * also takes the formula, which answers the same raster there — the cost is one station walk
+   * at a cliff, where the formula already paid it.
+   */
+  const RASTER_CLIFF_M = 0.5
+  /** the raster where it can answer; null at a cliff (see RASTER_CLIFF_M), for the formula */
+  const rasterOrNull = (x: number, z: number): number | null => (pyrSet!.cellSpanAt(x, -z) > RASTER_CLIFF_M ? null : heightAt(x, -z))
 
   /**
    * The lowest elevation of the terrain now HELD, in metres. This is the sea plane's gate: a water
@@ -1421,7 +1458,7 @@ if (uLodOn > 0.5) {
     const raw2 = sib.map(([x, y]) => {
       const wz = -y
       const n = nearestSpine(x, wz)
-      const z = n.dist < 60 ? n.y : heightAt(x, y) + 0.4
+      const z = n.dist < 60 ? n.y : bareAt(x, y) + 0.4
       return new THREE.Vector3(x, z, wz)
     })
     const c2 = new THREE.CatmullRomCurve3(raw2, false, 'centripetal')
@@ -1495,7 +1532,7 @@ if (uLodOn > 0.5) {
     const key = br.id ?? `${c0[0]},${c0[1]},${br.coords.length},${br.name ?? ''}`
     if (takenBranchKeys.has(key)) return false
     takenBranchKeys.add(key)
-    const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
+    const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : bareAt(x, y)) + 0.4))
     let cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal')
     cB.arcLengthDivisions = Math.max(100, rawB.length * 8)
     let lenB = cB.getLength()
@@ -1930,7 +1967,18 @@ if (uLodOn > 0.5) {
     const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len })), ...branchAts.map((b) => ({ at: b.at, len: b.len }))]
     const branchWho0 = 1 + sibAts.length // `who` of the first branch in the station grid
     const halfOf = (who: number, s: number) => (who === 0 ? pavedHalfAt(s) : who < branchWho0 ? pavedWidth(2) / 2 : branchAts[who - branchWho0].half)
-    const addStations = (who: number, halfAt: (s: number) => number, offAt: (s: number) => number = () => 0) => {
+    /**
+     * The bake's own deck runs for a carriageway, when it wrote them (`elev_s`): the raster under
+     * those stations is the EARTH, so the deck collider, the strip and the formula have to call
+     * them decks too, or a bridge approach has ground in neither. Without them the viewer decides
+     * at boot against the earth it holds — the 8 m overview for most of a site — as it always did.
+     */
+    const elevRunsFor = (runs: [number, number][] | null | undefined, s: number): boolean | null => {
+      if (!runs) return null
+      for (const r of runs) if (s >= r[0] - 1e-6 && s <= r[1] + 1e-6) return true
+      return false
+    }
+    const addStations = (who: number, halfAt: (s: number) => number, offAt: (s: number) => number = () => 0, elevRuns: [number, number][] | null = null) => {
       const c = curves[who]
       const list: { x: number; z: number; half: number; off: number; s: number; y: number; dx: number; dz: number; elev?: boolean }[] = []
       for (let s = 0; s <= c.len; s += 5) {
@@ -1940,8 +1988,10 @@ if (uLodOn > 0.5) {
         const arr = stGrid.get(k)
         // IS THIS STATION UP IN THE AIR? A carriageway whose spline stands a level above the bare
         // earth is a bridge or an overpass deck, not ground to grade to — it is carried as a trimesh
-        // collider instead. See `edgeDistance`'s `grade`. `heightAt` takes site (x, north), so -z.
-        const elev = isDeck(st.pos.y, heightAt(st.pos.x, -st.pos.z), T.OVERPASS_CLEAR_M)
+        // collider instead. See `edgeDistance`'s `grade`. `bareAt` takes site (x, north), so -z —
+        // and it is the EARTH, not the graded raster, or a bridge approach graded up to its crown
+        // would never read as a deck.
+        const elev = elevRunsFor(elevRuns, s) ?? isDeck(st.pos.y, bareAt(st.pos.x, -st.pos.z), T.OVERPASS_CLEAR_M)
         const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), off: offAt(s), who, y: st.pos.y, elev }
         if (arr) arr.push(rec)
         else stGrid.set(k, [rec])
@@ -1949,9 +1999,9 @@ if (uLodOn > 0.5) {
       }
       stationsByWho[who] = list
     }
-    addStations(0, pavedHalfAt, pavedOffsetAt)
+    addStations(0, pavedHalfAt, pavedOffsetAt, manifest.spine.elev_s ?? null)
     for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
-    for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half)
+    for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half, undefined, branchRaw[i].br.elev_s ?? null)
 
     // --- cul-de-sacs ------------------------------------------------------------------------
     // "if a street dead ends, assume a cul de sac" (Rich, 2026-09-21). An end is a dead end when
@@ -2174,7 +2224,7 @@ if (uLodOn > 0.5) {
       }
       return false
     }
-    const buildDeck = (who: number) => deckRibbon(stationsByWho[who], heightAt, T.OVERPASS_CLEAR_M, (a, b) => {
+    const buildDeck = (who: number) => deckRibbon(stationsByWho[who], bareAt, T.OVERPASS_CLEAR_M, (a, b) => {
       const hx = b.x - a.x, hz = b.z - a.z
       const h = Math.hypot(hx, hz) || 1
       return dupAt(who, (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2, (a.half + b.half) / 2, hx / h, hz / h)
@@ -2317,6 +2367,13 @@ if (uLodOn > 0.5) {
     // parapet on the primary, it answers null and the caller falls back to the DEM.
     const offsetFn = adjustments.active ? (x: number, y: number) => adjustments.at(x, y, adjScratch).ground_offset_m : null
     const gradedHeight = (x: number, z: number, grade = false): number | null => {
+      // THE BAKED GROUND. The physics ground IS the raster on a graded bake — the bake ran this
+      // very formula (grade = true: decks excluded, so the ground under an overpass is the road
+      // below or the earth) into every fine tile. Nothing here is cheaper than one bilinear read.
+      if (gradedBake && grade) {
+        const r = rasterOrNull(x, z)
+        if (r !== null) return r
+      }
       const e = edgeDistance(x, z, -1, false, grade)
       if (!Number.isFinite(e.d)) return null
       const primary = e.who < branchWho0
@@ -2326,7 +2383,7 @@ if (uLodOn > 0.5) {
       // the Beltway rides a deck whose bare-earth DEM below is the valley floor, but the ground
       // formula kept following the deck and stood a mound of earth in the underpass roadway. Keep
       // the pavement itself (objects on the deck still stand on it); drop the verge to the DEM.
-      if (!primary && e.d > 0.6 && isDeck(e.y, heightAt(x, -z), T.OVERPASS_CLEAR_M)) return null
+      if (!primary && e.d > 0.6 && isDeck(e.y, bareAt(x, -z), T.OVERPASS_CLEAR_M)) return null
       const t = THREE.MathUtils.smoothstep(e.d, 0.6, 7.0)
       const off = offsetFn ? offsetFn(x, -z) * t : 0
       // THE TURF LIP (buildStrip). The mesh stands the grass-scaled lip proud of the pavement over
@@ -2334,8 +2391,12 @@ if (uLodOn > 0.5) {
       // the mesh and is never seen — which is why no blades ever defined the raised edge.
       const ramp = primary ? 0.6 : 2.4
       const lift = e.d > 0 ? T.grassLipM() * Math.min(1, e.d / ramp) : 0
-      return (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + heightAt(x, -z) * t) + off + lift
+      return (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + bareAt(x, -z) * t) + off + lift
     }
+    // What a strip vertex stands on when the bake graded the ground: the raster, read once, where
+    // the formula would have blended road to earth. Null on an older bake — the strip then
+    // computes the formula itself, exactly as it did.
+    const rasterGround: ((x: number, z: number) => number | null) | null = gradedBake ? rasterOrNull : null
     type LiveStrip = Awaited<ReturnType<typeof buildStrip>>
     const liveStrips: LiveStrip[] = []
     // the terrain surfaces a new strip must sink: every geometry whose box it touches, not all 60
@@ -2373,7 +2434,7 @@ if (uLodOn > 0.5) {
       const s1 = Math.min(curveLen, s0 + CHUNK)
       const mid = spineAt((s0 + s1) / 2).pos
       spineUnits.push({ key: `spine:${Math.round(s0)}`, x: mid.x, z: mid.z, r: (s1 - s0) / 2 + VERGE + 60, done: false, run: async (budget) => {
-        await adoptStrip(await buildStrip((s) => spineAt(s0 + s), s1 - s0, -latMin + VERGE, latMax + VERGE, edgeAtSpine, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, offsetFn, null, (s) => stripEdgeLimitAt(s0 + s), stripCanopyAt, litter, budget), budget)
+        await adoptStrip(await buildStrip((s) => spineAt(s0 + s), s1 - s0, -latMin + VERGE, latMax + VERGE, edgeAtSpine, bareAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, offsetFn, null, (s) => stripEdgeLimitAt(s0 + s), stripCanopyAt, litter, budget, rasterGround), budget)
       } })
     }
     mark('grade: sink primary')
@@ -2612,7 +2673,7 @@ if (uLodOn > 0.5) {
         // the underpass (Kenilworth Ave over the Beltway), whose graded fill used to climb onto the
         // span and stand in the roadway below — the "DEM in the underpass" Rich kept driving into.
         // The pavement mesh still carries the car; only the grass verge goes.
-        if (isDeck(q.y, heightAt(q.x, -q.z), T.OVERPASS_CLEAR_M)) return true
+        if (isDeck(q.y, bareAt(q.x, -q.z), T.OVERPASS_CLEAR_M)) return true
         return edgeDistance(q.x, q.z, branchWho0 + i, true).d < T.BRANCH_VERGE
       }
       const nChunks = Math.max(1, Math.ceil(b.len / CHUNK))
@@ -2627,7 +2688,7 @@ if (uLodOn > 0.5) {
         }
         branchUnits.push({ key: `branch:${i}:${k}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: async (budget) => {
           await buildBranchChunk(i, k, budget)
-          await adoptStrip(await buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s), null, null, null, budget), budget)
+          await adoptStrip(await buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, bareAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s), null, null, null, budget, rasterGround), budget)
         } })
       }
     })
@@ -2639,7 +2700,7 @@ if (uLodOn > 0.5) {
         // the underpass (Kenilworth Ave over the Beltway), whose graded fill used to climb onto the
         // span and stand in the roadway below — the "DEM in the underpass" Rich kept driving into.
         // The pavement mesh still carries the car; only the grass verge goes.
-        if (isDeck(q.y, heightAt(q.x, -q.z), T.OVERPASS_CLEAR_M)) return true
+        if (isDeck(q.y, bareAt(q.x, -q.z), T.OVERPASS_CLEAR_M)) return true
         return edgeDistance(q.x, q.z, branchWho0 + i, true).d < T.BRANCH_VERGE
       }
       const nChunks = Math.max(1, Math.ceil(b.len / CHUNK))
@@ -2653,7 +2714,7 @@ if (uLodOn > 0.5) {
         }
         into.push({ key: `branch:${i}:${k}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: async (budget) => {
           await buildBranchChunk(i, k, budget)
-          await adoptStrip(await buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s), null, null, null, budget), budget)
+          await adoptStrip(await buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, bareAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s), null, null, null, budget, rasterGround), budget)
         } })
       }
     }
@@ -2668,7 +2729,7 @@ if (uLodOn > 0.5) {
       const b = branchAts[i]
       curves.push({ at: b.at, len: b.len })
       await budget.tick()
-      addStations(branchWho0 + i, () => b.half)
+      addStations(branchWho0 + i, () => b.half, undefined, br.elev_s ?? null)
       const de = br.dead_ends
       if (de?.length) authored.set(branchWho0 + i, de)
       endsFor(branchWho0 + i)
@@ -2805,10 +2866,30 @@ if (uLodOn > 0.5) {
         const base = pos.length / 3
         for (let i = 0; i < pts.length; i++) {
           const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]
-          const dx = b.x - a.x, dz = b.z - a.z
-          const n = Math.hypot(dx, dz) || 1
+          let dx = b.x - a.x, dz = b.z - a.z
+          let n = Math.hypot(dx, dz)
+          if (n < 1e-6) {
+            // A STATION WITH NO DIRECTION IS A 160 m PLATEAU. Two coincident shape points gave the
+            // station between them a (0, 0) tangent; `along` is then 0 for every point in the 7x7
+            // walk, every point is "in the band", `lat` is 0 and d is -half up to 80 m away — the
+            // stub of Lavender Cliff Way graded 3.5 m of ground over the fields beside Route 3,
+            // 160 m across (measured against the bake, 2026-10-09). The direction comes from the
+            // nearest distinct point instead; a ribbon with none is a dot and gets no station.
+            let j = -1, best = Infinity
+            for (let k = 0; k < pts.length; k++) { if (k === i) continue; const d = Math.hypot(pts[k].x - pts[i].x, pts[k].z - pts[i].z); if (d > 1e-6 && d < best) { best = d; j = k } }
+            if (j < 0) continue
+            const sgn = j > i ? 1 : -1
+            dx = (pts[j].x - pts[i].x) * sgn; dz = (pts[j].z - pts[i].z) * sgn
+            n = Math.hypot(dx, dz)
+          }
           const sx = -dz / n, sz = dx / n // right of travel
-          const g = groundAtWorld(pts[i].x, pts[i].z)
+          // ON THE BAKE'S OWN z when the bake graded the ground. `_service_ways` wrote each point's
+          // height from the 1 m DEM and graded the raster to it; laying the station on the earth
+          // held at boot instead — the 8 m overview for most of a site — put a stub on Route 3
+          // 3.5 m above the ground it stands on, with a 40 m verge graded up to it, and the
+          // formula and the raster disagreed by that much all round it (measured 2026-10-09).
+          // An older bake keeps the boot-time earth, exactly as before.
+          const g = bakeGraded ? pts[i].y : groundAtWorld(pts[i].x, pts[i].z)
           const y = (g ?? pts[i].y) + 0.03
           const hw = halfAtI(i)
           for (const s of [-1, 1]) {
@@ -3696,7 +3777,7 @@ if (uLodOn > 0.5) {
     } else {
       const deck = st.deck_z_min ?? mid.pos.y + (st.clearance_m ?? 6)
       const width = pavedHalfAt((st.s_start + st.s_end) / 2) * 2
-      const op = overpassMesh({ pos: mid.pos, dir: mid.dir.clone().setY(0).normalize(), s: 0 }, deck, st.length_m, width, heightAt, undefined, (x, z) => edgeDistanceWorld(x, z) < 0.5)
+      const op = overpassMesh({ pos: mid.pos, dir: mid.dir.clone().setY(0).normalize(), s: 0 }, deck, st.length_m, width, bareAt, undefined, (x, z) => edgeDistanceWorld(x, z) < 0.5)
       op.traverse((o) => { o.userData = { structure: st } })
       structures.add(op)
       continue
@@ -4517,6 +4598,8 @@ if (uLodOn > 0.5) {
     /** where the building build time went: massing loop, dressing loop, final normals pass */
     buildingsTiming: () => buildTiming,
     heightAt,
+    bareAt,
+    gradedBake,
     lowestGround,
     graded: () => ({
       built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst, long: [...gradeStats.long],

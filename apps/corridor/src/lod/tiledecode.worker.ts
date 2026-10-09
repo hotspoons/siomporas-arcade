@@ -26,6 +26,10 @@ interface Job {
   zscale: number
   chm: ArrayBuffer | null
   chmScale: number
+  /** the bare-earth twin of `dem` on a graded tile (bare.png), with its own encoding */
+  bare: ArrayBuffer | null
+  bareZmin: number
+  bareZscale: number
   /** the site's geodetic anchor: [lon, lat, h] */
   anchor: [number, number, number]
   /** the tile's level: [z, x, y] */
@@ -56,6 +60,13 @@ self.onmessage = async (ev: MessageEvent<Job>) => {
     const zmin = job.zmin
     const zs = job.zscale
     for (let i = 0; i < heights.length; i++) heights[i] = zmin + ((dem.px[i * 4] << 8) | dem.px[i * 4 + 1]) * zs
+    // the bare earth, decoded like the DEM; it never takes relief (the main thread does that once)
+    let bare: Float32Array | null = null
+    if (job.bare) {
+      const b = await raster(job.bare)
+      bare = new Float32Array(b.w * b.h)
+      for (let i = 0; i < bare.length; i++) bare[i] = job.bareZmin + ((b.px[i * 4] << 8) | b.px[i * 4 + 1]) * job.bareZscale
+    }
     let canopy: Float32Array | null = null
     let cw = 0
     let ch = 0
@@ -85,7 +96,8 @@ self.onmessage = async (ev: MessageEvent<Job>) => {
     const grid = gridArrays({ data: gridData, size, res: 0, bbox: [0, 0, 0, 0], rf }, stride)
     const transfer: Transferable[] = [heights.buffer, grid.pos.buffer, grid.uv.buffer, grid.idx.buffer, grid.norm.buffer]
     if (canopy) transfer.push(canopy.buffer)
-    self.postMessage({ id: job.id, demW: dem.w, demH: dem.h, dem: heights, chmW: cw, chmH: ch, chm: canopy, grid }, { transfer })
+    if (bare) transfer.push(bare.buffer)
+    self.postMessage({ id: job.id, demW: dem.w, demH: dem.h, dem: heights, bare, chmW: cw, chmH: ch, chm: canopy, grid }, { transfer })
   } catch (err) {
     self.postMessage({ id: job.id, error: err instanceof Error ? err.message : String(err) })
   }

@@ -183,3 +183,105 @@ branch unit's 150 ms of wall time per 25 ms of work is awaits inside the unit, n
   the same five questions of the same ground every time a tile is planted. A per-tile bitmask from
   the bake leaves only the per-blade jitter at run time.
 - **Tree records per 1 km cell** so a replant is a cell swap, not a walk over every record.
+
+### What landed: the graded ground raster (2026-10-09, branch `agent/graded-dem`)
+
+The first item is done. `tools/corridor/corridor/grade.py` is `scene.ts`'s `gradedHeight` read out
+line by line into numpy — the station field every 5 m with the 7 × 7 cell walk, `edgeDistance`
+(lateral inside the ±3.5 m band, radial outside, so a lone station is a disc), three's centripetal
+Catmull-Rom with its arc-length table (checked against three.js to 1e-9 m in `test_grade.py`),
+`taperedLanes`, `pavedWidth`/`pavedOffset`, the junction meet, authored and geometric dead ends
+with their bulbs, driveway and stub stations, `stripEdgeLimitAt`, the 0.6–7 m blend. `pyramid.bake`
+runs it over every z13 and z14 tile (pixel ≤ 6 m; a z12 pixel is 9.6 m and cannot hold a 7 m
+verge) and writes the result as `dem.png`, the sampled earth beside it as `bare.png`, and
+`layers.pyramid.graded = true`. The viewer (`PyramidSet.bareAt`, `scene.ts` `gradedBake`) then
+reads `physGroundAt` and the strip heights straight from the raster and asks `bareAt` for the
+deck tests. An older bake has no flag and runs exactly the code it ran before.
+
+Two things the measurement forced, both by design rather than by moving the targets:
+
+- **The bake decides what is a deck, and says so.** The viewer flagged a station "elevated" at
+  boot against whatever earth it held — the 8 m overview for everything outside the home
+  kilometre — and the deck colliders, the strips and the formula all followed that guess. On a
+  graded bake the raster under an elevated station is the earth, so the guess and the bake had to
+  be one decision or a bridge approach has ground in neither. `grade.RoadModel.annotate_decks`
+  writes the runs (`spine.elev_s`, `branches[].elev_s`) into the manifest and `addStations`
+  takes them when present. And it decides in RUNS: OVERPASS_CLEAR_M is 3 m and Route 3 rides a
+  3 m embankment, so against the 1 m DEM the flag flipped station by station along it; a deck is
+  now at least three stations and a gap of up to two is still the deck (`_smooth_runs`).
+- **Driveways stand on the bake's own z.** `_service_ways` writes every driveway and stub point's
+  height from the 1 m DEM, and the viewer laid its driveway stations on the earth it held at boot
+  instead — the 8 m overview for most of a site. A stub on Route 3 landed 3.5 m above the ground
+  it stands on with a 40 m verge graded up to it, and 546 of the 743 points over 10 cm were
+  that. On a graded bake both sides use the manifest's z.
+- **A station with no direction is a 160 m plateau.** A stub of Lavender Cliff Way ends on two
+  coincident shape points, so `addDriveways` gave its last station a (0, 0) tangent; `along` is
+  then 0 for every point in the 7 × 7 walk, every point is "in the band", `lat` is 0 and d is
+  −half up to 80 m away — 3.5 m of ground graded over the fields beside Route 3, 160 m across, in
+  every bake this viewer has drawn. Both sides now take the direction from the nearest distinct
+  point. This one is a viewer bug fix that reaches old bakes too, and the only such change.
+- **A raster cannot hold a step.** Where two carriageways at different heights stand within a
+  pixel of each other the formula is discontinuous, and a bilinear read smears the step over one
+  2.3 m cell: 1.44 m measured beside Route 3 at s = 2840, where a branch runs 2.7 m below the spine
+  four metres away — the written pixels there equal the formula at every pixel centre, the
+  *read* between them does not. So a sample whose four pixels span more than `RASTER_CLIFF_M`
+  (0.5 m) is computed, not read (`PyramidSet.cellSpanAt`). The cost returns only at cliffs.
+
+**Measured** (`probes/corridor-gradedraster.mjs crofton-triangle-graded --compare`: the same
+graded bake loaded twice, `?grade=runtime` against the raster, 69,940 points on and beside every
+road, each sampled only once its leaf tile was resident, with a 12 m shifted control that must
+disagree):
+
+| class (by the viewer's own `edgeInfo.d`) | n | p50 | p90 | p99 | max |
+|---|---|---|---|---|---|
+| past every road's verge (the formula answers null) | 13,480 | 0 | 0 | **0.0000** | 0.0000 |
+| the rest of the verge, 7 m < d ≤ 40 m | 12,238 | 0 | 0.0006 | **0.0077** | 0.073 |
+| the blend, 0.6 m < d ≤ 7 m, carriageways | 22,898 | 0.0083 | 0.029 | **0.083** | 0.338 |
+| on a carriageway's pavement, d ≤ 0 | 13,693 | 0.0015 | 0.0035 | **0.0315** | 0.300 |
+| on a deck (road 3 m over the earth) | 135 | 0 | 0 | **0.012** | 0.012 |
+| answered by a driveway station, on its pavement | 986 | 0.007 | 0.070 | 0.246 | 0.909 |
+| the control: raster against the formula 12 m away | 69,940 | 0.269 | 1.15 | 3.44 | 8.71 |
+
+By the probe's own grid classes (lateral offset from the sampled road): pavement p99 **2.4 cm** on
+carriageways (127 of 11,176 over 2 cm), blend 8.8 cm, verge 3.8 cm, beyond 3.7 cm (every one of
+those "beyond" points is inside another road's or a driveway's verge — by the viewer's `d` the
+ground past every verge moved by exactly nothing), deck 1.2 cm. The cliff rule took the formula at
+3,870 of the 69,940 points.
+
+Against the targets (2 cm pavement, 10 cm verge, nothing beyond the verge or on a deck): verge,
+beyond and deck are met; the pavement p99 is 2.4 cm rather than 2 — the 127 points over are the
+mouths of driveways, which are 3.6 m wide on a 2.3 m raster, so the pixel centres under a mouth
+belong to the road and the sliver between them to the driveway, and the viewer's own formula
+steps 0.3–0.9 m there (a driveway is laid on the DEM, the road it meets is graded 0.9 m above
+it). A raster of this resolution cannot hold a feature narrower than two pixels; the fix that
+would make both agree is for a driveway to rise to meet its road, which is a change to the
+formula and not to this port. The starting point, before the three decisions above, was a
+pavement p99 of 6.95 cm and maxima of 3.4 m in every class.
+
+The port itself was also held against the viewer's formula on the SERVED crofton-triangle bake
+(1038 branches, the junction meet live: 1106 junctions met, 587 warped, largest step 8.95 m — the
+viewer's own counters and the port's agree exactly), 121,495 points, the viewer's own earth as the
+DEM term: p50 = p90 = 0.0000 m everywhere, and p99 = 0.0000 m over the 61,579 points whose answer
+the viewer itself determines. The rest is the viewer's: 9,838 points answered by a driveway
+station laid on the boot-time earth, and 50,078 whose nearest station sits within a metre of the
+3 m deck threshold — because that bake's branch grades stand a median 1.5 m (p90 3.3 m) above
+the 1 m DEM and 21,939 of its 93,835 stations are "decks", where a fresh export of the same site
+puts road z on the DEM (median −0.01 m, 39 deck stations). That served bake's branch profiles are
+off their ground; a re-export fixes it and the car stops riding deck colliders through the suburb.
+
+**Bake cost** on crofton-triangle (427 branches in the on-disk intermediates): the export went
+from 1:21 to 1:29 wall; the pyramid stage from 40 s to 54 s, of which ~9 s builds the station
+field once and ~130 s of worker CPU grades 241 tiles (4.5 M pixels touched) across the pool.
+`CORRIDOR_GRADE=0` turns it off.
+
+**Not carried by the raster:** the editor's `ground_offset_m` adjustments (the viewer keeps
+run-time grading on a site whose adjustments are active) and the `GRASS_LIFT_M` lip (default 0).
+The knobs the bake grades with are tuning.ts's defaults.
+
+Two things found on the way, both pre-existing: main's on-disk crofton-triangle intermediates
+hold 427 branches while the served `web/manifest.json` (baked elsewhere on 2026-10-02) holds
+1038, so a local re-export is a smaller world; and `export_branches`' on-read junction frame
+repair converts an already-ENU `branches.json` a second time, putting every re-exported
+junction ~1 km off its road (0 junctions met). And every probe in `probes/` that aborts
+`/@vite/client` no longer boots under Vite 8.2 — the page never evaluates `main.ts`, with no
+error. The new probe does not abort it.

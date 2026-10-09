@@ -183,6 +183,20 @@ def plan(bbox_wgs: tuple[float, float, float, float], zmax: int, zmin: int) -> l
 
 TILE_PX = 512  # samples a side, every level. z14 lands at ~1.9 x 2.4 m, near the 2 m we emit today.
 
+# THE GRADED GROUND. A tile's `dem.png` carries the road grading folded in (grade.py — the
+# viewer's own formula), and `bare.png` beside it is the earth as sampled, for the deck tests
+# that need bare earth. Only levels whose pixel is finer than this are graded: the blend from
+# pavement to DEM runs 0.6–7 m, and a 10–40 m pixel cannot hold it — it would just smear the road
+# height across a strip wider than the verge. At latitude 39 that is z13 (4.7 m) and z14 (2.3 m);
+# coarser levels stay bare and the viewer, which reads the finest resident tile, has a leaf or a
+# z13 under anything within four kilometres of the eye. The car's physics tiles reach 180 m.
+GRADE_MAX_PX_M = 6.0
+
+
+def graded_levels(zmin: int, zmax: int, lat: float) -> list[int]:
+    """The levels whose pixel is at most GRADE_MAX_PX_M across (the finer end of the pyramid)."""
+    return [z for z in range(zmin, zmax + 1) if max(tile_metres(z, lat)) / TILE_PX <= GRADE_MAX_PX_M]
+
 
 # One open dataset per source for the whole bake. Opening the 1 m DEM once per tile, per band,
 # is most of the wall time — trailworks resamples from a dataset it already holds.
@@ -291,9 +305,12 @@ def fill_blank(rgb, fallback=None):
     return rgb, (nb / blank.size if blank.size else 0.0)
 
 
-def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None, only_tiles: list | None = None) -> dict:
+def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None, only_tiles: list | None = None, grade_model=None, grade_z: tuple = ()) -> dict:
     """
     Emit the pyramid under `web/pyr/<z>/<x>_<y>.{pack,jpg}` and return the manifest block.
+
+    With `grade_model` (a `grade.RoadModel`), every tile at a level in `grade_z` is written with
+    the road grading folded into `dem.png` and the sampled earth beside it as `bare.png`.
 
     A tile's bounds are IMPLICIT in (z, x, y) — that is the point of quadtree addressing, and it
     is why this needs no control lattice where the UTM tiles did. The viewer derives the geodetic
@@ -302,12 +319,15 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
     """
     import io
     import json
+    import time
 
     import numpy as np
     from PIL import Image
 
     from .export import _encode_height, _fill
     from .pack import write_pack
+
+    grade_ms = 0.0
 
     site = json.loads((site_dir / "site.json").read_text())
     lat = float(site["lat"])
@@ -355,6 +375,22 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
             skipped += 1
             continue
         z = _fill(z, -9999.0)
+        if grade_model is not None and t.z in grade_z:
+            # The viewer reads this raster through `toEnuUp`, so the grading happens in ENU up and
+            # comes back to a stored height with the viewer's own corner-patch drop (grade_block).
+            from .grade import corner_enu_for, grade_block
+
+            tg0 = time.perf_counter()
+            corners = corner_enu_for(frame.anchor_frame(), w, s, e, n)
+            zg, touched = grade_block(grade_model, corners, z)
+            grade_ms += (time.perf_counter() - tg0) * 1000
+            rgb_b, zmn_b, scale_b = _encode_height(z)
+            buf = io.BytesIO()
+            Image.fromarray(rgb_b, "RGB").save(buf, "PNG", optimize=True)
+            parts["bare.png"] = buf.getvalue()
+            entry["bare"] = {"zmin": zmn_b, "zscale": scale_b}
+            entry["graded_px"] = int(touched.sum())
+            z = zg
         rgb_h, zmn, scale = _encode_height(z)
         buf = io.BytesIO()
         Image.fromarray(rgb_h, "RGB").save(buf, "PNG", optimize=True)
@@ -410,7 +446,7 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
             flush=True,
         )
 
-    return {
+    out_block = {
         "scheme": "geo-quadtree",   # 2^(z+1) lon cols, 2^z lat rows — same ids as trailworks
         "zmin": zmin,
         "zmax": zmax,
@@ -421,6 +457,13 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
         "empty": skipped,
         "list": entries,
     }
+    if grade_model is not None:
+        # `graded` is the viewer's switch: physGroundAt and the strips read the raster directly
+        # and the deck tests ask `bareAt`. An old bake has no flag and grades at run time as before.
+        out_block["graded"] = True
+        out_block["graded_levels"] = sorted(grade_z)
+        out_block["grade_ms"] = round(grade_ms)
+    return out_block
 
 
 #: Set in the parent before forking so every worker inherits `frame` (its pyproj Transformer cache
@@ -440,16 +483,48 @@ def _init_ctx(ctx: dict) -> None:
 
 def _bake_worker(tiles: list) -> dict:
     c = _PYR_CTX
-    return _bake_serial(c["site_dir"], c["web"], c["frame"], c["zmax"], c["zmin"], c["vivid"], only_tiles=tiles)
+    return _bake_serial(c["site_dir"], c["web"], c["frame"], c["zmax"], c["zmin"], c["vivid"], only_tiles=tiles, grade_model=c.get("grade"), grade_z=c.get("grade_z", ()))
 
 
-def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None) -> dict:
+def road_model(site_dir, frame, manifest: dict):
+    """The site's carriageways as the viewer builds them (grade.RoadModel), over the 1 m DEM.
+
+    Built ONCE, in the parent, and handed to every worker: the junction meet and the station field
+    are a whole-network job, and a tile only needs to ask the finished field.
+    """
+    import os
+    import time
+
+    from . import grade
+
+    if os.environ.get("CORRIDOR_GRADE", "1").strip().lower() in ("0", "false", "no", "off"):
+        return None
+    dem_p = site_dir / "dem_1m.tif"
+    if not dem_p.exists() or not manifest or not manifest.get("spine", {}).get("coords"):
+        return None
+    t0 = time.perf_counter()
+    model = grade.RoadModel(manifest, grade.site_dem_up(frame, dem_p))
+    # the manifest is the caller's `out`: the deck runs land in it before it is written
+    decks = model.annotate_decks(manifest)
+    sm = model.summary()
+    print(f"  grade   {decks} elevated runs written as elev_s (the viewer's deck tests follow the bake)", flush=True)
+    print(f"  grade   {sm['roads']} carriageways, {sm['stations']} stations + {sm['bulbs']} bulbs + {sm['driveway_stations']} driveway stations; "
+          f"junctions {sm['junctions']['junctions']} met, {sm['junctions']['warped']} warped (max {sm['junctions']['maxStep']} m), "
+          f"{sm['junctions']['noTarget']} without a target — {time.perf_counter() - t0:.1f} s", flush=True)
+    return model
+
+
+def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None, manifest: dict | None = None) -> dict:
     """Render the pyramid, forked across `pool` workers (one manifest merged from the slices).
 
     A pyramid tile is sampled from the same site rasters as its siblings and written to a file keyed
     by its own (z, x, y), so the tiles are independent and the only shared state is the read-only
     plan. On the Capital Beltway that was 1,272 tiles in a single `for` loop (corridor-bake-495,
     ~60 min); the plan is unchanged, only who runs it is.
+
+    `manifest` is the manifest-shaped dict the viewer will read (spine, branches, intersections,
+    structures, driveways). With it, the fine levels are written GRADED — see `GRADE_MAX_PX_M` and
+    grade.py; `CORRIDOR_GRADE=0` turns that off. Without it the pyramid is bare, as it always was.
     """
     from . import pool
 
@@ -464,12 +539,25 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
     print(f"pyramid: {len(tiles)} tiles z{zmin}..{zmax}", flush=True)
     if not tiles:
         return {}
+    model = None
+    if manifest is not None:
+        try:
+            model = road_model(site_dir, frame, manifest)
+        except Exception as exc:  # a bare pyramid is the old viewer path, not a broken one — but say so
+            import traceback
+
+            traceback.print_exc()
+            print(f"  grade   FAILED ({exc.__class__.__name__}: {exc}) — the pyramid is baked BARE and the viewer grades at run time", flush=True)
+    grade_z = tuple(graded_levels(zmin, zmax, float(site["lat"]))) if model is not None else ()
+    if model is not None:
+        print(f"  grade   levels {grade_z} graded (pixel <= {GRADE_MAX_PX_M} m); {tuple(z for z in range(zmin, zmax + 1) if z not in grade_z)} bare", flush=True)
     global _PYR_CTX
-    _PYR_CTX = {"site_dir": site_dir, "web": web, "frame": frame, "zmax": zmax, "zmin": zmin, "vivid": vivid}
+    _PYR_CTX = {"site_dir": site_dir, "web": web, "frame": frame, "zmax": zmax, "zmin": zmin, "vivid": vivid, "grade": model, "grade_z": grade_z}
     chunks = pool.chunk([(t.z, t.x, t.y) for t in tiles], pool.default_jobs(len(tiles)))
     parts = pool.map_chunks(_bake_worker, chunks, "pyramid", initializer=_init_ctx, initargs=(_PYR_CTX,))
     entries: list = []
     empty = 0
+    grade_ms = 0
     out = None
     for r in parts:
         if not r:
@@ -477,9 +565,16 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
         out = out or r
         entries.extend(r.get("list") or [])
         empty += int(r.get("empty") or 0)
+        grade_ms += int(r.get("grade_ms") or 0)
     if out is None:
         return {}
     out = dict(out)
     out["list"] = entries
     out["empty"] = empty
+    if model is not None:
+        # worker CPU summed across the slices — what the grading cost, not the wall it hid behind
+        n_graded = sum(1 for e in entries if e.get("bare"))
+        px = sum(int(e.get("graded_px") or 0) for e in entries)
+        print(f"  grade   {n_graded} tiles graded, {px:,} pixels touched, {grade_ms / 1000:.1f} s of worker time", flush=True)
+        out.pop("grade_ms", None)
     return out

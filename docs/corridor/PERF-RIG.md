@@ -91,6 +91,44 @@ within a frame; two or three frames in fifteen seconds still go past 14 ms (the 
     (13 ms). → 4,000 entries a pump. And `adoptArriving` replanted per branch inside the cell's
     unit (a 237 ms stretch on a branch cell) → one replant per frame, from the frame.
 
+## Ultra (2026-10-09)
+
+Rich: *"I had that on low mode and switched it to ultra mode — can you see if there are any high
+detail expenses we can find and fix?"* At Ultra on the 2560 × 1323 window the CPU was fine
+(5.7 ms) and the GPU was 18 ms a frame (21 fps): 8–13 M triangles, pixel-bound.
+
+What was found:
+
+1. **Every car in 700 m drew at full detail** (118k triangles each; the jam in view was 8–13 M).
+   → full detail within 220 m / the nearest 80 (`detail.ts`, Ultra and High); beyond that a car is
+   forty pixels and the 5% copy is the same picture.
+2. **three's logarithmic depth buffer writes `gl_FragDepth` in every shader, so early-Z is off
+   renderer-wide**: every overdrawn fragment (leaves behind leaves, the ground under the road, cars
+   behind cars) is shaded in full and then rejected. Flat-shading everything saved 8–12 of 16 ms;
+   the trees' leaf shading alone was 4.8 ms. → a **reversed float depth buffer**
+   (`?depth=reversed`: three's `reversedDepthBuffer` + `EXT_clip_control`). GPU at Ultra, same
+   drive: **p50 18.4 → 7.6 ms, p95 23 → 11.4**. Four things had to move with it: a bare
+   `THREE.Camera` in the water-probe pass (three calls `updateProjectionMatrix` on every camera
+   now), a raw `gl.clearDepth` in the road cover (bypasses three's inverted clear cache), the
+   skybox trick `gl_Position = p.xyww` (near plane under reversed-Z; `vec4(p.xy, 0, p.w)` under
+   `USE_REVERSED_DEPTH_BUFFER`), and three's own render-list sort, which reverses the whole list —
+   renderOrder included — so the dome drew last (custom sort comparators undo it). The pyramid
+   tiles' polygon offset and the grass's sun-shadow bias flip sign. Still behind the URL
+   parameter: without a post composer the canvas depth is 24-bit, and the float depth texture that
+   makes reversed-Z precise over 60 km only exists on the composer's target.
+3. **The car's reflection probe** re-rendered the scene on a third of all frames at speed
+   (1048² cube, refresh 0.3 s, move trigger 25 m). → 512², 1 s, 60 m.
+4. **Dents on full-detail cars** recomputed 160k normals (10 ms). → only the moved vertices'
+   normals, from the faces that touch them (`Deformable.localNormals`).
+5. The test rig's car is now a ghost to traffic and props (Rich: *"disable collision physics with
+   the hero car too"*) — `RapierCar.setGhost`, on while the rig runs.
+
+Measuring GPU by layer: hide/show toggles on `trees`, `grass`, `road`, `buildings` are undone by
+`updateNear` every frame (it re-shows them from `userData.layerOn`) — flip the flag, not `visible`.
+Paired A/B while driving drifts with the scenery; alternate frames (odd with, even without) or stop
+the car. `apex.screenshot` now reads the frame loop's own render: a render made from the bridge
+between frames inherits a probe's scissor and lies.
+
 ## What is left (measured, not yet fixed)
 
 | cost | where | what to do |
@@ -98,6 +136,8 @@ within a frame; two or three frames in fifteen seconds still go past 14 ms (the 
 | 16 ms, on a cell with water arriving | `nearPerf.water`: the water layer merges a whole per-look bucket (every stream seen so far) when a cell adds to it | bucket per (look, 1 km cell) so a merge is one cell's geometry |
 | 4–6 ms, every ~350 m (every 5 s at speed) | `nearPerf.treesPlant`: the replant's `plantMoved` walks all 60k records (2 ms) and drops the leavers from two grids (1–2 ms) | slice `plantMoved` over frames; keep records per 1 km cell so a replant is a cell swap |
 | 2–3 ms/frame at speed | `physics.stats().parts.terrain`: the sliced tile sampling at `PHYS_TILE_MS` — by design, the ring must keep ahead of 75 m/s | the graded-ground raster from the bake (below) makes a tile a copy |
+| 4.5 ms/frame CPU at Ultra | `fp.render`: 500–780 draw calls submitted (traffic at full detail is a draw per part per car) | instanced traffic; merge street furniture per cell |
+| reversed depth | 24-bit canvas depth when post AA is off; shadow, mirror and probe targets untested for z-fighting at distance | a RenderPass + OutputPass composer with a FloatType depth texture whenever reversed is on; then make it the default |
 | 6–11 ms, rare | `nearPerf.pyr`: `PyramidStream.update` on a tile landing (select, diff, release, fetch) | profile `select`/`diff`; move the quadtree walk to the decode worker |
 | 10–12 ms, rare | `render` on the frame a pyramid tile's JPEG texture first draws (upload + mipmaps of a 4096² RGBA) | KTX2 (GPU-compressed, pre-mipped) tiles from the bake; `createImageBitmap` off-thread; `renderer.initTexture` on arrival |
 | 1.5 ms/frame | `physics.update`: 2 steps × 0.7–0.9 ms with 4,300 bodies; the step cost does not track the traffic bodies enabled | `PHYS_HZ` 60 when the frame is over target; measure what the step spends on with the Rapier profiler |

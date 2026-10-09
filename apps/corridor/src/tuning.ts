@@ -1297,17 +1297,24 @@ export let CAR_PROBE_BLEND = 0.6
 /** fade distance (m) from the capture point; paint farther than this keeps the sky reflection */
 export let CAR_PROBE_REACH = 60
 /** probe cube face size (px). Higher is sharper and costs capture time + memory (a 2048 face is ~200 MB) */
-export let CAR_PROBE_RES = 1048
+/**
+ * 512, not 1048: the probe is seen through the car's roughness, and at 175 mph the capture ran
+ * nearly continuously (a face a frame, a whole scene render each) — 4–5 ms of CPU and the GPU to
+ * match (2026-10-08). Half the resolution is a quarter of the fill; CAR_PROBE_MOVE 60 keeps the
+ * move trigger from re-arming every third of a second at speed.
+ */
+export let CAR_PROBE_RES = 512
 /** a probe renders only the world this far away (m) — the trees and bank that show, not the county */
 export let CAR_PROBE_FAR = 400
 /** how far above the car's origin the probe camera sits (m): a little up keeps the road out of it */
 export let CAR_PROBE_LIFT = 0.9
 /** live mode: seconds between re-captures; 0 never re-captures on time (movement still does) */
-export let CAR_PROBE_REFRESH = 0.3
+/** seconds between cube captures; 0.3 was a whole scene render on a third of all frames at Ultra (2026-10-09) */
+export let CAR_PROBE_REFRESH = 1
 /** cube faces a refresh renders per frame: 1 spreads it over six frames (~8 ms each), 6 is the whole cube at once (one 48 ms spike) */
 export let CAR_PROBE_SPREAD = 1
 /** live mode: metres the car may move before the probe is re-captured; 0 disables the movement gate */
-export let CAR_PROBE_MOVE = 25
+export let CAR_PROBE_MOVE = 60
 /**
  * Environment-map reflections on shiny surfaces (paint, glass, water). The sky is already an
  * environment map; this is how hard those surfaces mirror it. Rough roads stay diffuse.

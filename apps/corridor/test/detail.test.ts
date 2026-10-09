@@ -20,7 +20,10 @@ describe('the detail presets', () => {
     // ultra: everything at full
     expect(ultra.LOD_PROP_RATIO).toBe(1)
     expect(ultra.LOD_HERO_RATIO).toBe(1)
-    expect(ultra.LOD_TRAFFIC_FULL_N).toBeGreaterThanOrEqual(4000)
+    // full-detail traffic is a radius, not everything: beyond ~200 m the copy is the same picture
+    expect(ultra.LOD_TRAFFIC_FULL_N).toBeGreaterThanOrEqual(40)
+    expect(ultra.LOD_TRAFFIC_FULL_M).toBeGreaterThanOrEqual(150)
+    expect(ultra.LOD_TRAFFIC_FULL_M).toBeLessThanOrEqual(400)
     // high: small props simplified, traffic and the hero still full
     expect(high.LOD_PROP_RATIO).toBeLessThan(1)
     expect(high.LOD_TRAFFIC_FULL_N).toBe(ultra.LOD_TRAFFIC_FULL_N)

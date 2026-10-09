@@ -902,7 +902,9 @@ export class Grass {
         if (map && shadow) {
           u.uSunShadowMatrix.value.copy(shadow.matrix)
           u.uSunShadowSize.value.set(shadow.mapSize.x, shadow.mapSize.y)
-          u.uSunShadowBias.value = shadow.bias
+          // the bias moves the receiver away from the light in window depth; a reversed depth
+          // buffer (three marks the shadow camera) counts the other way
+          u.uSunShadowBias.value = (shadow.camera as unknown as { _reversedDepth?: boolean })._reversedDepth ? -shadow.bias : shadow.bias
           u.uSunShadowRadius.value = 1
           u.uSunShadowIntensity.value = intensity
         }

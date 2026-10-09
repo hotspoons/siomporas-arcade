@@ -104,7 +104,45 @@ const canvas = $<HTMLCanvasElement>('#gl')
 // toggled on a live renderer. See render.ts for why a capture makes it expensive and
 // why turning it off makes the grass sparkle.
 const antialias = antialiasFor(bootSlug())
-const renderer = new THREE.WebGLRenderer({ canvas, antialias, logarithmicDepthBuffer: true })
+/*
+ * THE DEPTH BUFFER DECIDES WHETHER EARLY-Z EXISTS. three's logarithmic depth buffer writes
+ * gl_FragDepth in every fragment shader, and a shader that writes depth cannot be depth-tested
+ * before it runs: every overdrawn fragment — each leaf behind a leaf, the ground under the road,
+ * a car behind a car — is shaded in full and then thrown away. Measured at Ultra on Rich's
+ * 2560 × 1323 (2026-10-08): flat-shading everything saved 8–12 of ~16 ms, trees alone 4.8, and a
+ * depth pre-pass had "made it worse" — because nothing could be rejected early.
+ *
+ * A REVERSED float depth buffer (`?depth=reversed`, three's `reversedDepthBuffer`, EXT_clip_control)
+ * keeps the precision across 60 km without touching gl_FragDepth, so early-Z is back. The post
+ * composer's render target carries a FloatType depth texture for it (a 24-bit fixed-point buffer
+ * reversed is no more precise than it was forwards). Shadow maps, the mirror and the probes keep
+ * their own buffers. Behind a URL parameter while it is measured against the logarithmic path.
+ */
+const reversedDepth = new URLSearchParams(location.search).get('depth') === 'reversed'
+const renderer = new THREE.WebGLRenderer({ canvas, antialias, logarithmicDepthBuffer: !reversedDepth, reversedDepthBuffer: reversedDepth })
+if (reversedDepth && !renderer.capabilities.reversedDepthBuffer) console.warn('corridor: ?depth=reversed asked for, but EXT_clip_control is missing; a plain 24-bit depth buffer is drawing this')
+if (renderer.capabilities.reversedDepthBuffer) {
+  /*
+   * THREE REVERSES THE WHOLE RENDER LIST under a reversed depth buffer — renderOrder and all — so
+   * the sky dome's renderOrder −1000 drew LAST and, depth test off, painted over the world (the
+   * sky-only frame, 2026-10-08). These comparators sort every key the opposite way, so three's
+   * reverse() lands the list in the order it should have been: renderOrder ascending, opaque
+   * front-to-back (a larger reversed z is nearer), transparent back-to-front.
+   */
+  type Item = { groupOrder: number; renderOrder: number; material: { id: number }; materialVariant?: number; z: number; id: number }
+  renderer.setOpaqueSort((a: Item, b: Item) =>
+    a.groupOrder !== b.groupOrder ? b.groupOrder - a.groupOrder
+    : a.renderOrder !== b.renderOrder ? b.renderOrder - a.renderOrder
+    : a.material.id !== b.material.id ? b.material.id - a.material.id
+    : (a.materialVariant ?? 0) !== (b.materialVariant ?? 0) ? (b.materialVariant ?? 0) - (a.materialVariant ?? 0)
+    : a.z !== b.z ? a.z - b.z
+    : b.id - a.id)
+  renderer.setTransparentSort((a: Item, b: Item) =>
+    a.groupOrder !== b.groupOrder ? b.groupOrder - a.groupOrder
+    : a.renderOrder !== b.renderOrder ? b.renderOrder - a.renderOrder
+    : a.z !== b.z ? b.z - a.z
+    : b.id - a.id)
+}
 renderer.setPixelRatio(Math.min(2, devicePixelRatio))
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0xbfd2ea)
@@ -891,7 +929,11 @@ function buildPostAA(mode: 'fxaa' | 'smaa' | null) {
   composer?.dispose()
   composer = null
   if (!mode) return
-  const c = new EffectComposer(renderer)
+  // with the reversed depth buffer the scene target needs float depth (see the renderer's note)
+  const target = renderer.capabilities.reversedDepthBuffer
+    ? new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, depthTexture: new THREE.DepthTexture(innerWidth, innerHeight, THREE.FloatType) })
+    : undefined
+  const c = new EffectComposer(renderer, target)
   c.addPass(new RenderPass(scene, camera))
   c.addPass(mode === 'smaa' ? new SMAAPass() : new FXAAPass())
   c.addPass(new OutputPass())
@@ -1782,6 +1824,7 @@ const rig = new TestRig({
     return best
   },
   fire: (dir) => fireMissile(dir),
+  ghost: (on) => { if (drive.car instanceof RapierCar) drive.car.setGhost(on) },
 })
 /** the machine gun (weaponfx.ts): tracers, flashes, and the hits handed to the traffic */
 let gun: GunLayer | null = null
@@ -4563,9 +4606,28 @@ registerBridgeContext({
    * made this useless; data-URL images now come back whole, and `scripts/bridge.mjs` writes them
    * to a file instead of printing them.
    */
-  screenshot(quality = 0.72): string {
-    renderer.render(scene, camera)
-    return renderer.domElement.toDataURL('image/jpeg', quality)
+  /**
+   * THE FRAME LOOP'S OWN NEXT FRAME, read back inside its render call. A render made from the
+   * bridge, between frames, inherits whatever the last probe or mirror pass left in the renderer
+   * — a scissor, a viewport, a target — and drew a sky and nothing else under the reversed depth
+   * buffer while the screen was fine (2026-10-08). The loop's frame is what the screen shows.
+   */
+  screenshot(quality = 0.72): Promise<string> {
+    return new Promise((resolve) => {
+      const orig = renderer.render
+      renderer.render = function (this: THREE.WebGLRenderer, s: THREE.Object3D, cam: THREE.Camera) {
+        const out = orig.call(this, s, cam)
+        if (s === scene && cam === camera && !this.getRenderTarget()) {
+          renderer.render = orig
+          resolve(renderer.domElement.toDataURL('image/jpeg', quality))
+        }
+        return out
+      } as typeof renderer.render
+    })
+  },
+  /** the post-processing composer, or null when post AA is off */
+  get composer() {
+    return composer
   },
   get missiles() {
     return missiles

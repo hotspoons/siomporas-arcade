@@ -886,7 +886,9 @@ if (uLodOn > 0.5) {
         const m = terrainMaterial(null, t.z === L.pyramid!.zmax)
         // Finer levels are biased further forward. A partial quad keeps its parent to cover the
         // empty quadrants, and the child has to win the depth test on the ground they share.
-        const bias = 1 + t.z - L.pyramid!.zmin
+        // The offset is in window depth, which a reversed depth buffer turns round (main.ts, the
+        // renderer), so the sign goes with it.
+        const bias = (1 + t.z - L.pyramid!.zmin) * (renderer?.capabilities.reversedDepthBuffer ? -1 : 1)
         m.polygonOffset = true
         m.polygonOffsetFactor = -bias
         m.polygonOffsetUnits = -bias

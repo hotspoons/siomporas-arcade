@@ -85,7 +85,10 @@ const capturedAt = new Map<number, number>()
 
 // the cube → equirect pass: a full-screen quad, one strip of the atlas per call
 const convertScene = new THREE.Scene()
-const convertCam = new THREE.Camera()
+// an orthographic camera rather than a bare Camera: the shader ignores the projection, but three
+// calls updateProjectionMatrix on whatever camera it renders with under a reversed depth buffer,
+// and a bare Camera has none (the frame loop died on it, 2026-10-08)
+const convertCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 const convertMat = new THREE.ShaderMaterial({
   uniforms: { uCube: { value: null } },
   depthTest: false,

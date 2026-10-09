@@ -46,6 +46,8 @@ export interface RigHost {
   targetAhead(from: THREE.Vector3, forward: THREE.Vector3, r: number): THREE.Vector3 | null
   /** fire a missile from the car's bonnet, along the nose or at `dir` */
   fire(dir?: THREE.Vector3): boolean
+  /** make the player's car a ghost to traffic and props (the ground still holds it), or solid again */
+  ghost?: (on: boolean) => void
 }
 
 export interface RigStats {
@@ -131,11 +133,13 @@ export class TestRig {
     this.s = opts.startS ?? this.nearestS(car.pos.x, car.pos.z, null)
     this.placeAt(car, this.s)
     this.on = true
+    if (this.shield) this.host.ghost?.(true)
     return true
   }
 
   stop(): void {
     this.on = false
+    this.host.ghost?.(false)
   }
 
   stats(): RigStats {

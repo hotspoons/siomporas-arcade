@@ -24,15 +24,18 @@ export type Detail = 'low' | 'medium' | 'high' | 'ultra'
 export const DETAILS: Detail[] = ['low', 'medium', 'high', 'ultra']
 
 export const DETAIL_PRESETS: Record<Detail, Record<string, number>> = {
+  // FULL-DETAIL TRAFFIC WITHIN 220 M, not everywhere: a 118k-triangle car 400 m away is forty
+  // pixels tall, and at Ultra the jam in view was 8-13 M triangles a frame (2026-10-08). Within
+  // 220 m the copy and the original cannot be told apart from the driver's seat.
   ultra: {
-    LOD_TRAFFIC_RATIO: 0.05, LOD_TRAFFIC_FULL_N: 10000, LOD_TRAFFIC_FULL_M: 100000, LOD_HERO_RATIO: 1, LOD_PROP_RATIO: 1,
+    LOD_TRAFFIC_RATIO: 0.05, LOD_TRAFFIC_FULL_N: 80, LOD_TRAFFIC_FULL_M: 220, LOD_HERO_RATIO: 1, LOD_PROP_RATIO: 1,
     SHADOW: 1, SHADOW_REACH: 95, SHADOW_CARDS: 1,
     CAR_PROBES: 1, WATER_REFLECT: 0.9, WATER_PROBES: 1,
     HERO_HEADLIGHTS_MODE: 1, HERO_TAILLIGHTS_MODE: 1,
     TREE_NEAR_RADIUS: 220, GRASS_DENSITY: 3.1, RENDER_SCALE: 1,
   },
   high: {
-    LOD_TRAFFIC_RATIO: 0.05, LOD_TRAFFIC_FULL_N: 10000, LOD_TRAFFIC_FULL_M: 100000, LOD_HERO_RATIO: 1, LOD_PROP_RATIO: 0.05,
+    LOD_TRAFFIC_RATIO: 0.05, LOD_TRAFFIC_FULL_N: 80, LOD_TRAFFIC_FULL_M: 220, LOD_HERO_RATIO: 1, LOD_PROP_RATIO: 0.05,
     SHADOW: 1, SHADOW_REACH: 95, SHADOW_CARDS: 1,
     CAR_PROBES: 2, WATER_REFLECT: 0.9, WATER_PROBES: 1,
     HERO_HEADLIGHTS_MODE: 1, HERO_TAILLIGHTS_MODE: 2,

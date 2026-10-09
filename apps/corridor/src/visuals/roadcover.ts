@@ -208,9 +208,14 @@ export class RoadCover {
       // Depth clears to 0 so GreaterEqual keeps the farther (lower) pavement. Colour clears to
       // the empty sentinel. Three's own clear colour is 0..1, which cannot hold either value.
       gl.clearColor(9999, 0, 0, 1)
-      gl.clearDepth(0)
+      // THROUGH THREE'S STATE, not gl.clearDepth: three caches the clear depth and, under a
+      // reversed depth buffer, inverts it. A raw gl.clearDepth(1) here left GL at 1 while three
+      // believed 0, the main frame cleared its depth to "nearest", and every depth test failed —
+      // a sky and nothing else (2026-10-08).
+      const depthState = this.renderer.state.buffers.depth
+      depthState.setClear(0)
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-      gl.clearDepth(1)
+      depthState.setClear(1)
       this.renderer.render(root, this.cam)
       roadClipUniforms.uRoadViewProj.value.multiplyMatrices(this.cam.projectionMatrix, this.cam.matrixWorldInverse)
       roadClipUniforms.uRoadCoverOn.value = 1

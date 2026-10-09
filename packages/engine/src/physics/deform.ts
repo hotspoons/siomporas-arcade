@@ -100,7 +100,12 @@ export class Deformable {
     const pos = this.geo.getAttribute('position')
     this.rest = new Float32Array(pos.array as ArrayLike<number>)
     this.moved = new Float32Array(this.rest.length)
+    this.touchedMask = new Uint8Array(this.rest.length / 3)
   }
+
+  /** which vertices a dent has moved since the last flush, for the local normal recompute */
+  private touchedMask: Uint8Array
+  private anyTouched = false
 
   /**
    * Apply an impact.
@@ -199,6 +204,8 @@ export class Deformable {
       arr[i + 1] = this.rest[i + 1] + this.moved[i + 1]
       arr[i + 2] = this.rest[i + 2] + this.moved[i + 2]
       if (len * k > worst * maxDent) worst = (len * k) / maxDent
+      this.touchedMask[i / 3] = 1
+      this.anyTouched = true
       touched++
     }
     if (!touched) return false
@@ -221,10 +228,50 @@ export class Deformable {
     pos.needsUpdate = true
     // Normals go stale the moment a vertex moves, and a dent with the old normals is a flat patch
     // that catches the light exactly as it did before — i.e. invisible, which is the failure mode
-    // this line exists to avoid.
-    this.geo.computeVertexNormals()
+    // this line exists to avoid. A full recompute on a 160k-vertex car is 10 ms on the frame
+    // (2026-10-08); the dent moved a few hundred vertices, so on a big mesh only those are
+    // recomputed, from the faces that touch them. Small meshes take three's own pass.
+    if (!this.localNormals()) this.geo.computeVertexNormals()
     this.geo.computeBoundingSphere()
     this.dirty = false
+    return true
+  }
+
+  /**
+   * Recompute the normals of the vertices a dent moved, and only those: one scan of the index
+   * for the faces that touch a moved vertex, face normals for those, normalised per vertex.
+   * Returns false when the geometry is small enough for the full pass, or has no index or normals.
+   */
+  private localNormals(): boolean {
+    const index = this.geo.getIndex()
+    const nrm = this.geo.getAttribute('normal')
+    if (!index || !nrm || !this.anyTouched || index.count < 60_000) return false
+    const idx = index.array as ArrayLike<number>
+    const p = this.geo.getAttribute('position').array as Float32Array
+    const n = nrm.array as Float32Array
+    const mask = this.touchedMask
+    // zero the moved vertices' normals; untouched neighbours keep theirs (a hair off, invisible)
+    for (let v = 0; v < mask.length; v++) if (mask[v]) { n[v * 3] = 0; n[v * 3 + 1] = 0; n[v * 3 + 2] = 0 }
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i], b = idx[i + 1], c = idx[i + 2]
+      const ta = mask[a], tb = mask[b], tc = mask[c]
+      if (!ta && !tb && !tc) continue
+      const ax = p[a * 3], ay = p[a * 3 + 1], az = p[a * 3 + 2]
+      const abx = p[b * 3] - ax, aby = p[b * 3 + 1] - ay, abz = p[b * 3 + 2] - az
+      const acx = p[c * 3] - ax, acy = p[c * 3 + 1] - ay, acz = p[c * 3 + 2] - az
+      const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx
+      if (ta) { n[a * 3] += nx; n[a * 3 + 1] += ny; n[a * 3 + 2] += nz }
+      if (tb) { n[b * 3] += nx; n[b * 3 + 1] += ny; n[b * 3 + 2] += nz }
+      if (tc) { n[c * 3] += nx; n[c * 3 + 1] += ny; n[c * 3 + 2] += nz }
+    }
+    for (let v = 0; v < mask.length; v++) {
+      if (!mask[v]) continue
+      const l = Math.hypot(n[v * 3], n[v * 3 + 1], n[v * 3 + 2]) || 1
+      n[v * 3] /= l; n[v * 3 + 1] /= l; n[v * 3 + 2] /= l
+      mask[v] = 0
+    }
+    this.anyTouched = false
+    nrm.needsUpdate = true
     return true
   }
 

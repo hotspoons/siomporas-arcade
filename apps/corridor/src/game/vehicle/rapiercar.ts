@@ -24,6 +24,7 @@
 // wheel, which are all that is left to turn.
 
 import * as THREE from 'three'
+import { LAYER, groups } from '@apex/engine/physics/layers'
 import type { Vehicle } from '@apex/engine/physics/vehicle'
 import type { DriveProfile } from '@apex/engine/physics/profiles'
 import { Car, type CarEvent, type CarInput, type DrivableCar, type Surface } from './car'
@@ -105,6 +106,18 @@ export class RapierCar implements DrivableCar {
   /** the chassis BODY's handle: what a blast is told to leave alone (the test rig's shield) */
   get bodyHandle(): number {
     return this.vehicle.body.handle
+  }
+
+  /**
+   * A ghost to everything but the ground: the chassis still rides the terrain, structures and
+   * stunt tracks, and passes through traffic, props, debris and people. The test rig drives this
+   * way (Rich, 2026-10-08: "disable collision physics with the hero car too"), so a run measures
+   * the world and not the crash it had on lap two.
+   */
+  setGhost(on: boolean): void {
+    const g = on ? ((LAYER.vehicle << 16) | (LAYER.terrain | LAYER.structure | LAYER.track)) >>> 0 : groups('vehicle')
+    this.vehicle.collider.setCollisionGroups(g)
+    this.vehicle.collider.setSolverGroups(g)
   }
 
   get profile(): DriveProfile {

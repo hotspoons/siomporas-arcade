@@ -16,8 +16,8 @@ https://dc-nightmare.siomporas.com/#dc-metro-take-2?stance=eyJ2Ijox…&season=su
 ```
 
 `src/url.ts` is the one reader and writer (`param`, `hasParam`, `worldSlug`, `write`, `navigate`,
-`href`). Old links still work — `/?lite=1&season=summer#crofton`, `#/crofton`, the world editor's
-`/index.html?site=crofton` — and are rewritten into the form above as the page boots. A hash typed
+`href`). No other form is read: a query before the `#`, `#/crofton` and `?site=crofton` are
+ignored (a clean break, 2026-10-10). A hash typed
 into the address bar reloads the page onto it. The options: `level`, `stance`, `season`, `style`,
 `relief`, `ui`, `phys`, `car`, `profile`, `depth`, `aa`, `grade`, `splats`, `lite`, `fresh`, `data`,
 `assetsvc`.
@@ -42,7 +42,7 @@ quarter of the terrain vertices, 4k imagery, fewer near trees); touch devices ge
 | `src/fly.ts` | trailworks-style fly camera |
 | `src/car.ts` | the car: stuntin's ground regime + lateral grip model, tree collision |
 | `src/main.ts` | UI, orbit/drive cameras, phone layout, picking |
-| `src/url.ts` | the address: `#world?k=v&flag`, legacy forms folded in, `replaceState` writes |
+| `src/url.ts` | the address: `#world?k=v&flag`, nothing else read, `replaceState` writes |
 | `public/surfaces/` | texture sets from `tools/surfaces/gen.py` |
 
 **Game mode.** A production build opens as a GAME: no bar, a dashboard and the objective in the

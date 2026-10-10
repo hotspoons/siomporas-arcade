@@ -112,16 +112,11 @@ import { downloadJSON, readJSONFile } from './ui/files'
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
 /*
- * THE ADDRESS, CANONICAL FROM HERE ON: `/#world?k=v&flag` (url.ts). An old link — the options
- * before the hash, `#/world`, the world editor's `?site=` — is rewritten in the bar before anything
- * else runs; everything reads through url.ts, which folds the old forms in anyway, so the modules
- * that read an option at load time (before this line) see the same values.
- *
- * And a hash typed into the bar (or a probe's `goto` to this page with another hash) loads it:
- * with the options in the hash, a change to them is no longer a navigation by itself. The page's
- * own writes are `replaceState`, which never fires `hashchange`.
+ * THE ADDRESS IS `/#world?k=v&flag` AND NOTHING ELSE (url.ts). A hash typed into the bar (or a
+ * probe's `goto` to this page with another hash) loads it: with the options in the hash, a change
+ * to them is no longer a navigation by itself. The page's own writes are `replaceState`, which
+ * never fires `hashchange`.
  */
-url.canonicalize()
 addEventListener('hashchange', () => location.reload())
 
 const canvas = $<HTMLCanvasElement>('#gl')

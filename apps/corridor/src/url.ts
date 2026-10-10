@@ -11,32 +11,26 @@
  * pod serves the game at `/index.html` and the Worker serves it at `/`, and neither server has
  * anything to learn from the options: they are the page's business only.
  *
- * OLD LINKS STILL WORK. `/?stance=…&season=summer#crofton`, `/#/crofton`, `/index.html?level=x#w`
- * and the world editor's `/index.html?site=w` all name the same thing; `read()` folds them in, and
- * `canonicalize()` (main.ts, first thing) rewrites the address bar into the form above with
- * `replaceState`. Where an option is in both places the hash wins: it is the newer form.
+ * NO OTHER FORM IS READ. A query before the `#` (`/?stance=…#w`), the slash hash (`#/w`) and the
+ * world editor's old `?site=w` are ignored, not translated — Rich, 2026-10-10: "No backwards
+ * compatibility please, make it a clean break." The first `write` drops a stray query from the bar.
  *
  * ONE CATCH THAT COMES WITH THE HASH: changing only the hash does not load a page. `location.href =`
  * a URL that differs from this one only after the `#` scrolls, it does not navigate. So anything
  * that used to rely on a new `?level=` reloading the page goes through `navigate()`, which writes
  * and then reloads, and main.ts reloads on `hashchange` (a hash edited in the address bar, or a
  * probe's `goto` to the same page) — `replaceState` never fires it, so the page's own writes don't.
- *
- * Module-load readers (`site.ts`'s `DATA_BASE`, `LITE`, the stores) run before main.ts can
- * canonicalize anything, which is why `read()` always parses the live location and folds the
- * legacy query in rather than trusting that the rewrite has happened.
  */
 
-/** the two parts of a location this module reads */
+/** the part of a location this module reads */
 export interface Loc {
-  search: string
   hash: string
 }
 
 export interface GameLocation {
   /** the world, `''` when the address names none */
   slug: string
-  /** the options, legacy query folded in */
+  /** the options from the hash's own query string */
   params: URLSearchParams
 }
 
@@ -50,7 +44,7 @@ export interface Change {
   set?: Record<string, ParamValue>
 }
 
-const live = (): Loc => (typeof location === 'undefined' ? { search: '', hash: '' } : location)
+const live = (): Loc => (typeof location === 'undefined' ? { hash: '' } : location)
 
 function decode(s: string): string {
   try {
@@ -61,28 +55,16 @@ function decode(s: string): string {
 }
 
 /**
- * The address, as the game means it.
- *
- * The hash is `[/]slug[:mode][?query]`: the slash is the 2026-10-01 form (`#/crofton`), `:mode` is
- * the site editor's (`#crofton:areas`), and neither is part of the world's name. `?site=` is the
- * world editor's old "play" link, which the game never actually read; it names the world here.
+ * The address, as the game means it: the hash is `slug[:mode][?query]`. `:mode` is the site
+ * editor's own suffix (`editor.html#crofton:areas`) and not part of the world's name.
  */
 export function parse(loc: Partial<Loc> = live()): GameLocation {
   // Partial: a test that stubs `location` with only an origin must still read as "no options"
   const raw = (loc.hash ?? '').replace(/^#/, '')
   const q = raw.indexOf('?')
   const head = q < 0 ? raw : raw.slice(0, q)
-  const params = new URLSearchParams(loc.search ?? '')
-  if (q >= 0) {
-    const fromHash = new URLSearchParams(raw.slice(q + 1))
-    for (const k of new Set(fromHash.keys())) params.delete(k)
-    for (const [k, v] of fromHash) params.append(k, v)
-  }
-  let slug = decode(head).replace(/^\/+/, '').split(':')[0].trim()
-  const site = params.get('site')
-  params.delete('site')
-  if (!slug && site) slug = site.trim()
-  return { slug, params }
+  const params = new URLSearchParams(q < 0 ? '' : raw.slice(q + 1))
+  return { slug: decode(head).split(':')[0].trim(), params }
 }
 
 // `encodeURIComponent`, minus what a fragment may carry as it is: `data=http://127.0.0.1:5190`
@@ -127,7 +109,7 @@ export function param(name: string): string | null {
   return read().params.get(name)
 }
 
-/** is the option present at all (`#w?lite`, `?lite=1`) */
+/** is the option present at all (`#w?lite`, `#w?lite=1`) */
 export function hasParam(name: string): boolean {
   return read().params.has(name)
 }
@@ -170,16 +152,6 @@ export function href(change: Change = {}): string {
 export function navigate(change: Change = {}): void {
   write(change)
   location.reload()
-}
-
-/**
- * Rewrite a legacy address (`?k=v#w`, `#/w`, `?site=w`) into the canonical one. Called once at
- * boot; true when the bar changed.
- */
-export function canonicalize(): boolean {
-  const before = `${location.pathname}${location.search}${location.hash}`
-  write()
-  return `${location.pathname}${location.search}${location.hash}` !== before
 }
 
 /**

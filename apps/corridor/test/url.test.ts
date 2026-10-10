@@ -1,9 +1,9 @@
-// The game's address (src/url.ts): one canonical form, `/#world?k=v&flag`, and every old form
-// still read — Rich, 2026-10-10: "don't stick the query string before the hash".
+// The game's address (src/url.ts): one form, `/#world?k=v&flag`, and no other form read —
+// Rich, 2026-10-10: "don't stick the query string before the hash" and "make it a clean break".
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as url from '../src/url'
 
-const at = (search: string, hash: string) => url.parse({ search, hash })
+const at = (_search: string, hash: string) => url.parse({ hash })
 const entries = (p: URLSearchParams) => [...p]
 
 describe('parse', () => {
@@ -20,32 +20,13 @@ describe('parse', () => {
     expect(g.slug).toBe('')
     expect(g.params.get('phys')).toBe('1')
   })
-  it('reads the legacy query-before-hash form', () => {
-    const g = at('?lite=1&level=crofton-jam', '#crofton-triangle')
-    expect(g.slug).toBe('crofton-triangle')
-    expect(entries(g.params)).toEqual([['lite', '1'], ['level', 'crofton-jam']])
-  })
-  it('reads the legacy slash hash, with or without options', () => {
-    expect(at('', '#/arrowhead-farms-network').slug).toBe('arrowhead-farms-network')
-    const g = at('?season=summer', '#/arrowhead-farms-network')
-    expect(g.slug).toBe('arrowhead-farms-network')
-    expect(g.params.get('season')).toBe('summer')
-    expect(at('', '#/crofton?fresh').params.has('fresh')).toBe(true)
-  })
-  it("reads the world editor's old ?site= link, and the hash's world beats it", () => {
-    const g = at('?site=bowie-racetrack-rd', '')
-    expect(g.slug).toBe('bowie-racetrack-rd')
-    expect(g.params.has('site')).toBe(false)
-    expect(at('?site=a', '#b').slug).toBe('b')
-    expect(at('', '#?site=c').slug).toBe('c')
+  it('ignores every old form: a query before the hash, the slash hash, ?site=', () => {
+    expect(url.parse({ search: '?lite=1&level=x', hash: '#w' } as unknown as url.Loc)).toEqual({ slug: 'w', params: new URLSearchParams() })
+    expect(at('', '#/w').slug).toBe('/w')
+    expect(url.parse({ search: '?site=w', hash: '' } as unknown as url.Loc).slug).toBe('')
   })
   it("drops the site editor's :mode suffix", () => {
     expect(at('', '#crofton:areas').slug).toBe('crofton')
-  })
-  it('lets the hash win where an option is in both places', () => {
-    const g = at('?phys=0&lite', '#w?phys=1')
-    expect(g.params.getAll('phys')).toEqual(['1'])
-    expect(g.params.has('lite')).toBe(true)
   })
   it('decodes a percent-encoded slug and survives a broken escape', () => {
     expect(at('', '#my%20world').slug).toBe('my world')
@@ -76,19 +57,9 @@ describe('format', () => {
     expect(back.params.get('stance')).toBe(stance)
     expect(url.decodeStance<{ site: string }>(back.params.get('stance'))?.site).toBe('w')
   })
-  it('round-trips through parse, legacy in, canonical out', () => {
-    for (const [search, hash, want] of [
-      ['?lite=1&stance=abc&season=summer', '#braddock-i70', '#braddock-i70?lite=1&stance=abc&season=summer'],
-      ['?season=summer', '#/arrowhead-farms-network', '#arrowhead-farms-network?season=summer'],
-      ['?level=crofton-jam', '#crofton-triangle', '#crofton-triangle?level=crofton-jam'],
-      ['?site=bowie-racetrack-rd', '', '#bowie-racetrack-rd'],
-      ['?lite&phys=1', '#w', '#w?lite&phys=1'],
-      ['', '#w?a=1&b', '#w?a=1&b'],
-      ['', '', ''],
-    ]) {
-      const h = url.format(at(search, hash))
-      expect(h, `${search}${hash}`).toBe(want)
-      expect(url.format(at('', h)), `idempotent: ${h}`).toBe(want)
+  it('round-trips through parse', () => {
+    for (const h of ['#braddock-i70?lite=1&stance=abc&season=summer', '#w?lite&phys=1', '#w?a=1&b', '#w', '']) {
+      expect(url.format(at('', h)), h).toBe(h)
     }
   })
 })
@@ -146,39 +117,18 @@ describe('the live address', () => {
   beforeEach(() => vi.unstubAllGlobals())
   afterEach(() => vi.unstubAllGlobals())
 
-  it('canonicalizes a legacy link in place, keeping the path', () => {
-    const b = fakeBrowser('http://localhost:5185/index.html?lite=1&level=crofton-jam#/crofton-triangle')
-    expect(url.canonicalize()).toBe(true)
-    expect(b.href()).toBe('http://localhost:5185/index.html#crofton-triangle?lite=1&level=crofton-jam')
-    expect(url.canonicalize()).toBe(false) // already canonical: no second write
-    expect(b.replaced).toHaveLength(1)
-  })
-  it("canonicalizes the world editor's ?site= link", () => {
-    const b = fakeBrowser('http://h/index.html?site=bowie-racetrack-rd')
-    url.canonicalize()
-    expect(b.href()).toBe('http://h/index.html#bowie-racetrack-rd')
-  })
-  it('leaves a canonical address alone', () => {
-    const b = fakeBrowser('http://h/#w?phys=1')
-    expect(url.canonicalize()).toBe(false)
-    expect(b.replaced).toHaveLength(0)
-  })
-  it('reads options from either place before and after the rewrite (load-time readers)', () => {
-    fakeBrowser('http://h/?data=http://127.0.0.1:5190&lite#w')
+  it('reads options from the hash only', () => {
+    fakeBrowser('http://h/?data=nope&lite#w?data=http://127.0.0.1:5190')
     expect(url.param('data')).toBe('http://127.0.0.1:5190')
-    expect(url.hasParam('lite')).toBe(true)
+    expect(url.hasParam('lite')).toBe(false)
     expect(url.worldSlug()).toBe('w')
-    url.canonicalize()
-    expect(location.search).toBe('')
-    expect(url.param('data')).toBe('http://127.0.0.1:5190')
-    expect(url.hasParam('lite')).toBe(true)
-    expect(url.query()).toBe('?data=http://127.0.0.1:5190&lite')
+    expect(url.query()).toBe('?data=http://127.0.0.1:5190')
     expect(url.param('nope')).toBeNull()
   })
   it('writes with replaceState, and never puts a query before the hash', () => {
-    const b = fakeBrowser('http://h/?lite#/a')
+    const b = fakeBrowser('http://h/?stray#a?lite')
     url.write({ slug: 'b', set: { level: 'x' } })
-    expect(b.href()).toBe('http://h/#b?lite&level=x')
+    expect(b.href()).toBe('http://h/#b?lite&level=x') // the stray query is gone with the first write
     url.write({ set: { level: null, stance: null } })
     expect(b.href()).toBe('http://h/#b?lite')
     expect(b.replaced.every((r) => !r.includes('?') || r.indexOf('#') < r.indexOf('?'))).toBe(true)

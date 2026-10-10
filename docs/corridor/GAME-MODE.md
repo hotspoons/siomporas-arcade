@@ -17,8 +17,7 @@ Settings dialog and the Escape menu read and write the same fields, and both ask
 
 Where a page starts (`resolveUiMode` in `src/gamepolicy.ts`):
 
-1. `ui=game` or `ui=dev` in the address: `#<world>?ui=game` (`src/url.ts`; an old `?ui=game#<world>`
-   link still works and is rewritten).
+1. `ui=game` or `ui=dev` in the address: `#<world>?ui=game` (`src/url.ts`).
 2. The player's remembered choice (`apex-corridor.settings.v1`, field `ui`).
 3. Otherwise a **production build is a game**; the **dev server is a workbench**
    (`import.meta.env.PROD`).

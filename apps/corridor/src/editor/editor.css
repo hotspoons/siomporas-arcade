@@ -138,7 +138,8 @@
 .pv-help { width: min(1500px, 100%); padding: var(--s2) 2px; color: var(--ink-3); font-size: var(--text-xs); }
 
 /* ---- the frame-mismatch banner --------------------------------------------------------------
-   `frameBanner()` in editor/ui.ts, absorbed into the palette at the editor lane's request. Their
+   `frameNotice()` in editor/store/frameguard.ts (it was `frameBanner()` in editor/ui.ts), absorbed
+   into the palette at the editor lane's request. Their
    version hand-rolled four hex colours (#e2564f / #2a1512 / #ff8b82 / #b99) which put the one
    loudest element in the editor in a red that was not this UI's red. Same intent, same markup
    (strong, a reason, a dim instruction), expressed in --danger.
@@ -332,6 +333,8 @@
 /* the frame warning is still true and no longer the loudest thing in the panel */
 .framewarn { font-size: var(--text-xs); padding: var(--s2); }
 .framewarn .dim { display: block; opacity: 0.75; }
+/* the one thing a measured frame notice lets you do about it */
+.framewarn button { justify-self: start; }
 
 /* ---- the asset library, in a pane rather than a dialog ---------------------------------------- */
 .class-tabs { display: flex; flex-wrap: wrap; gap: 2px; }

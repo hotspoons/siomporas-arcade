@@ -7,7 +7,9 @@
 import * as THREE from 'three'
 import type { Site } from '../../world/scene'
 import { el, dragChip, paneTabs } from './ui'
-import { nextId, frameOf, frameMismatch } from '../store/schema'
+import { nextId, frameOf } from '../store/schema'
+import { frameNotice, guardFrame } from '../store/frameguard'
+import type { FrameVerdict } from '../store/framecheck'
 import { loadPoints, savePoints, validatePoints, POINT_KINDS, POINT_MODES, type Point, type PointKind, type PointMode as PointHow, type PointsDoc } from '../../game/world/points'
 
 type HeightAt = (x: number, y: number) => number
@@ -28,7 +30,8 @@ export class PointMode {
   dirty = false
   selected: string | null = null
   arming: PointKind | null = null
-  frameWarning: string | null = null
+  /** what the roads say about this file's frame — see store/framecheck.ts */
+  frame: FrameVerdict | null = null
   panelTab: 'kinds' | 'points' | 'courses' = 'kinds'
   /** the Courses tab's body: the race gates, rendered by whoever owns them (editor/main.ts) */
   coursesTab: ((root: HTMLElement) => void) | null = null
@@ -51,7 +54,7 @@ export class PointMode {
     this.h = h
     this.site = site
     this.doc = await loadPoints(slug, '')
-    this.frameWarning = site ? frameMismatch(this.doc.frame, site.manifest, this.doc.points.length) : null
+    this.frame = site ? guardFrame(this.doc, site, { polygons: [], points: this.doc.points.map((p) => ({ id: p.id, at: p.at })) }, 'points') : null
     this.dirty = false
     this.selected = null
     this.arming = null
@@ -60,6 +63,35 @@ export class PointMode {
 
   get busy(): boolean {
     return this.arming !== null
+  }
+
+  /**
+   * Turn every point by the bake's recorded UTM→ENU fit — a frame notice's button. A point's
+   * heading is anticlockwise from east, so it gains the turn.
+   */
+  moveIntoFrame() {
+    if (this.frame?.state !== 'old' || !this.site) return
+    const { move, turnDeg } = this.frame
+    for (const p of this.doc.points) {
+      p.at = move(p.at).map((v) => Math.round(v * 10) / 10) as [number, number]
+      p.yaw_deg = Math.round((p.yaw_deg + turnDeg) * 10) / 10
+    }
+    this.doc.frame = frameOf(this.site.manifest)
+    this.frame = { state: 'stamped' }
+    this.dirty = true
+    this.rebuild()
+    this.onChange()
+  }
+
+  /** A point's reach — the circle `pick` answers inside — for the editor's hover ring. */
+  outline(id: string): [number, number][] | null {
+    const p = this.doc.points.find((x) => x.id === id)
+    return p ? circle(p.at, 4) : null
+  }
+
+  /** Name and place of every point, for the active mode's labels. */
+  labels(): { id: string; text: string; at: [number, number] }[] {
+    return this.doc.points.map((p) => ({ id: p.id, text: p.name, at: p.at }))
   }
 
   private rebuild() {
@@ -255,6 +287,8 @@ export class PointMode {
   }
 
   private pointsTab(root: HTMLElement, go: (p: Point) => void) {
+    const notice = frameNotice('points.json', this.frame, () => this.moveIntoFrame())
+    if (notice) root.append(notice)
     if (!this.doc.points.length) { root.append(el('p', 'dim', 'nothing placed yet')); return }
     const list = el('div', 'list')
     for (const p of this.doc.points) {
@@ -311,4 +345,11 @@ export class PointMode {
     }
     root.append(list)
   }
+}
+
+/** A ring of `n` points about a centre, for a hover outline. */
+export function circle(c: [number, number], r: number, n = 24): [number, number][] {
+  const out: [number, number][] = []
+  for (let i = 0; i < n; i++) out.push([c[0] + r * Math.cos((2 * Math.PI * i) / n), c[1] + r * Math.sin((2 * Math.PI * i) / n)])
+  return out
 }

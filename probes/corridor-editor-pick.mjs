@@ -50,6 +50,10 @@ const jumped = await p.evaluate((at) => {
   // deselect first, or "it is selected" proves nothing — it was selected when it was placed
   window.corridor.stunts.select(null)
   window.corridor.click({ x: at[0], y: at[1] })
+  // Since 2026-10-10 the ACTIVE mode's thing comes first (Rich: "be first on selection when
+  // clicking"), so if an area lies under the loop the first click takes the area — and a second
+  // click on the same spot goes to the next thing there, the loop (editor/view/pickorder.ts).
+  if (window.corridor.mode() === 'areas' && window.corridor.areas.selected) window.corridor.click({ x: at[0], y: at[1] })
   return {
     mode: window.corridor.mode(),
     selected: window.corridor.stunts.selected,

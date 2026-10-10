@@ -10,9 +10,11 @@
 import * as THREE from 'three'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { instanceOf, loadCatalog, tintOf, type Catalog, type CatalogEntry } from './catalog'
-import { frameMismatch, frameOf, isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from '../store/schema'
+import { frameOf, isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from '../store/schema'
 import { yawFacingRoad } from './corridor'
-import { el, frameBanner, paneTabs } from './ui'
+import { el, paneTabs } from './ui'
+import { frameNotice, guardFrame } from '../store/frameguard'
+import type { FrameVerdict } from '../store/framecheck'
 import { MeshView } from '../library/meshview'
 import type { Site } from '../../world/scene'
 
@@ -36,8 +38,14 @@ export class PlaceMode {
   )
   private nose = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 10, SELECT, 4, 2.4)
   private armed: string | null = null
-  /** set when the file's coordinates were authored in a different frame from the bake's */
-  frameWarning: string | null = null
+  /** what the roads say about this file's frame — see store/framecheck.ts */
+  frame: FrameVerdict | null = null
+  /**
+   * Another mode is the one being worked in. The placements stay drawn — they are the world — but
+   * the gizmo comes off: a handle on a barn you are not editing, that still takes the press, is a
+   * trap in every other mode (view/emphasis.ts).
+   */
+  private passive = false
   private grabbed: string | null = null
   /**
    * The move/rotate handles on the selected object.
@@ -83,7 +91,7 @@ export class PlaceMode {
     this.ground = ground
     if (!this.catalog.assets.length) this.catalog = await loadCatalog()
     this.doc = await loadPlacements(slug)
-    this.frameWarning = frameMismatch(this.doc.frame, site.manifest, this.doc.items.length)
+    this.frame = guardFrame(this.doc, site, { polygons: [], points: this.doc.items.map((p) => ({ id: p.id, at: [p.x, p.y] as [number, number] })) }, 'placements')
     this.dirty = false
     this.selected = null
     for (const o of this.objects.values()) this.group.remove(o)
@@ -175,6 +183,8 @@ export class PlaceMode {
     const o = await instanceOf(e)
     o.userData.placeId = p.id
     o.traverse((c) => (c.userData.placeId = p.id))
+    // a placed model is the world, not a mark — an unlit one must not fade in other modes (view/emphasis.ts)
+    o.userData.emphasisKeep = true
     this.place(o, p)
     this.objects.set(p.id, o)
     this.group.add(o)
@@ -282,6 +292,8 @@ export class PlaceMode {
     this.gizmo = g
     const helper = g.getHelper()
     helper.name = 'place-gizmo'
+    // the gizmo drives its own highlight opacities; the emphasis pass leaves it alone (view/emphasis.ts)
+    helper.userData.emphasisKeep = true
     this.group.add(helper)
     this.attachGizmo()
   }
@@ -290,7 +302,7 @@ export class PlaceMode {
   private attachGizmo(): void {
     const g = this.gizmo
     if (!g) return
-    const o = this.selected ? this.objects.get(this.selected) : null
+    const o = this.selected && !this.passive ? this.objects.get(this.selected) : null
     if (!o) { g.detach(); return }
     g.setMode(this.gizmoMode)
     // SIZED AGAINST THE THING. The default gizmo is one unit across, which on a 40 m barn is a
@@ -461,6 +473,46 @@ export class PlaceMode {
 
   get busy(): boolean {
     return !!this.armed || this.dragging
+  }
+
+  /** The editor says whether this is the mode being worked in; see `passive`. */
+  setPassive(on: boolean) {
+    if (this.passive === on) return
+    this.passive = on
+    this.attachGizmo()
+  }
+
+  /** A placement's footprint, turned as it stands, for the editor's hover ring. */
+  outline(id: string): [number, number][] | null {
+    const p = this.doc.items.find((x) => x.id === id)
+    if (!p) return null
+    const e = this.entry(p.asset)
+    const [w, d] = e ? e.footprint_m : [3, 3]
+    const hw = (w * p.scale) / 2 + 1, hd = (d * p.scale) / 2 + 1
+    const t = ((p.yaw_deg + (e?.yaw_offset_deg ?? 0)) * Math.PI) / 180
+    // a compass bearing: the model's front (local −Z, north) turns clockwise by t
+    const fx = Math.sin(t), fy = Math.cos(t), rx = Math.cos(t), ry = -Math.sin(t)
+    return ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([a, b]) => [p.x + rx * a * hw + fx * b * hd, p.y + ry * a * hw + fy * b * hd] as [number, number])
+  }
+
+  /**
+   * Turn every placement by the bake's recorded UTM→ENU fit — a frame notice's button. Positions
+   * turn about the anchor, and so does every heading: a bearing measured clockwise loses the turn.
+   */
+  async moveIntoFrame() {
+    if (this.frame?.state !== 'old' || !this.site) return
+    const { move, turnDeg } = this.frame
+    for (const p of this.doc.items) {
+      const [x, y] = move([p.x, p.y])
+      p.x = Math.round(x * 10) / 10
+      p.y = Math.round(y * 10) / 10
+      p.yaw_deg = Math.round((((p.yaw_deg - turnDeg) % 360) + 360) % 360 * 10) / 10
+    }
+    this.doc.frame = frameOf(this.site.manifest)
+    this.frame = { state: 'stamped' }
+    this.dirty = true
+    await this.respawn()
+    this.onChange()
   }
 
   click(pt: { x: number; y: number } | null) {
@@ -698,7 +750,8 @@ export class PlaceMode {
     }
     // under the preview, not in front of it — still unmissable, since nothing else in this editor
     // gets a banner, but no longer standing between you and the thing you came here to do
-    if (this.frameWarning) root.append(frameBanner('placements.json', this.frameWarning))
+    const notice = frameNotice('placements.json', this.frame, () => void this.moveIntoFrame())
+    if (notice) root.append(notice)
 
     root.append(el('h2', '', this.armed ? 'double-click the ground to place it' : 'drag one in, or pick it and double-click the ground'))
 
@@ -748,7 +801,8 @@ export class PlaceMode {
 
   private placedTab(root: HTMLElement, fly: (pts: [number, number][]) => void) {
     // here it IS the first thing: every row below it is a coordinate the warning says is displaced
-    if (this.frameWarning) root.append(frameBanner('placements.json', this.frameWarning))
+    const notice = frameNotice('placements.json', this.frame, () => void this.moveIntoFrame())
+    if (notice) root.append(notice)
     const list = el('div', 'list')
     for (const p of this.doc.items) {
       const e = this.entry(p.asset)

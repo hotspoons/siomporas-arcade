@@ -4,8 +4,8 @@
 // path and with these signatures so areas.ts / place.ts / grow.ts / structures.ts did not have to
 // change to pick up the new look. One definition of what a slider is, for both apps.
 // `el` is both imported and re-exported: a bare `export { el } from '...'` forwards it to this
-// module's consumers WITHOUT binding it in this module's own scope, so frameBanner below could
-// not see it. tsc caught that the moment the two branches merged.
+// module's consumers WITHOUT binding it in this module's own scope, so nothing below could use it.
+// (The frame banner that once lived here is `frameNotice` in store/frameguard.ts now.)
 import { el } from '../../ui/shell'
 import { slider as uiSlider } from '../../ui/controls'
 
@@ -126,12 +126,4 @@ export function roadStrip(
     right.push([+(x + (dy / l) * half).toFixed(1), +(y - (dx / l) * half).toFixed(1)])
   }
   return [...left, ...right.reverse()]
-}
-
-export function frameBanner(file: string, why: string): HTMLElement {
-  const b = el('div', 'framewarn')
-  b.append(el('strong', '', `${file} was authored in a different frame`))
-  b.append(el('span', '', why))
-  b.append(el('span', 'dim', 'Regenerate the seeded areas (`python -m corridor areas <slug> --overwrite`) and re-run grow; anything drawn by hand has to be redrawn.'))
-  return b
 }

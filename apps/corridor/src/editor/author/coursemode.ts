@@ -83,12 +83,30 @@ export class CourseMode {
 
   /* ---- geometry -------------------------------------------------------------------------------- */
 
+  /*
+   * EVERY RACE IS DRAWN, not only the selected one. Rich, 2026-10-10: "we need all the items
+   * visible from this editor all the time" — a second circuit's gates were invisible until you
+   * picked it from the list, so the map could not tell you there was one. The selected race is
+   * drawn solid with its handles; the others at half strength and with none, so a press on one
+   * cannot start dragging a gate of a race you are not editing.
+   */
   private rebuild() {
     this.marks.clear()
-    const c = this.course
-    if (!c) return
-    for (const g of c.gates) this.drawGate(g)
-    if (c.entry) this.drawEntry(c)
+    for (const c of this.doc.courses) {
+      const on = c.id === this.selected
+      const from = this.marks.children.length
+      for (const g of c.gates) this.drawGate(g, on)
+      if (c.entry) this.drawEntry(c, on)
+      if (on) continue
+      for (const o of this.marks.children.slice(from)) {
+        o.traverse((m) => {
+          const mat = (m as THREE.Mesh).material as THREE.Material | undefined
+          if (!mat) return
+          mat.transparent = true
+          mat.opacity *= 0.5
+        })
+      }
+    }
   }
 
   /**
@@ -98,7 +116,7 @@ export class CourseMode {
    * sees. Its handle is at the centre, so dragging moves the whole marker; the radius is a slider,
    * because a radius is not a thing anybody drags accurately.
    */
-  private drawEntry(c: Course) {
+  private drawEntry(c: Course, handles = true) {
     const e = c.entry!
     const r = e.r || DEFAULT_ENTRY_R
     const z = this.h(e.x, e.y)
@@ -110,6 +128,7 @@ export class CourseMode {
     ring.position.set(e.x, z + 0.15, -e.y)
     ring.renderOrder = 10
     this.marks.add(ring)
+    if (!handles) return
     const hm = handleMesh(ENTRY, 3)
     hm.position.set(e.x, z + 1.4, -e.y)
     hm.userData = { entryFor: c.id }
@@ -122,8 +141,8 @@ export class CourseMode {
    * The arrow is the important part. Without it the only way to discover that a gate faces the
    * wrong way is to drive at it and not be counted.
    */
-  private drawGate(g: Gate) {
-    const on = g.id === this.selectedGate
+  private drawGate(g: Gate, handles = true) {
+    const on = handles && g.id === this.selectedGate
     const colour = on ? SELECTED : COLOUR[g.role]
     const za = this.h(g.a[0], g.a[1])
     const zb = this.h(g.b[0], g.b[1])
@@ -419,6 +438,37 @@ export class CourseMode {
     if (id) this.panelTab = 'placed'
     this.onChange()
     return !!id
+  }
+
+  /** A gate's span, or an entry ring, for the editor's hover ring. */
+  outline(id: string): [number, number][] | null {
+    if (id.startsWith('entry:')) {
+      const c = this.doc.courses.find((x) => x.id === id.slice(6))
+      if (!c?.entry) return null
+      const r = c.entry.r || DEFAULT_ENTRY_R
+      return Array.from({ length: 32 }, (_, i) => [c.entry!.x + r * Math.cos((i * Math.PI) / 16), c.entry!.y + r * Math.sin((i * Math.PI) / 16)] as [number, number])
+    }
+    for (const c of this.doc.courses) {
+      const g = c.gates.find((x) => x.id === id)
+      if (!g) continue
+      // a thin box along the gate line, as wide as `pick`'s reach
+      const dx = g.b[0] - g.a[0], dy = g.b[1] - g.a[1]
+      const l = Math.hypot(dx, dy) || 1
+      const nx = (-dy / l) * 4, ny = (dx / l) * 4
+      return [[g.a[0] + nx, g.a[1] + ny], [g.b[0] + nx, g.b[1] + ny], [g.b[0] - nx, g.b[1] - ny], [g.a[0] - nx, g.a[1] - ny]]
+    }
+    return null
+  }
+
+  /** Each race's name, on its entry ring or its first gate, for the active mode's labels. */
+  labels(): { id: string; text: string; at: [number, number] }[] {
+    const out: { id: string; text: string; at: [number, number] }[] = []
+    for (const c of this.doc.courses) {
+      const g = c.gates[0]
+      const at: [number, number] | null = c.entry ? [c.entry.x, c.entry.y] : g ? [(g.a[0] + g.b[0]) / 2, (g.a[1] + g.b[1]) / 2] : null
+      if (at) out.push({ id: c.id, text: c.name, at })
+    }
+    return out
   }
 
   /** The gate nearest a point, for the cross-mode click: any race's, within a post's reach. */

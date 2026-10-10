@@ -165,6 +165,8 @@ export class StuntMode {
     this.gizmo = g
     const helper = g.getHelper()
     helper.name = 'stunt-gizmo'
+    // the gizmo drives its own highlight opacities; the emphasis pass leaves it alone (view/emphasis.ts)
+    helper.userData.emphasisKeep = true
     this.gizmoHost.add(helper)
     this.attachGizmo()
   }
@@ -202,7 +204,7 @@ export class StuntMode {
   private attachGizmo(): void {
     const g = this.gizmo
     if (!g) return
-    const f = this.doc.fixtures.find((x) => x.id === this.selected)
+    const f = this.passive ? undefined : this.doc.fixtures.find((x) => x.id === this.selected)
     this.gizmoHost.visible = !!f
     if (!f) { g.detach(); return }
     this.anchor.position.set(f.at[0], this.ground(f.at[0], f.at[1]) + (f.lift_m ?? 0), -f.at[1])
@@ -399,6 +401,8 @@ export class StuntMode {
       kerbs: f.style === 'stuntin',
     })
     this.built.set(id, r)
+    // the fixture is road, not a mark: solid in every mode (view/emphasis.ts)
+    r.group.userData.emphasisKeep = true
     this.group.add(r.group)
   }
 
@@ -653,6 +657,28 @@ export class StuntMode {
 
   get busy(): boolean {
     return !!this.arming || !!this.linking
+  }
+
+  /**
+   * Another mode is the one being worked in: the fixtures stay drawn (they are road), the gizmo
+   * comes off — see the same note on `PlaceMode.setPassive`.
+   */
+  private passive = false
+  setPassive(on: boolean) {
+    if (this.passive === on) return
+    this.passive = on
+    this.attachGizmo()
+  }
+
+  /** A fixture's footprint, for the editor's hover ring. */
+  outline(id: string): [number, number][] | null {
+    const f = this.doc.fixtures.find((x) => x.id === id)
+    return f ? fixtureFootprint(f) : null
+  }
+
+  /** Each fixture's name, for the active mode's labels. */
+  labels(): { id: string; text: string; at: [number, number] }[] {
+    return this.doc.fixtures.map((f) => ({ id: f.id, text: f.name, at: f.at }))
   }
 
   /** The smallest footprint under a point, so a jump inside a long banked run is reachable. */

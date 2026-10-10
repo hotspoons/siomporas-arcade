@@ -28,6 +28,12 @@ names. Pointing the page at a published bucket with `?data=` disables saving.
 | `author/catalog.ts` | `public/assets/catalog.json` → a `.glb` or a labelled box at the real footprint |
 | `view/drape.ts` | polygons made to lie on the ground rather than hover over it |
 | `author/ui.ts` | the panel's sliders and rows |
+| `view/emphasis.ts` | every mode's things drawn in every mode: the active one full strength, the rest quieter |
+| `view/pickorder.ts` | which thing a click means when several modes have one under it |
+| `view/labels.ts` | the active mode's names on the map |
+| `store/framecheck.ts` | is a document in the bake's frame? measured against the roads (pure) |
+| `store/frameguard.ts` | that check wired to a loaded site: the silent stamp, and the one banner left |
+| `store/docwatch.ts` | a document changed on disk (an MCP tool wrote it) is reloaded into its mode |
 
 Keys: `1`/`2`/`3`/`4` mode · `T` top · `F` fly to selection · `V` preview · `Ctrl+S` save.
 **Areas**: `N` draw, click to add a vertex, click the first vertex or `Enter` to close, `Esc`
@@ -232,7 +238,61 @@ coast; one `GRASS_RADIUS` cannot be right for all of them.
   all 112 knobs and every future default change is a merge conflict.
 - An unknown knob is reported in the status line, not swallowed.
 
+## Every mode's things, in every mode
+
+Rich, 2026-10-10: *"all of the tabs assets [should be] visible from all other tabs in the place
+editor, so traffic zones will show up when you are in the structures tab … The active tab's items
+should appear bolder than other tabs items and be first on selection when clicking."*
+
+- **Drawn always.** No mode's group is hidden by the mode switch any more (the Settings layer
+  toggles still hide areas, placements and authored structures if you ask). After every `refresh`
+  `applyEmphasis` makes the active mode's group full strength and every other one *passive*: its
+  unlit marks at 55 % of the opacity their mode chose, outlines at 60 % of their width, grab
+  handles hidden, the place and stunt gizmos detached. Lit materials (a placed diner, a loop, a
+  bridge) are the world and are never faded. The pass remembers what each mode set, so a mode
+  that redraws while passive comes out quiet without knowing it is passive.
+- **Bolder means wider.** Area and zone outlines are `Line2` fat lines (2.5 px, 4 px selected);
+  WebGL draws `gl.LINES` one pixel wide whatever `linewidth` says.
+- **Names.** The active mode's things carry their names (`view/labels.ts`); the passive ones do not.
+- **Clicks.** Every mode answers `pick(pt)` without taking the click. The active mode's thing wins,
+  then the smallest of the rest; **a second click on the same spot takes the next thing there**, so
+  a loop standing inside a corridor-wide canopy area is still reachable from the Areas tab.
+  Choosing another mode's thing switches to that mode with it selected and its row in view. A tool
+  mid-gesture (drawing, armed, picking an interval) still keeps every click.
+- **Hover.** What a click would take is outlined in white before you click, across modes.
+- **Off disk.** Every eight seconds, while the editor is on screen, it re-reads the seven authored
+  documents; one whose text changed (an agent's `traffic_zone_add`) is reloaded into its mode,
+  unless that mode has unsaved edits — then it says so and leaves them alone.
+
+## Frames are measured, not dated
+
+A document with no frame stamp used to get a red banner: "authored before frames were stamped …
+if these were drawn before 2026-09-22 they … will sit off the road". dc-metro-take-2's five
+Beltway zones were written over MCP on 2026-10-08 in exactly the bake's frame and got it anyway
+(Rich: *"This screenshot about zones.json is bullshit"*). Now an unstamped (or `utm`-stamped)
+document is measured against the roads (`store/framecheck.ts`): how much road its polygons cover,
+or whether its points are within 20 m of one, as written and after the old UTM→ENU turn the
+manifest records (`utm_convergence_deg`, `utm_scale`).
+
+- **fits** — stamped in memory, written at the next save, and nothing is shown;
+- **old** — at least half the things sit clearly better after the turn: a banner with the numbers
+  and a *Move them into this frame* button (positions turned, headings with them; save to keep);
+- **unknown** — the roads cannot tell (nothing near a road, or too near the anchor for the turn to
+  matter): nothing is shown, because that is not evidence of anything.
+
+Polygons are scored by *how much* road they cover, not whether they cover any: the Beltway circles
+dc-metro's anchor, so the turn slides a zone mostly along it. Measured: z-01 covers 1000 stations
+as written and 528 after the turn; an off-frame copy covers 509 and 1000. The MCP tools that write
+zones and points stamp the bake's frame now, so the question should not come up for them again.
+
 ## Adding a mode
+
+Give it `pick(pt)` (what is here, without taking the click), `select(id)`, `outline(id)` (for the
+hover ring) and, if its things have names, `labels()`; then add it to `hitsAt`, `selectHit`,
+`emphasiseLayers` and `docs()` in `main.ts`. Draw its marks with unlit materials and its grab
+handles with `handleMesh`, and the emphasis pass does the rest; flag anything that is a real
+object rather than a mark with `userData.emphasisKeep`.
+
 
 Mark your scene group with `markOverlay()` from `preview.ts`. The preview hides every direct
 child of the scene carrying `userData.editorOverlay` and restores it on close — a flag rather

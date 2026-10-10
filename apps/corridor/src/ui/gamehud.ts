@@ -39,6 +39,8 @@ export interface Telemetry {
 export interface Objective {
   goal: string
   score: number
+  /** the score as words — "$1,340" when the program counts money; absent: "1,340 pts" */
+  scoreText?: string
   outcome: 'win' | 'lose' | 'abandoned' | null
   /** a race in progress: its line */
   race?: string | null
@@ -200,7 +202,7 @@ export class GameHud {
     }
     this.blank = false
     this.write('goal', this.goal, o.goal)
-    this.write('score', this.score, o.score ? `${o.score.toLocaleString()} pts` : '')
+    this.write('score', this.score, o.score ? (o.scoreText ?? `${o.score.toLocaleString()} pts`) : '')
     this.write('race', this.race, o.race ?? '')
     const oc = o.outcome ? (o.outcome === 'win' ? 'WIN' : o.outcome === 'lose' ? 'LOSE' : 'ABANDONED') : ''
     if (this.last.outcome !== oc) {

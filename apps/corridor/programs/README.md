@@ -36,6 +36,8 @@ nothing gracefully.
 | placements | `api.placed(id)`, `api.placedWith(tag)`, `api.placements()` | the Place mode — `placements.json` |
 | physics | `api.physics.explode/impulse/break/ray/profile` | the Rapier world, when one is running |
 | sound | `api.audio.play(slot, { at, gain })`, `.loop(slot)`, `.override(slot, clips)`, `.slots()` | the sound bank — `public/sounds`, docs/corridor/SOUNDS.md |
+| winnings | `api.score.currency('$')`, `.add(amount, label)`, `.set(amount, label?)`, `.get()`, `.lines()` | the run's score, which the HUD and the finish screen show |
+| the end | `api.finish({ outcome, title, text, winnings, stats, show, model, screen })`, `api.win/lose(text)`, `api.on('finish', r => …)` | the finish screen — docs/corridor/GAME-MODE.md, "Finishing" |
 | the world | `api.world`, `api.actors` | the ECS itself, for anything the above cannot say |
 
 A race starts on its own when the player drives into its ring; `api.races.start(id)` is for starting

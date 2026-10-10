@@ -19,7 +19,8 @@
 // That is the difference between "the compiler is happy" and "this is a level".
 import type { WorldThing, WorldThingKind } from '../../game/world/worldthings'
 import { CodeEditor, forget, knowAbout, languageForPath, type Diagnostic } from './codeeditor'
-import { GameRun, type GameDef, type ProgramHost, type Transport } from '../../game/session/program'
+import { GameRun, type FinishResult, type GameDef, type ProgramHost, type Transport } from '../../game/session/program'
+import { formatAmount } from '../../game/session/finish'
 import { rewriteImports } from '../../game/session/programload'
 import { ActorWorld } from '../../game/actors/actorworld'
 import { bodyOf, group, readout } from '../../ui/controls'
@@ -170,6 +171,22 @@ export default defineGame({
         if (e.impulse > 8000) api.say('that was a big one', 'warn')
       })
     }
+
+    // ---- 10 · the score, and the end -----------------------------------------------------
+    //
+    // The score is the run's winnings. A currency makes it money on the HUD and on the finish
+    // screen; a label puts a payment on a line of the breakdown ("Laps ×3 — $1,500").
+    // \`api.finish\` ends the run: the finish screen turns the car (or, on foot, the character)
+    // on a turntable, counts the total up, and offers Restart and Exit to menu. Nothing here
+    // ends this starter level — uncomment the last line to see the screen after a minute.
+    api.score.currency('$')
+    api.on('enters', 'start', () => api.score.add(50, 'Laps'))
+    api.on('finish', (r) => console.log('finished:', r.outcome, r.winnings?.total))
+    // api.after(60, () => api.finish({
+    //   outcome: 'win',
+    //   title: 'Sixty seconds survived',
+    //   stats: [{ label: 'Distance', value: (api.facts().distance_m / 1000).toFixed(1) + ' km' }],
+    // }))
   },
 
   /*
@@ -227,6 +244,13 @@ const KIND_LABEL: Record<WorldThingKind, string> = {
   race: 'Races',
 }
 
+/** The finish screen in one line: "Mission complete · $1,340 (2 lines) · car", or "no screen". */
+function finishLine(r: FinishResult): string {
+  if (!r.screen) return `${r.title} · no screen`
+  const w = r.winnings ? ` · ${formatAmount(r.winnings.total, r.winnings.currency)}${r.winnings.lines.length ? ` (${r.winnings.lines.length} line${r.winnings.lines.length === 1 ? '' : 's'})` : ''}` : ''
+  return `${r.title}${w} · ${r.show ?? 'car or character'}`
+}
+
 /** What a dry run found out. Every field is something a person would otherwise have to play for. */
 export interface DryRun {
   ok: boolean
@@ -240,6 +264,8 @@ export interface DryRun {
   messages: string[]
   score: number
   outcome: string | null
+  /** what the finish screen would show: the headline, the winnings, the turntable — null while running */
+  finish: string | null
   /** simulated seconds stepped */
   played: number
 }
@@ -279,7 +305,7 @@ export async function dryRun(js: string, { seconds = 5, step = 0.05 }: { seconds
   const blob = URL.createObjectURL(new Blob([rewriteImports(js)], { type: 'text/javascript' }))
   const base: DryRun = {
     ok: false, error: null, goal: '', zones: [], hidden: [], transport: null, presets: [], messages: [],
-    score: 0, outcome: null, played: 0,
+    score: 0, outcome: null, finish: null, played: 0,
   }
   try {
     const mod = (await import(/* @vite-ignore */ blob)) as { default?: GameDef }
@@ -307,6 +333,7 @@ export async function dryRun(js: string, { seconds = 5, step = 0.05 }: { seconds
       messages: run.messages.map((m) => m.text),
       score: run.score,
       outcome: run.outcome,
+      finish: run.result ? finishLine(run.result) : null,
       played: +played.toFixed(2),
     }
   } catch (e) {
@@ -728,6 +755,7 @@ export class ProgramPanel {
       if (d.goal) b.append(readout('goal', d.goal))
       b.append(readout('outcome', d.outcome ?? 'still running'))
       b.append(readout('score', String(d.score)))
+      if (d.finish) b.append(readout('finish screen', d.finish))
       if (d.zones.length) b.append(readout('zones', d.zones.join(', ')))
       if (d.hidden.length) b.append(readout('hidden', d.hidden.join(', ')))
       if (d.transport) b.append(readout('transport', d.transport))

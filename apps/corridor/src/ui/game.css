@@ -147,3 +147,90 @@ body.paused .gamehud { opacity: 0.35; }
 .menu .footer { margin: var(--s4) 0 0; font-size: 0.75em; color: var(--ink-3); line-height: 1.6; }
 
 @media (max-height: 520px) { .menu { padding: var(--s3) var(--s4); } .menu h1 { font-size: 1.2em; } }
+
+/* ---- the finish screen (ui/finishscreen.ts) ------------------------------------------------- */
+
+/*
+ * The canvas behind this is the turntable over a blurred copy of the world's last frame, so the
+ * overlay itself is clear: only the panel has a surface. Everything the game draws over the world
+ * goes while it is up — the HUD, the map, the arrow, the pads, the developer's bar.
+ */
+body.finished .gamehud, body.finished #minimap, body.finished .waypoint, body.finished .topbar,
+body.finished .drivepad, body.finished .movepad, body.finished #fsbtn { display: none; }
+
+.finish {
+  position: fixed; inset: 0; z-index: var(--z-modal);
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: var(--s6) clamp(var(--s4), 5vw, var(--s7));
+  pointer-events: none;
+  font-family: var(--font-body); color: var(--ink-1);
+  user-select: none;
+}
+.finish[hidden] { display: none; }
+.fin-panel {
+  pointer-events: auto;
+  width: min(440px, 100%); max-height: 100%; overflow: auto;
+  display: grid; gap: var(--s3); align-content: start;
+  padding: var(--s5) var(--s6);
+  font-size: clamp(13px, 2vmin, 17px);
+  background: color-mix(in srgb, var(--bg-1) 84%, transparent);
+  border: 1px solid var(--line-2); border-radius: var(--r3);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: blur(14px);
+  animation: fin-in 320ms var(--ease) both;
+}
+@keyframes fin-in { from { opacity: 0; transform: translateX(24px); } }
+
+.fin-kicker { font-size: 0.8em; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ok); }
+.fin-kicker[hidden] { display: none; }
+.finish[data-outcome='lose'] .fin-kicker, .finish[data-outcome='abandoned'] .fin-kicker { color: var(--danger); }
+.fin-title { margin: 0; font-size: 1.75em; font-weight: 600; line-height: 1.15; letter-spacing: 0.02em; }
+.finish[data-outcome='win'] .fin-title { color: var(--ink-1); }
+.fin-text { font-size: 0.95em; line-height: 1.5; color: var(--ink-2); }
+.fin-text[hidden] { display: none; }
+
+/* the winnings: the total counts up, the breakdown arrives under it a row at a time */
+.fin-total { display: grid; gap: 2px; padding: var(--s3) 0 var(--s1); border-top: 1px solid var(--line-1); }
+.fin-total[hidden] { display: none; }
+.fin-total-num {
+  font-family: var(--num); font-variant-numeric: tabular-nums;
+  font-size: 2.6em; font-weight: 600; line-height: 1.05; letter-spacing: -0.02em;
+  color: var(--warn);
+}
+.finish.counted .fin-total-num { animation: fin-pop 260ms var(--ease); }
+@keyframes fin-pop { 50% { transform: scale(1.06); } }
+.fin-total-label { font-size: 0.75em; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.fin-lines { display: grid; gap: 2px; }
+.fin-lines[hidden] { display: none; }
+.fin-line {
+  display: flex; justify-content: space-between; gap: var(--s4);
+  font-size: 0.9em; color: var(--ink-2);
+  opacity: 0; transform: translateY(4px); transition: opacity var(--dur-2) var(--ease), transform var(--dur-2) var(--ease);
+}
+.fin-line.in { opacity: 1; transform: none; }
+.fin-line-amount { font-family: var(--num); font-variant-numeric: tabular-nums; color: var(--ink-1); white-space: nowrap; }
+
+.fin-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5em, 1fr)); gap: var(--s2) var(--s4); padding-top: var(--s3); border-top: 1px solid var(--line-1); }
+.fin-stat { display: grid; gap: 1px; }
+.fin-stat-label { font-size: 0.72em; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.fin-stat-value { font-family: var(--num); font-variant-numeric: tabular-nums; font-size: 1.05em; }
+
+/* the buttons: the menu's selection, side by side */
+.fin-actions { display: flex; flex-wrap: wrap; gap: var(--s2); padding-top: var(--s2); }
+.fin-btn {
+  flex: 1 1 auto;
+  font: 500 1em var(--font-body); letter-spacing: 0.03em; color: var(--ink-1);
+  padding: 0.6em 1em; border-radius: var(--r2); cursor: pointer;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  transition: background var(--dur-1), border-color var(--dur-1);
+}
+.fin-btn.selected { background: var(--accent-dim); border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.fin-btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.fin-footer { font-size: 0.72em; color: var(--ink-3); }
+
+/* a tall screen: the turntable on top, the panel along the bottom */
+@media (max-aspect-ratio: 20/21) {
+  .finish { align-items: flex-end; justify-content: center; padding: var(--s4); }
+  .fin-panel { width: 100%; max-width: 560px; max-height: 58vh; padding: var(--s4); }
+  @keyframes fin-in { from { opacity: 0; transform: translateY(24px); } }
+}

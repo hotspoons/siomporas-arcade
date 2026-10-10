@@ -51,7 +51,9 @@ import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
 import { dentObject, flushDents, repairObject } from './game/vehicle/dents'
-import { GameRun, type ModelHost, type ModelPose, type ProgramHost, type TrafficHitInfo, type WeaponTuning } from './game/session/program'
+import { GameRun, type FinishResult, type FinishShow, type ModelHost, type ModelPose, type ProgramHost, type TrafficHitInfo, type WeaponTuning } from './game/session/program'
+import { defaultShow, formatAmount } from './game/session/finish'
+import { FinishView, type FinishButton } from './ui/finishscreen'
 import { loadGameModule } from './game/session/programload'
 import { PROFILES, profile as driveProfile, type DriveProfile } from '@apex/engine/physics/profiles'
 import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './world/placements'
@@ -462,6 +464,8 @@ document.body.append(gameHud.root)
 /** the world stands still while the menu is up: no car, no traffic, no program clock */
 let paused = false
 const RELIEFS = ['1', '1.5', '2', '3', '5']
+/** the stages set in the world on screen (refreshStages), for the menu's level select */
+let stageList: { id: string; name?: string | null }[] = []
 const menu = new GameMenu({
   settings,
   policy,
@@ -532,7 +536,18 @@ const menu = new GameMenu({
   },
   applyAudio: () => applyAudio(),
   applyBindings: () => applyBindings(),
+  // the world's other stages: "Exit to menu" from the finish screen lands here, and so can a level select
+  levels: {
+    list: () => stageList.map((l) => ({ id: l.id, name: l.name || l.id })),
+    current: () => level?.id ?? null,
+    open: (id) => goToStage(id),
+  },
 })
+/** the finish screen: the car on a turntable, the winnings, the way on (ui/finishscreen.ts) */
+const finishView = new FinishView({ sounds })
+document.body.append(finishView.root)
+/** the turntable's programs are compiling: the world keeps drawing (held still) until they are ready */
+let finishCompiling = false
 // the policy moved — a program hid a tab, took the developer view away — and everything that
 // draws from it draws again
 policy.onChange = () => {
@@ -1282,6 +1297,19 @@ async function loadSite(slug: string) {
      */
     project: (lon: number, lat: number) => siteProjector(site!.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat),
     tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
+    /** the level's program run, or null: `goalText`, `score`, `currency`, `outcome`, `result`, `facts()` */
+    get game() { return game },
+    /**
+     * The finish screen: `open`, `result` (what the program ended with), `buttons` (ids on screen),
+     * `choose(id)` presses one as the player would, `draws` the last frame's calls and triangles.
+     */
+    finish: {
+      get open() { return finishView.open && !finishView.capturePending },
+      get result() { return game?.result ?? null },
+      get buttons() { return [...finishView.root.querySelectorAll<HTMLButtonElement>('.fin-btn')].map((b) => b.dataset.id ?? '') },
+      get draws() { return { calls: finishView.lastCalls, triangles: finishView.lastTriangles } },
+      choose: (id: string) => { finishView.root.querySelector<HTMLButtonElement>(`.fin-btn[data-id="${id}"]`)?.click() },
+    },
     /**
      * GAME MODE, for probes: which view is on, what the program has allowed, the player's
      * settings, the Escape menu and the pause it holds. `chrome.mode` is what is SHOWN
@@ -1639,6 +1667,7 @@ async function refreshStages() {
     const r = await fetch(`${DATA_BASE}/api/levels`, { cache: 'no-cache' })
     if (r.ok) levels = (((await r.json()) as { levels?: { id: string; world: string; name?: string | null; launch?: boolean; home?: boolean }[] }).levels ?? []).filter((l) => l.world === slug)
     launchLevelId = levels.find((l) => l.launch)?.id ?? levels.find((l) => l.home)?.id ?? null
+    stageList = levels
   } catch {
     /* no editor behind this page */
   }
@@ -1801,16 +1830,22 @@ let level: Awaited<ReturnType<typeof loadLevel>> = null
 /** the stage a finished or failed run returns to, when the level says `home` */
 let launchLevelId: string | null = null
 
-function advanceStage(outcome: 'win' | 'lose' | 'abandoned'): void {
-  if (outcome === 'abandoned' || !level) return
+/** the stage this outcome leads to (the level's `next`, or `onFail`), or null to stay */
+function stageAfter(outcome: 'win' | 'lose' | 'abandoned'): string | null {
+  if (outcome === 'abandoned' || !level) return null
   const raw = outcome === 'win' ? level.next : (level.onFail ?? level.next)
   const go = raw === 'home' || raw === '' ? launchLevelId : typeof raw === 'string' ? raw : null
-  if (!go || go === level.id) return
-  window.setTimeout(() => {
-    const u = new URL(location.href)
-    u.searchParams.set('level', go)
-    location.href = u.toString()
-  }, 1400)
+  return !go || go === level.id ? null : go
+}
+function goToStage(id: string): void {
+  const u = new URL(location.href)
+  u.searchParams.set('level', id)
+  location.href = u.toString()
+}
+/** a run that ended with no finish screen moves on by itself, as it always did */
+function advanceStage(outcome: 'win' | 'lose' | 'abandoned'): void {
+  const go = stageAfter(outcome)
+  if (go) window.setTimeout(() => goToStage(go), 1400)
 }
 /** the level's traffic, once a level with a traffic simulation has opened */
 let traffic: TrafficLayer | null = null
@@ -2241,6 +2276,7 @@ async function startProgram(path: string): Promise<boolean> {
 }
 
 function stopProgram() {
+  if (finishView.open) closeFinish()
   programWaypoint = null
   // a program's restrictions end with it: the developer view, the map, the settings all come back
   policy.reset()
@@ -2255,6 +2291,98 @@ function stopProgram() {
   if (!drive.on) clearStatus()
 }
 
+/*
+ * THE FINISH SCREEN. Rich, 2026-10-10: *"when the mission is complete we should have a finish screen
+ * that defaults to showing the hero car or main character depending on game mode, along with a
+ * representation of winnings (cash for our simple game), and an option to restart or exit to menu."*
+ *
+ * The program's ending (`api.finish`, `win`, `lose`) arrives at `onFinish` with a result; when the
+ * result says `screen`, the world is held still the way the menu holds it — no car, no traffic, no
+ * clock — and the screen goes up over a blurred copy of the last frame (ui/finishscreen.ts). The
+ * next stage, when the level names one, is a button now rather than a reload 1.4 s after the line.
+ */
+async function showFinish(r: FinishResult): Promise<void> {
+  if (finishView.open) return
+  if (menu.open) menu.close()
+  document.body.classList.remove('paused')
+  paused = true
+  input.suppressGameplay = true
+  // whatever is held as the line is crossed (the handbrake is Space) is not a press on the screen
+  input.menuOpened()
+  drive.input.throttle = drive.input.brake = drive.input.steer = 0
+  drive.input.handbrake = false
+  ui.drawer.set(false)
+  syncAudible()
+  const onFoot = !drive.on && !!fly?.walk
+  let kind: FinishShow = r.show ?? defaultShow({ driving: drive.on && !!drive.car, onFoot, hasCar: !!drive.car || !!playerModel })
+  const subject = await finishSubject(kind, r.model)
+  // a car was asked for and there is none anywhere: the figure, rather than an empty stage
+  if (kind === 'car' && !subject) kind = 'character'
+  const buttons: FinishButton[] = []
+  const next = stageAfter(r.outcome)
+  if (next) buttons.push({ id: 'next', label: 'Next stage', hint: stageList.find((l) => l.id === next)?.name ?? next, run: () => { closeFinish(); goToStage(next) } })
+  if (policy.allows('game.restart')) buttons.push({ id: 'restart', label: 'Restart', hint: 'the level from the top', run: () => { closeFinish(); restartLevel() } })
+  buttons.push({ id: 'exit', label: 'Exit to menu', run: () => exitFinishToMenu() })
+  document.body.classList.add('finished')
+  finishView.show(r, { kind, subject, buttons, pad: input.padConnected })
+  finishCompiling = true
+  await finishView.prepare(renderer)
+  finishCompiling = false
+}
+
+/** take the screen down; the world stays held until whoever called this lets it go */
+function closeFinish(): void {
+  finishView.close()
+  finishCompiling = false
+  document.body.classList.remove('finished')
+}
+
+/** "Exit to menu": the Escape menu's root, over the world where the run ended */
+function exitFinishToMenu(): void {
+  closeFinish()
+  paused = false
+  pause()
+}
+
+/**
+ * What stands on the turntable. A catalog model when the program named one; the car AS IT IS ON
+ * SCREEN — the level's model, the build's paint, the run's dents — cloned with its geometry and
+ * materials shared; null for the stand-in figure (or nothing at all for 'none').
+ */
+async function finishSubject(kind: FinishShow, model: string | null): Promise<THREE.Object3D | null> {
+  if (kind === 'none') return null
+  if (model) {
+    const catalog = placeCatalog ?? (await loadCatalog().catch(() => null))
+    const entry = catalog?.get(model)
+    const m = entry ? await loadAssetModel(entry).catch(() => null) : null
+    if (entry && m) return fitModel(m, entry, entry.height_m)
+    toast(`finish screen: no model "${model}" in the library — showing the ${kind}`, 'warn', 5000)
+  }
+  if (kind !== 'car') return null
+  const car = drive.car
+  let copy: THREE.Object3D | null = null
+  if (car) {
+    // from the outside: the cockpit view hides the body and shows the dash
+    car.setCockpit(false)
+    copy = car.mesh.clone(true)
+    car.setCockpit(drive.cockpit)
+  } else if (playerModel) {
+    copy = playerModel.object.clone(true)
+    copy.visible = true
+  }
+  if (!copy) return null
+  // the headlamps and the tail lamps are the world's lights; the turntable brings its own
+  const lights: THREE.Object3D[] = []
+  copy.traverse((o) => { if ((o as THREE.Light).isLight) lights.push(o) })
+  for (const l of lights) l.removeFromParent()
+  return copy
+}
+
+/** the score as the HUD writes it: money when the program named a currency, points otherwise */
+function scoreText(g: GameRun): string {
+  return formatAmount(g.score, g.currency ?? '')
+}
+
 /**
  * The objective block of the game HUD, every frame: the program's goal, score and outcome, and
  * the race in progress. `setObjective` writes the DOM only when something changed.
@@ -2266,7 +2394,7 @@ function updateObjective() {
     ? `${st.course?.name ?? 'race'} · ${st.time.toFixed(1)} s${st.laps > 1 ? ` · lap ${st.lap}/${st.laps}` : ''}`
     : null
   if ((!game || hudHidden) && !race) { gameHud.setObjective(null); return }
-  gameHud.setObjective({ goal: hudHidden ? '' : (game?.goalText ?? ''), score: hudHidden ? 0 : (game?.score ?? 0), outcome: hudHidden ? null : (game?.outcome ?? null), race })
+  gameHud.setObjective({ goal: hudHidden ? '' : (game?.goalText ?? ''), score: hudHidden ? 0 : (game?.score ?? 0), scoreText: game && !hudHidden ? scoreText(game) : undefined, outcome: hudHidden ? null : (game?.outcome ?? null), race })
 }
 
 /**
@@ -2278,12 +2406,13 @@ function updateObjective() {
 function showGame() {
   if (!game || hudHidden) return
   const line = game.outcome
-    ? `${game.outcome === 'win' ? 'WIN' : game.outcome === 'lose' ? 'LOSE' : 'abandoned'} · ${game.score} pts`
-    : `${game.score} pts`
+    ? `${game.outcome === 'win' ? 'WIN' : game.outcome === 'lose' ? 'LOSE' : 'abandoned'} · ${scoreText(game)}`
+    : scoreText(game)
   if (line !== gameLine) {
     const first = gameLine === ''
     gameLine = line
-    if (game.outcome) toast(line, game.outcome === 'win' ? 'ok' : 'warn', 8000)
+    // the finish screen says it bigger; the toast is for an ending that has none
+    if (game.outcome) { if (!game.result?.screen) toast(line, game.outcome === 'win' ? 'ok' : 'warn', 8000) }
     else if (!first && game.score) toast(line, 'info', 2000)
   }
 }
@@ -2551,7 +2680,8 @@ function programHost(): ProgramHost {
     },
     mark: (id, at, kind) => zoneMarks.set(`mark:${id}`, at, kind || 'pickup', site?.groundAt(at.x, -at.y) ?? 0),
     unmark: (id) => zoneMarks.remove(`mark:${id}`),
-    onFinish: (outcome) => advanceStage(outcome),
+    // the finish screen when the program's ending asks for one; otherwise on to the next stage as before
+    onFinish: (outcome, result) => { if (result?.screen) void showFinish(result); else advanceStage(outcome) },
     ui: {
       // a program's choice of view is for this run: not remembered as the player's
       mode: (m) => { uiMode = m; applyUiMode() },
@@ -3981,6 +4111,12 @@ addEventListener('keydown', (e) => {
    *   developer view      LEAVE THE RACE first (Rich, 2026-09-29: "the ability to exit the race"),
    *                       then the results are cleared, then the menu
    */
+  // the finish screen reads its keys by polling, like the menu; Escape is its "Exit to menu"
+  if (finishView.open) {
+    if (e.code === 'Escape') { e.preventDefault(); finishView.back(); return }
+    if (e.code.startsWith('Arrow') || e.code === 'Space' || e.code === 'Enter' || e.code === 'Tab') e.preventDefault()
+    return
+  }
   if (e.code === 'Escape') {
     if (menu.open) { e.preventDefault(); menu.escape(); return }
     if (minimap?.expanded) return
@@ -4243,9 +4379,10 @@ function frame() {
    * the keydown handler); while the menu is up it gets the edges and the world gets nothing.
    */
   input.poll(dt)
-  if (menu.open) menu.handle(input.ui)
+  if (finishView.open) finishView.handle(input.ui)
+  else if (menu.open) menu.handle(input.ui)
   else if (input.ui.pause) pause()
-  if (!menu.open) for (const a of PAD_HOTKEYS) if (input.padHotkey(a)) hotkey(a)
+  if (!menu.open && !finishView.open) for (const a of PAD_HOTKEYS) if (input.padHotkey(a)) hotkey(a)
   // the frame's own clock, for the performance panel: `real` is the gap between frames, and the
   // work we do inside this function is measured separately so the two can be compared
   const cpu0 = performance.now()
@@ -4695,11 +4832,13 @@ function frame() {
   tickShading()
   followShadow()
   skyDome.tick(performance.now() / 1000)
+  // the finish screen is up and its backdrop copied: the world is not drawn at all, nor its probes
+  const finishing = finishView.open && !finishView.capturePending
   // the car's own reflection probe: one cube render at the car, at most once a frame, and none
   // unless CAR_PROBES > 0. The car is hidden from its own capture.
-  tickCarProbe(renderer, scene, drive.on && drive.car ? drive.car.pos : camera.position, drive.car?.mesh ?? null)
+  if (!finishing) tickCarProbe(renderer, scene, drive.on && drive.car ? drive.car.pos : camera.position, drive.car?.mesh ?? null)
   // per-body reflection probes, at most one capture a frame and none unless WATER_PROBES > 0
-  tickWaterProbes(renderer, scene, camera)
+  if (!finishing) tickWaterProbes(renderer, scene, camera)
   // where the car is, for whoever is not in it (fly, walk, or a craft). The camera is settled by
   // now, so the on-screen/off-screen test is against the frame about to be drawn.
   beacon.update(camera, !drive.on && drive.car ? drive.car.pos : null, dt)
@@ -4714,7 +4853,9 @@ function frame() {
   }
   fpMark('shading')
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0
-  if (perfHud.open) {
+  if (finishing) {
+    finishView.render(renderer, real)
+  } else if (perfHud.open) {
     // Time each pass as it is submitted. `poll` first collects whatever the GPU finished since last
     // frame. The profiler skips a pass whose previous query has not landed, so it never stalls here.
     const prof = gpuProfiler()
@@ -4730,6 +4871,12 @@ function frame() {
     renderWaterReflection(renderer, scene, camera)
     if (composer) composer.render()
     else renderer.render(scene, camera)
+  }
+  // THE LAST FRAME OF THE WORLD, copied in the same task it was drawn in (the canvas is not kept
+  // after it is presented), then the finish screen over it from this frame on
+  if (finishView.open && finishView.capturePending && !finishCompiling) {
+    finishView.capture(renderer.domElement)
+    finishView.render(renderer, 0)
   }
   /*
    * MEASURED AFTER THE RENDER CALL, which is the honest place: `renderer.info` holds the counts of

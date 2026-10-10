@@ -392,7 +392,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     /* ---- what an agent needs to know before it writes anything ------------------------------ */
     T(
       'program_api',
-      'The program API’s declarations — the TypeScript a level program is written against: `@apex/program` (GameApi: objectives, models, player, zones, timers, physics, traffic, races, stunts, the interface). Read it before writing a program; program_check and the editor’s code_check check against exactly this text. `module` picks one of the other importable modules (actors, actorworld, ecsconfig, traffic, races, zones, stunts, objectives, vehicles, trafficsets).',
+      'The program API’s declarations — the TypeScript a level program is written against: `@apex/program` (GameApi: objectives, models, player, zones, timers, physics, traffic, races, stunts, the interface, the score as winnings — `score.currency/add/set` — and `finish({ outcome, title, winnings, stats, show })`, which ends a run on the finish screen). Read it before writing a program; program_check and the editor’s code_check check against exactly this text. `module` picks one of the other importable modules (actors, actorworld, ecsconfig, traffic, races, zones, stunts, objectives, vehicles, trafficsets).',
       { module: str('default: program') },
       [],
       async (a) => ({ ...(await declarations(a.module ?? 'program')), modules: await modules() }),

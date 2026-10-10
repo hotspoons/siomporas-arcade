@@ -44,6 +44,7 @@ Paused
   Abandon the race            only while one is on
   Leave the car / Drive       only while the policy allows transport
   Mute
+  Levels ▸                    the world's other stages — only when it has more than one
   Settings ▸
     Display ▸                 season · style · relief · trees · weather · AA · perf · units · theme · hide interface
     Layers ▸                  every LAYER_GROUPS toggle
@@ -96,6 +97,115 @@ export default defineGame({
 
 Everything defaults to on. Every restriction ends when the program stops (`policy.reset()` in
 `stopProgram`). A dry run has no interface and every call is a no-op.
+
+## Finishing
+
+Rich, 2026-10-10: *"when the mission is complete we should have a finish screen that defaults to
+showing the hero car or main character depending on game mode, along with a representation of
+winnings (cash for our simple game), and an option to restart or exit to menu. This should all
+have API hooks that are in the example game engine code in the editor."*
+
+### What a program says
+
+The score is the winnings — one number, not a second "money" beside the points:
+
+```ts
+api.score.currency('$')                 // money on the HUD and the finish screen; '' or null is points
+api.score.add(20, 'Hits')               // a line of the breakdown; the same label again adds and counts
+api.score.set(500, 'Time bonus')        // that line, exactly; with no label, the total exactly
+api.award(7)                            // still works: score.add(7) with no label
+api.score.get(); api.score.lines()      // 527; [{ label: 'Hits', amount: 20, count: 1 }, …]
+```
+
+And the run ends with a result:
+
+```ts
+api.finish({
+  outcome: 'win',                       // default; 'lose', 'abandoned'
+  title: 'Beltway cleared',             // default "Mission complete" / "Mission failed" / "Mission abandoned"
+  text: 'Five appointments kept.',      // under the headline, and said on screen as the run ends
+  winnings: { currency: '$', total: 2_310_000, lines: [{ label: 'Fees', amount: 2_150_000, count: 5 }] },
+  stats: [{ label: 'Legs', value: '5/5' }, { label: 'Top speed', value: '142 mph' }],
+  show: 'car',                          // 'character' | 'none'; absent: the car driving, the character on foot
+  model: 'some-catalog-id',             // a library asset on the turntable instead
+  screen: false,                        // this ending draws its own screen
+})
+api.on('finish', (r) => { /* r: FinishResult — everything the screen is about to show */ })
+defineGame({ finishScreen: false, setup(api) { … } })   // never the app's screen for this program
+```
+
+`win(text)` and `lose(text)` are `finish({ outcome, text })`. Every field is optional; `winnings`
+absent is the score as it stands (null when nothing was ever scored and no currency named),
+`winnings: null` is "nothing worth a count-up". The first ending is the only one. A run the
+program never ended — the level closed, a restart — is abandoned with no screen; an abandon gets
+the screen only when the program says `finish({ outcome: 'abandoned' })`. The order is
+`on('ends')` listeners, then `on('finish')`, then the app. A dry run (the editor's, a test's)
+has no screen and nothing throws; the Program pane's dry-run report gains a "finish screen" line.
+
+### What the player sees
+
+`src/ui/finishscreen.ts`. The world is held still the way the menu holds it (the car, the traffic,
+the physics, the program's clock), and the screen goes up: on the left the car **as it is on
+screen** — the level's model, the build's paint, the run's dents — slowly turning on a turntable,
+lit like the library's mesh viewer (room environment, key + rim, ACES for this pass only); on the
+right a panel in the menu's own tokens with the headline, the program's line, the total counting
+up (ease-out, 0.9–2.4 s, landing exactly — cents only when there are cents), the breakdown arriving
+a row at a time ("Hits ×12 — $240"), the time and the program's stats, and the buttons:
+
+- **Next stage** — only when the level names one for this outcome (`next`, `onFail`). A finish
+  screen replaces the old automatic jump 1.4 s after the line; with no screen it still jumps.
+- **Restart** — the Escape menu's own restart (`restartLevel`): back to the start point, the car
+  straightened, the program's `setup` again on a fresh clock. Hidden by `ui.settings.hide('game.restart')`.
+- **Exit to menu** — the Escape menu's root, over the world where the run ended. The root now
+  has **Levels ▸** when the world has more than one stage (`game.levels` hides it).
+
+Arrows / the stick move, Enter / Space / A / Start choose, Escape / Backspace / B is Exit. Nothing
+can be chosen for the first 0.8 s (the handbrake is Space, and it is often held across the line);
+the first press during the count-up finishes the count instead. A tall screen puts the panel along
+the bottom and the turntable above it. The sting is synthesised on the interface bus (master ×
+interface volume, silent when muted) — a rising arpeggio for a win, a falling one otherwise — because
+the sound bank has crashes, guns and tyres and nothing that sounds like an ending.
+
+With no car anywhere (flying from the start of a carless level) `show: 'car'` falls back to the
+figure. The figure is a stand-in mannequin: the library's actors are unrigged and on foot is a
+camera, so there is no player character model yet — `model:` puts any library asset there.
+
+### What it costs
+
+The world is **not drawn** while the screen is up. The frame the run ended on is drawn once more
+and copied off the canvas into a sixth-size texture in the same task (before the browser presents
+it, so no `preserveDrawingBuffer`); after that each frame is two passes on the app's own renderer
+— that copy blurred and darkened in one 25-tap full-screen quad, then the turntable. Measured on crofton-triangle with `probes/corridor-finish.mjs` (headless, software
+GL — the agent box has no GPU, so these are counts and relative times, not a real card's
+milliseconds):
+
+| | draw calls | triangles | frame interval p50 / p95 (SwiftShader) |
+|---|---|---|---|
+| the world, driving | 150 | 3,176,197 | 1,433 / 10,683 ms |
+| the finish screen, the default car | 30 | 948 | 450 / 4,050 ms |
+| the finish screen, the figure | 13 | 2,340 | — |
+
+One full-screen quad (25 taps on a sixth-size texture) and the subject is a rounding error on any
+real card; what is left of the frame under the screen is the CPU work the paused world still does
+(the tile and tree pumps). The one-off costs are on the frame the screen opens: the copy
+(`drawImage` of the canvas, a few ms), the room environment (one PMREM, made once per page), and
+the turntable's shader programs, compiled with `compileAsync` before the swap so they are not a
+hitch — the world keeps drawing, held still, until they are ready (1.5 s at most).
+A CSS `backdrop-filter` over the live world was the alternative: it keeps paying for the world
+every frame and blurs the car with it.
+
+### Probing it
+
+```
+PORT=5198 OUT=/tmp/shots node probes/corridor-finish.mjs [slug]
+```
+
+The probe serves its own level and program by route (nothing is written to a world editor), and
+checks the screen is hidden until the finish, the count-up lands on the reported total, the world's
+draw calls stop, the turntable turns, the keys move and choose, Restart is a second `setup` on a
+fresh clock, Escape lands on the menu's root with Levels, and `'character'` (asked for, and by
+default on foot) puts the figure up. From a console or a bridge: `corridor.finish` — `open`,
+`result`, `buttons`, `choose(id)`, `draws`.
 
 ## The map's double-click
 

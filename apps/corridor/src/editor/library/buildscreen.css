@@ -319,3 +319,18 @@
   .tab-panel.lib-screen .material-right { overflow: visible; }
   .tab-panel.lib-screen .material-list { flex: none; max-height: none; overflow: visible; }
 }
+
+/* ---- the catalog's sources (assets.ts `sourceOf`) ---------------------------------------------- */
+/*
+ * Where a row comes from, on the row: built-in (ships with the game, cannot be redrawn), shared
+ * (editing it changes every world) or this world's own. Small and quiet — the state chip on the
+ * right is still the thing the list is read for.
+ */
+.asset-src {
+  display: inline-block; margin-right: 4px; padding: 0 5px; border-radius: var(--r1);
+  font-size: 10px; line-height: 1.5; letter-spacing: 0.02em; vertical-align: 1px;
+  border: 1px solid var(--line-1); color: var(--ink-3); background: var(--bg-2);
+}
+.asset-src.src-built-in { color: var(--warn, #e2b34a); border-color: color-mix(in srgb, var(--warn, #e2b34a) 35%, transparent); }
+.asset-src.src-world { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
+.chip.scope-builtin { color: var(--warn, #e2b34a); border-color: color-mix(in srgb, var(--warn, #e2b34a) 40%, transparent); }

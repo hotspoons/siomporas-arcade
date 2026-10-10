@@ -1996,6 +1996,7 @@ function fireGun(dt: number): void {
         return toi === null ? null : from.clone().addScaledVector(d, toi)
       },
       groundAt: (x, z) => site?.groundAt(x, z) ?? null,
+      lowerAt: (x, z) => site?.physGroundAt(x, z) ?? null,
       // a round that lands on a car knocks it loose and shoves it; one on a soft prop breaks it
       onHit: ({ at, dir }) => {
         const w = weaponsNow()
@@ -2078,6 +2079,7 @@ function ensureMissiles(): MissileLayer | null {
         return toi === null ? null : from.clone().addScaledVector(d, toi)
       },
       groundAt: (x, z) => site?.groundAt(x, z) ?? null,
+      lowerAt: (x, z) => site?.physGroundAt(x, z) ?? null,
       onHit: (at) => {
         const w = weaponsNow()
         boom(at, { radius: w.missileRadius, impulse: w.missileImpulse, lift: w.missileLift, breakAt: 1, damage: w.missileDamage, weapon: 'missile' })

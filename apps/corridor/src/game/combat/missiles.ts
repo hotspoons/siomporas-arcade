@@ -10,6 +10,7 @@
 // numbers are the rocket launcher's from weaponpresets.ts, over the F6 knobs.
 
 import * as THREE from 'three'
+import { surfaceCrossing } from './surface'
 import * as T from '../../tuning'
 
 export interface MissileHit {
@@ -73,6 +74,8 @@ export class MissileLayer {
   /** the first solid thing along a segment, or null: the app supplies it from the physics world */
   private hitTest: (from: THREE.Vector3, to: THREE.Vector3) => THREE.Vector3 | null
   private groundAt: (x: number, z: number) => number | null
+  /** the ground UNDER a deck at a crossing (`site.physGroundAt`); absent, `groundAt` is all there is */
+  private lowerAt: ((x: number, z: number) => number | null) | null
   private onHit: (at: MissileHit) => void
   /** the round's model, pointing +X — a fixture override or the built-in; null draws the cone */
   model: (() => THREE.Object3D) | null = null
@@ -82,10 +85,11 @@ export class MissileLayer {
   /** where the last one landed, for a probe */
   lastHit: MissileHit | null = null
 
-  constructor(o: { hitTest: MissileLayer['hitTest']; groundAt: MissileLayer['groundAt']; onHit: MissileLayer['onHit'] }) {
+  constructor(o: { hitTest: MissileLayer['hitTest']; groundAt: MissileLayer['groundAt']; lowerAt?: (x: number, z: number) => number | null; onHit: MissileLayer['onHit'] }) {
     this.group.name = 'missiles'
     this.hitTest = o.hitTest
     this.groundAt = o.groundAt
+    this.lowerAt = o.lowerAt ?? null
     this.onHit = o.onHit
   }
 
@@ -135,8 +139,9 @@ export class MissileLayer {
       m.flown += m.vel.length() * dt
       let at: THREE.Vector3 | null = this.hitTest(m.pos, next)
       if (!at) {
-        const g = this.groundAt(next.x, next.z)
-        if (g !== null && next.y <= g + 0.2) at = new THREE.Vector3(next.x, g + 0.2, next.z)
+        // the deck over a crossing is a slab, not the ground: under it the road goes on (surface.ts)
+        const g = surfaceCrossing(m.pos.y, next, this.groundAt, this.lowerAt, 0.2)
+        if (g !== null) at = new THREE.Vector3(next.x, g, next.z)
       }
       if (at || m.flown > 500 || m.age > 8) {
         this.group.remove(m.mesh)

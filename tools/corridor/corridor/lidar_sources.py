@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +45,7 @@ from typing import Iterator
 
 import laspy
 import numpy as np
+import requests
 import shapely
 from pyproj import CRS, Transformer
 from shapely.geometry import Polygon, box, shape
@@ -408,15 +410,62 @@ class Occupancy:
         return float((self.hit & self.want).sum() / max(1, self.want.sum()))
 
 
-def _read_node(src: EptSource, key: str, cache: Path, tr: Transformer, zf: float, bbox, clip) -> dict | None:
-    from .lidar import session
+class NodeReader:
+    """Reads one EPT node into the site frame, clipped to the streets — from ANY thread of the pool.
 
-    path = cache / "ept" / src.slug / "data" / f"{key}.laz"
-    if not path.exists():
+    WHY EVERY THREAD HAS ITS OWN CLIP. dc-metro-take-2 shard 5 (2026-10-10, 17:39 UTC) walked
+    222,212 Virginia nodes, started the sixteen readers, and two seconds later glibc aborted the
+    process: `malloc(): unaligned tcache chunk detected`, exit 133, no Python traceback. The readers
+    shared ONE shapely polygon, the streets' outline, and each called `shapely.contains_xy` on it.
+    That call prepares the geometry in place and then releases the GIL, and GEOS builds a prepared
+    polygon's point locator, and that locator's STR tree, LAZILY on first use and with no lock
+    (`PreparedPolygon::getPointLocator`, then `IndexedPointInAreaLocator::locate` -> the tree's
+    `build()`). Two threads in their first clip test together both build it; one frees what the
+    other is still filling. Reproduced off-cluster on the baker image's own Python, glibc and wheels
+    (shapely 2.2.0 / GEOS 3.14.1, and 2.1.2 / 3.13.1 aborts the same way): sixteen threads released
+    together onto shard 5's own streets polygon abort with `double free or corruption` in the first
+    round, every run, and gdb puts the `free()` inside
+    `TemplateSTRtreeImpl<IndexedPointInAreaLocator::SegmentView, IntervalTraits>::build()` under
+    `GEOSPreparedContains_r`. Earlier bakes ran this same code and finished because the window is
+    only the FIRST clip test of each source's pool: a race, not a data problem.
+
+    So nothing native crosses threads here: each worker thread builds its own clip (from WKB, which
+    is the same doubles bit for bit) and prepares it, its own pyproj Transformer, and its own HTTP
+    session, on its first node. pyproj's Transformer is already per-thread inside, and a Session is
+    pure Python; building them per thread costs a few milliseconds per source and makes the rule
+    one sentence instead of three library-specific exceptions.
+    """
+
+    def __init__(self, src: EptSource, cache: Path, crs_from, crs_to, zf: float, bbox, clip: BaseGeometry | None):
+        self.src, self.cache, self.zf, self.bbox = src, cache, zf, tuple(bbox)
+        self.crs_from, self.crs_to = crs_from, crs_to
+        # bytes, not a geometry: the only form of the clip the threads ever see
+        self.clip_wkb = None if clip is None else shapely.to_wkb(clip)
+        self._local = threading.local()
+
+    def kit(self) -> "_Kit":
+        """This thread's clip, transformer and session, built the first time it asks."""
+        k = getattr(self._local, "kit", None)
+        if k is None:
+            from .lidar import session as shared
+
+            clip = None
+            if self.clip_wkb is not None:
+                clip = shapely.from_wkb(self.clip_wkb)
+                shapely.prepare(clip)
+            sess = requests.Session()
+            sess.headers.update(shared.headers)
+            k = self._local.kit = _Kit(clip, Transformer.from_crs(self.crs_from, self.crs_to, always_xy=True), sess)
+        return k
+
+    def fetch(self, key: str, session: requests.Session) -> Path:
+        path = self.cache / "ept" / self.src.slug / "data" / f"{key}.laz"
+        if path.exists():
+            return path
         path.parent.mkdir(parents=True, exist_ok=True)
         for attempt in range(3):
             try:
-                r = session.get(src.base + f"ept-data/{key}.laz", timeout=300)
+                r = session.get(self.src.base + f"ept-data/{key}.laz", timeout=300)
                 r.raise_for_status()
                 break
             except Exception:
@@ -429,24 +478,38 @@ def _read_node(src: EptSource, key: str, cache: Path, tr: Transformer, zf: float
             tmp.replace(path)
         finally:
             tmp.unlink(missing_ok=True)
-    las = laspy.read(path)
-    x, y = tr.transform(np.asarray(las.x), np.asarray(las.y))
-    x, y = np.asarray(x), np.asarray(y)
-    xmin, ymin, xmax, ymax = bbox
-    m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
-    if clip is not None and m.any():
-        idx = np.flatnonzero(m)
-        m[idx[~shapely.contains_xy(clip, x[idx], y[idx])]] = False
-    if not m.any():
-        return None
-    z = np.asarray(las.z)[m]
-    return {
-        "x": x[m], "y": y[m], "z": z * zf if zf != 1.0 else z,
-        "cls": np.asarray(las.classification)[m].astype(np.uint8),
-        "rn": np.asarray(las.return_number)[m].astype(np.uint8),
-        "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
-        "i": np.asarray(las.intensity)[m].astype(np.uint16),
-    }
+        return path
+
+    def __call__(self, key: str) -> dict | None:
+        k = self.kit()
+        las = laspy.read(self.fetch(key, k.session))
+        x, y = k.tr.transform(np.asarray(las.x), np.asarray(las.y))
+        x, y = np.asarray(x), np.asarray(y)
+        xmin, ymin, xmax, ymax = self.bbox
+        m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
+        if k.clip is not None and m.any():
+            idx = np.flatnonzero(m)
+            m[idx[~shapely.contains_xy(k.clip, x[idx], y[idx])]] = False
+        if not m.any():
+            return None
+        z = np.asarray(las.z)[m]
+        zf = self.zf
+        return {
+            "x": x[m], "y": y[m], "z": z * zf if zf != 1.0 else z,
+            "cls": np.asarray(las.classification)[m].astype(np.uint8),
+            "rn": np.asarray(las.return_number)[m].astype(np.uint8),
+            "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
+            "i": np.asarray(las.intensity)[m].astype(np.uint16),
+        }
+
+
+@dataclass
+class _Kit:
+    """One pool thread's own native objects (see NodeReader)."""
+
+    clip: BaseGeometry | None
+    tr: Transformer
+    session: requests.Session
 
 
 def _join(parts: list[dict]) -> dict:
@@ -510,8 +573,7 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
             continue
         first = not used
         before = occ.share()
-        tr = Transformer.from_crs(crs, frame.crs, always_xy=True)
-        zf = z_factor(src.ept)
+        read = NodeReader(src, cache, crs, frame.crs, z_factor(src.ept), bbox, clip)
         print(f"  lidar   {src.label()}: {len(keys)} nodes to depth {depth} (~{density:.1f} pts/m² where it covers){'' if first else f', filling {1 - before:.0%} of the streets it left empty'}", flush=True)
         t0 = time.time()
         got = 0
@@ -523,7 +585,7 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
         n = 0
         done = 0
         with ThreadPoolExecutor(jobs) as ex:
-            for part in ex.map(lambda k: _read_node(src, k, cache, tr, zf, bbox, clip), keys):
+            for part in ex.map(read, keys):
                 done += 1
                 if part is not None:
                     if not first:

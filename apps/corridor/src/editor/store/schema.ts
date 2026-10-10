@@ -7,6 +7,7 @@
 // seeding the areas this editor then tunes, so the two must agree on the shape exactly.
 
 import type { Manifest } from '../../world/site'
+import { param } from '../../url'
 
 /** Every knob an area can turn. NOTHING may be added here without telling the main agent: the
  *  viewer (scene.ts) consumes this key set to decide what a polygon does to trees, grass, the
@@ -224,7 +225,7 @@ export const SLIDERS: SliderDef[] = [
 ]
 
 // `location` guarded: the pure parts of this module (the frame check) are unit-tested under node
-const base = typeof location === 'undefined' ? '' : (new URLSearchParams(location.search).get('data') ?? '')
+const base = param('data') ?? ''
 /** Saving writes through the dev middleware; a remote ?data= bucket is read-only. */
 export const CAN_SAVE = base === ''
 

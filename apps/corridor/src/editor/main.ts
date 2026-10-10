@@ -163,6 +163,7 @@ import { Labels, type LabelItem } from './view/labels'
 import { ClickCycle, rankHits, type PickHit } from './view/pickorder'
 import { outlineMesh } from './view/drape'
 import { DocWatch } from './store/docwatch'
+import { param } from '../url'
 // an old link's `:races` and `:grow` are the Points and Place tabs now
 const hashMode = location.hash.split(':')[1]
 let mode: Mode = (hashMode === 'races' ? 'points' : hashMode === 'grow' ? 'place' : (hashMode as Mode)) || 'areas'
@@ -1032,7 +1033,7 @@ canvas.addEventListener('pointerleave', () => { hoverEvent = null; setHover(null
  * DOCUMENTS CHANGED ON DISK — an agent's traffic_zone_add, point_add or course_save while this is
  * open. See store/docwatch.ts. Every eight seconds while the editor is the thing on screen.
  */
-const watch = new DocWatch(new URLSearchParams(location.search).get('data') ?? '')
+const watch = new DocWatch(param('data') ?? '')
 const docPaths = () => docs().map((d) => d.path)
 function docs(): { path: string; file: string; mode: { dirty: boolean }; reload: () => Promise<unknown>; reselect: () => void }[] {
   const s = site

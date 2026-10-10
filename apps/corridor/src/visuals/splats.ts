@@ -27,6 +27,7 @@ import { geodeticToEcef, enuBasis } from '@apex/engine/geo/wgs84'
 import { DATA_BASE } from '../world/site'
 import * as T from '../tuning'
 import { angleBetween, shouldResort } from './splatsort'
+import { param } from '../url'
 
 /** `world.json` as gaussworks' merge writes it */
 interface SplatWorld {
@@ -458,7 +459,7 @@ export class SplatField {
 
 /** what a site says it has attached; `?splats=<world>` attaches one by hand for testing */
 export async function attachmentsFor(slug: string): Promise<SplatAttachment[]> {
-  const override = new URLSearchParams(location.search).get('splats')
+  const override = param('splats')
   if (override === 'off') return []
   if (override) return [{ id: override, base: `/splats/${override}/`, enabled: true }]
   try {

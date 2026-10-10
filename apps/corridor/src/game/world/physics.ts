@@ -36,6 +36,7 @@ import type { Site } from '../../world/scene'
 import { toDriveProfile, toVehicleSpec, type VehicleDoc } from '../vehicle/vehicles'
 import { catalogue, detachInstance, detachedOffset, type PropRecord } from './worldbodies'
 import * as T from '../../tuning'
+import { param } from '../../url'
 
 export interface CorridorPhysics {
   readonly phys: PhysicsWorld
@@ -561,7 +562,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       // `?profile=stunts` beats the knob, like `?phys=` and `?car=` — and this is the one that
       // matters most, because driving the Stunts PROFILE against the kinematic model it was ported
       // from is the only real test of the port, and it should not need a panel to set up.
-      const fromUrl = new URLSearchParams(location.search).get('profile')
+      const fromUrl = param('profile')
       const id = profileId ?? (fromUrl && PROFILES[fromUrl] ? fromUrl : T.physProfileId())
       /*
        * THE DOCUMENT'S OWN NUMBERS, ON THE LEVEL'S CHOICE OF PROFILE.

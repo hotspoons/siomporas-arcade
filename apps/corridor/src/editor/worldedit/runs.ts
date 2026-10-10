@@ -15,6 +15,7 @@ import { bodyOf, empty, group, readout } from '../../ui/controls'
 import { icon } from '../../ui/icons'
 import { api, type Run, type World } from './api'
 import { downloadBakeGroup } from './transfer'
+import { format as gameHash } from '../../url'
 
 const STATE_KIND: Record<Run['state'], 'info' | 'ok' | 'warn' | 'danger'> = {
   starting: 'info',
@@ -264,12 +265,13 @@ export class RunsPanel {
           button({
             label: 'Open in the viewer',
             icon: 'globe-alt',
-            onClick: () => window.open(`/index.html?site=${world.slug}`, '_blank'),
+            onClick: () => window.open(`/index.html${gameHash({ slug: world.slug })}`, '_blank'),
           }),
           button({
             label: 'Open in the editor',
             icon: 'pencil-square',
-            onClick: () => window.open(`/editor.html?site=${world.slug}`, '_blank'),
+            // the site editor's own hash, `#slug[:mode]` (editor/main.ts) — it never read `?site=`
+            onClick: () => window.open(`/editor.html#${encodeURIComponent(world.slug)}`, '_blank'),
           }),
         )
       }

@@ -2,6 +2,7 @@
 // origin (the photo fix projected to UTM), z in metres NAVD88. Keep this in step with export.py.
 
 import { reliefHeights } from '../visuals/relief'
+import { param } from '../url'
 
 /**
  * A geodetic control lattice over a raster: `n*n` lon/lat samples, row-major, rows running SOUTH
@@ -374,7 +375,7 @@ export interface IndexEntry {
 }
 
 /** Where the bake is served from. Dev: the Vite middleware. Later: an R2 public URL via ?data= */
-export const DATA_BASE = new URLSearchParams(location.search).get('data') ?? ''
+export const DATA_BASE = param('data') ?? ''
 
 export async function fetchJSON<T>(path: string): Promise<T> {
   const r = await fetch(`${DATA_BASE}${path}`, { cache: 'no-cache' })

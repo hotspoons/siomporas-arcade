@@ -49,6 +49,7 @@ import { injectShade } from '../visuals/shading'
 import { reliefManifest } from '../visuals/relief'
 import { TreeShadowCasters } from '../lod/treeshadows'
 import { isBackgrounded } from './pageactive'
+import { param } from '../url'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
 
@@ -654,7 +655,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
    */
   /** the bake graded this pyramid (and wrote its deck runs and driveway heights to match) */
   const bakeGraded = !!(pyrSet && L.pyramid?.graded)
-  const gradedBake = bakeGraded && !adjustments.active && new URLSearchParams(location.search).get('grade') !== 'runtime'
+  const gradedBake = bakeGraded && !adjustments.active && param('grade') !== 'runtime'
   /**
    * A RASTER CANNOT HOLD A STEP. The formula is discontinuous wherever two carriageways at
    * different heights stand within a pixel of each other — an interchange ramp on its main line,

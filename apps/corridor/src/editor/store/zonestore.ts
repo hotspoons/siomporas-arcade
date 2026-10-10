@@ -7,6 +7,7 @@
 // deliberately identical, including the "a missing file is not an error" rule.
 
 import type { ZoneDoc } from '../../game/world/zones'
+import { param } from '../../url'
 
 /**
  * A published viewer is read-only, so authoring is off there.
@@ -15,7 +16,7 @@ import type { ZoneDoc } from '../../game/world/zones'
  * not pull the adjustment schema in: `?data=` pointed at a bucket means somebody is looking at a
  * published world, and a PUT would 403 in a way that reads as a bug in the editor.
  */
-const base = new URLSearchParams(location.search).get('data') ?? ''
+const base = param('data') ?? ''
 export const CAN_SAVE_ZONES = base === ''
 
 export async function loadZones(slug: string): Promise<ZoneDoc> {

@@ -79,7 +79,8 @@ import { STYLE, styled, isStyle, type Style } from './visuals/style'
 import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './visuals/relief'
 import { WorldClock, sunPosition, sunVector } from './visuals/sun'
 import { SplatField, attachmentsFor } from './visuals/splats'
-import { antialiasFor, bootSlug, hashWorld, noteCaptureAttached, postAAFor, setWorldHash } from './visuals/render'
+import { antialiasFor, bootSlug, noteCaptureAttached, postAAFor } from './visuals/render'
+import * as url from './url'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
@@ -109,6 +110,19 @@ import { crashSlot, type SoundOverrides } from './game/audio/soundbank'
 import { downloadJSON, readJSONFile } from './ui/files'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
+
+/*
+ * THE ADDRESS, CANONICAL FROM HERE ON: `/#world?k=v&flag` (url.ts). An old link — the options
+ * before the hash, `#/world`, the world editor's `?site=` — is rewritten in the bar before anything
+ * else runs; everything reads through url.ts, which folds the old forms in anyway, so the modules
+ * that read an option at load time (before this line) see the same values.
+ *
+ * And a hash typed into the bar (or a probe's `goto` to this page with another hash) loads it:
+ * with the options in the hash, a change to them is no longer a navigation by itself. The page's
+ * own writes are `replaceState`, which never fires `hashchange`.
+ */
+url.canonicalize()
+addEventListener('hashchange', () => location.reload())
 
 const canvas = $<HTMLCanvasElement>('#gl')
 // MSAA is a CONTEXT attribute, so it is decided here and nowhere else: it cannot be
@@ -140,8 +154,8 @@ const antialias = antialiasFor(bootSlug())
 const { renderer } = createRenderer({
   canvas,
   antialias,
-  // ?depth=log (or reversed, standard) for an A/B; anything else is auto
-  depthMode: depthRequestFromURL() ?? 'auto',
+  // #world?depth=log (or reversed, standard) for an A/B; anything else is auto
+  depthMode: depthRequestFromURL(url.query()) ?? 'auto',
   fallback: 'log',
   label: 'corridor',
 })
@@ -292,7 +306,7 @@ let squealWas = 0
  * one without the vehicle document having to say so twice. Filled when the player's vehicle is.
  */
 let playerWeaponSounds: SoundOverrides | null = null
-const uiParam = new URLSearchParams(location.search).get('ui')
+const uiParam = url.param('ui')
 let uiMode: UiMode = resolveUiMode({ param: uiParam, stored: settings.data.ui, prod: import.meta.env.PROD })
 /**
  * The view actually shown. `?ui=` decided where this page STARTED (`resolveUiMode`); after that
@@ -396,27 +410,22 @@ const ui = new ViewerUI({
   onAAChange: () => {
     const slug = site?.manifest.slug ?? bootSlug()
     if (antialiasFor(slug) !== renderer.getContext().getContextAttributes()?.antialias) {
-      const u = new URL(location.href)
-      u.searchParams.delete('aa')
-      location.replace(u.toString())
+      url.navigate({ set: { aa: null } })
       return
     }
     buildPostAA(postAAFor(slug))
   },
   onSite: (slug) => {
-    setWorldHash(slug)
+    url.write({ slug })
     void loadSite(slug)
   },
   onSeason: (s) => setSeason(s),
   onStyle: (s) => setStyle(s),
   onOpenLevel: (id) => {
-    const u = new URL(location.href)
-    if (id) u.searchParams.set('level', id)
-    else u.searchParams.delete('level')
     // a stage over a bare world opens in place; leaving one, or swapping one for another, is a
     // fresh page — a level is not unloadable in place, and a half-unloaded one is worse than a reload
-    if (!id || level) { location.href = u.toString(); return }
-    history.replaceState(null, '', u.toString())
+    if (!id || level) { url.navigate({ set: { level: id || null } }); return }
+    url.write({ set: { level: id } })
     void openLevel(id)
   },
   onTrees: (t) => chooseTrees(t),
@@ -618,10 +627,7 @@ function applyBindings() {
 /** Display → Relief, from the dialog or the menu: the world reloads at the new exaggeration */
 function chooseRelief(k: number) {
   reliefWanted = clampRelief(k)
-  const u = new URL(location.href)
-  if (reliefWanted === 1) u.searchParams.delete('relief')
-  else u.searchParams.set('relief', String(reliefWanted))
-  history.replaceState(null, '', u.toString())
+  url.write({ set: { relief: reliefWanted === 1 ? null : reliefWanted } })
   if (site) void loadSite(site.manifest.slug)
 }
 /** Display → Trees: two knobs, one choice — cards-only is TREE_SIMPLE, the editor's are TREE_LOLLIPOP */
@@ -635,9 +641,7 @@ function chooseAA(v: AAMode) {
   setAAMode(v)
   const slug = site?.manifest.slug ?? bootSlug()
   if (antialiasFor(slug) !== renderer.getContext().getContextAttributes()?.antialias) {
-    const u = new URL(location.href)
-    u.searchParams.delete('aa')
-    location.replace(u.toString())
+    url.navigate({ set: { aa: null } })
     return
   }
   buildPostAA(postAAFor(slug))
@@ -1048,13 +1052,13 @@ resize()
 // loading
 async function loadIndex() {
   const idx = await fetchJSON<{ sites: IndexEntry[] }>('/sites/index.json')
-  const want = readStanceParam()?.site || hashWorld() || idx.sites[0]?.slug
+  const want = readStanceParam()?.site || url.worldSlug() || idx.sites[0]?.slug
   ui.setSites(idx.sites, want ?? '')
   if (want) await loadSite(want)
 }
 
 async function loadSite(slug: string) {
-  setWorldHash(slug)
+  url.write({ slug })
   ui.setSite(slug)
   if (site) {
     scene.remove(site.group)
@@ -1106,8 +1110,8 @@ async function loadSite(slug: string) {
   // world's own look (tuning.json, written by the world editor). It is a load-time transform on
   // every absolute height (relief.ts), so changing it reloads the site.
   {
-    const q = new URLSearchParams(location.search)
-    const fromUrl = q.get('relief') != null ? Number(q.get('relief')) : NaN
+    const q = url.param('relief')
+    const fromUrl = q != null ? Number(q) : NaN
     const fromStance = readStanceParam()?.relief
     const fromWorld = Number.isFinite(fromUrl) || fromStance != null ? undefined : (await loadSiteTuning(slug))?.look?.relief
     reliefWanted = clampRelief(Number.isFinite(fromUrl) ? fromUrl : fromStance ?? fromWorld ?? reliefWanted)
@@ -1130,7 +1134,7 @@ async function loadSite(slug: string) {
   ui.setSearch(null) // the old site's index is meaningless now
   // The start is known before the site is built, so the first kilometre is around the level's
   // point (else the world's home) and not around the bake's photo station.
-  const levelIdEarly = new URLSearchParams(location.search).get('level') ?? await publishedLaunch()
+  const levelIdEarly = url.param('level') ?? await publishedLaunch()
   const [pointsDoc, earlyLevel] = await Promise.all([
     loadPoints(slug),
     levelIdEarly ? loadLevel(levelIdEarly).catch(() => null) : Promise.resolve(null),
@@ -1144,7 +1148,7 @@ async function loadSite(slug: string) {
   // is nothing at all.
   // `?phys=1` / `?phys=0` beats the knob, because the knob is read once and this is the only hook
   // that runs before that happens. Same shape as the `relief` block above.
-  const physParam = new URLSearchParams(location.search).get('phys')
+  const physParam = url.param('phys')
   /*
    * A WORLD WITH STUNTS TURNS THE PHYSICS ON BY ITSELF.
    *
@@ -1165,7 +1169,7 @@ async function loadSite(slug: string) {
    * and a jam you drive straight through is not a jam. So the level named in the URL is read
    * here, once, for that one fact; `openLevel` reads it again for everything else.
    */
-  const levelId = new URLSearchParams(location.search).get('level')
+  const levelId = url.param('level')
   const early = levelId && earlyLevel?.id === levelId ? earlyLevel : levelId ? await loadLevel(levelId).catch(() => null) : null
   const trafficNeedsPhysics = !!early?.simulations?.some((x) => x.kind === 'traffic') || T.TRAFFIC_DENSITY > 0
   physics = await buildPhysics(site, {
@@ -1532,7 +1536,7 @@ async function loadSite(slug: string) {
   // the player's Display ▸ Detail outranks the world's own look file on the knobs it governs
   // (DC's tuning.json sets the hero lamp modes, for one); the panel's own overrides still win
   applyDetail(tuneUI, settings.data.detail ?? 'ultra', false, true)
-  const urlQ = new URLSearchParams(location.search)
+  const urlQ = url.read().params
   const st = readStanceParam()
   const resume = st && st.site === slug ? null : readResume(slug)
   if (st && st.site === slug) {
@@ -1582,7 +1586,7 @@ async function loadSite(slug: string) {
     tuneUI.invalidatePresets()
   }
 
-  const wantLevel = new URLSearchParams(location.search).get('level')
+  const wantLevel = url.param('level')
   if (wantLevel) await openLevel(wantLevel)
   else {
     const id = await publishedLaunch()
@@ -1825,9 +1829,7 @@ function stageAfter(outcome: 'win' | 'lose' | 'abandoned'): string | null {
   return !go || go === level.id ? null : go
 }
 function goToStage(id: string): void {
-  const u = new URL(location.href)
-  u.searchParams.set('level', id)
-  location.href = u.toString()
+  url.navigate({ set: { level: id } })
 }
 /** a run that ended with no finish screen moves on by itself, as it always did */
 function advanceStage(outcome: 'win' | 'lose' | 'abandoned'): void {
@@ -3040,7 +3042,7 @@ function setDrive(on: boolean) {
        */
       // `?car=rapier` beats the knob, for the same reason `?phys=1` does: this is read once, when
       // drive mode is first entered, and `tune.set` persists nothing across a reload.
-      const carParam = new URLSearchParams(location.search).get('car')
+      const carParam = url.param('car')
       /*
        * AND A WORLD WITH STUNTS DRIVES THE PHYSICS CAR, for the same reason it starts the physics
        * at all: the kinematic car samples the terrain height under itself, so it drives THROUGH a
@@ -3162,7 +3164,7 @@ function goToStructure(st: Structure) {
 
 // phone: bottom-sheet panel and on-screen drive buttons. LITE is also how the scene builder
 // knows to hand a phone GPU a quarter of the vertices and a 4k texture instead of a 22 MP one.
-export const LITE = matchMedia('(pointer: coarse)').matches || innerWidth < 900 || new URLSearchParams(location.search).has('lite')
+export const LITE = matchMedia('(pointer: coarse)').matches || innerWidth < 900 || url.hasParam('lite')
 document.getElementById('fsbtn')?.addEventListener('click', () => {
   if (document.fullscreenElement) void document.exitFullscreen()
   else void document.documentElement.requestFullscreen()
@@ -3262,10 +3264,10 @@ function applyMove(dt: number) {
 }
 
 // season: sky, fog, ground tint here; leaves and grass in the scene
-let season: Season = (new URLSearchParams(location.search).get('season') as Season) || 'summer'
+let season: Season = (url.param('season') as Season) || 'summer'
 if (!SEASONS.includes(season)) season = 'summer'
 // style: realistic is the bake as measured; ?style=fantasy is the first palette that is not Crofton
-const styleParam = new URLSearchParams(location.search).get('style')
+const styleParam = url.param('style')
 let style: Style = isStyle(styleParam) ? styleParam : 'realistic'
 /** terrain exaggeration for the next load; 1 is the world as measured (see relief.ts) */
 let reliefWanted = 1
@@ -3772,7 +3774,7 @@ function applyAutoGear() {
  * preset base — the level still picks the game, the car keeps its own engine, grip and aero.
  */
 function playerSourceProfile(): DriveProfile {
-  const fromUrl = new URLSearchParams(location.search).get('profile')
+  const fromUrl = url.param('profile')
   const id = playerSpawnBase ?? (fromUrl && PROFILES[fromUrl] ? fromUrl : T.physProfileId())
   const doc = playerVehicle ?? (T.PHYS_CAR_SOURCE > 0 ? defaultVehicle('hero-car') : null)
   return doc
@@ -3861,7 +3863,7 @@ function saveResume() {
   } catch { /* private window, or the quota is full: losing the resume point is not worth a throw */ }
 }
 function readResume(slug: string): Stance | null {
-  if (new URLSearchParams(location.search).has('fresh')) return null
+  if (url.hasParam('fresh')) return null
   try {
     const all = JSON.parse(localStorage.getItem(RESUME_KEY) ?? '{}') as Record<string, Stance>
     const st = all[slug]
@@ -3871,15 +3873,15 @@ function readResume(slug: string): Stance | null {
   }
 }
 function stanceUrl(st: Stance): string {
-  const u = new URL(location.href)
-  u.searchParams.set('stance', btoa(JSON.stringify(st)))
-  u.searchParams.set('season', st.season)
-  if (st.style && st.style !== 'realistic') u.searchParams.set('style', st.style)
-  else u.searchParams.delete('style')
-  if (st.relief && st.relief !== 1) u.searchParams.set('relief', String(st.relief))
-  else u.searchParams.delete('relief')
-  u.hash = st.site
-  return u.toString()
+  return url.href({
+    slug: st.site,
+    set: {
+      stance: btoa(JSON.stringify(st)),
+      season: st.season,
+      style: st.style && st.style !== 'realistic' ? st.style : null,
+      relief: st.relief && st.relief !== 1 ? st.relief : null,
+    },
+  })
 }
 function applyStance(st: Stance) {
   ui.setLayers(st.layers)
@@ -3912,13 +3914,7 @@ function applyStance(st: Stance) {
   }
 }
 function readStanceParam(): Stance | null {
-  const raw = new URLSearchParams(location.search).get('stance')
-  if (!raw) return null
-  try {
-    return JSON.parse(atob(raw)) as Stance
-  } catch {
-    return null
-  }
+  return url.decodeStance<Stance>(url.param('stance'))
 }
 /**
  * Strip `?stance=` once it has been applied.
@@ -3930,24 +3926,21 @@ function readStanceParam(): Stance | null {
  * the per-site resume point, so a plain reload lands where the link did.
  */
 function clearStanceParam(): void {
-  const u = new URL(location.href)
-  if (!u.searchParams.has('stance')) return
-  u.searchParams.delete('stance')
-  history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`)
+  if (url.hasParam('stance')) url.write({ set: { stance: null } })
 }
 async function copyStance() {
   const st = captureStance()
   if (!st) return
-  const url = stanceUrl(st)
+  const link = stanceUrl(st)
   // The clipboard only. This used to also rewrite the address bar, so the page's own URL changed
   // under you every time you pressed C — Rich: "copy a link to this view replaces the URL for no
   // reason" (2026-09-26). The address bar is left alone; if the clipboard is blocked the link is
   // printed to the console instead, which is where a blocked clipboard's caller is looking anyway.
   try {
-    await navigator.clipboard.writeText(url)
+    await navigator.clipboard.writeText(link)
     toast('view copied to the clipboard', 'ok')
   } catch {
-    console.log(url)
+    console.log(link)
     toast('clipboard blocked — the view link is in the console', 'warn')
   }
 }

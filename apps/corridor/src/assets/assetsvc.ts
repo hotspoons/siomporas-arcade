@@ -14,6 +14,8 @@
 // completely without it, so every call here can fail and the UI's job is to say "no service"
 // rather than to break.
 
+import { param } from '../url'
+
 export interface AssetItem {
   id: string
   subject: string
@@ -152,7 +154,7 @@ export interface ModelRoster {
 }
 
 function baseUrl(): string {
-  const q = new URLSearchParams(location.search).get('assetsvc')
+  const q = param('assetsvc')
   if (q) return q.replace(/\/$/, '')
   const built = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_ASSETSVC
   if (built) return built.replace(/\/$/, '')

@@ -49,7 +49,7 @@ NIR = 77
 RGBN = ("red", "green", "blue", "undefined")
 
 
-def write_cog(path: Path, ubox, res: float, colour, hole=None, crs="EPSG:26918", marker=None, white=(), order=RGBN) -> None:
+def write_cog(path: Path, ubox, res: float, colour, hole=None, crs="EPSG:26918", marker=None, white=(), order=RGBN, discs=(), boxes=()) -> None:
     """A 4-band (RGB+NIR, like NAIP) COG of one flat colour over a UTM box, with an optional
     all-zero `hole` box (a quarter-quad's black collar) and an optional white `marker` box. Band 4
     is NIR with an UNDEFINED colour interpretation, exactly as the real NAIP COGs have it (not
@@ -64,6 +64,16 @@ def write_cog(path: Path, ubox, res: float, colour, hole=None, crs="EPSG:26918",
         hx0, hy0, hx1, hy1 = hole
         a[:, int((y1 - hy1) / res) : int((y1 - hy0) / res), int((hx0 - x0) / res) : int((hx1 - x0) / res)] = 0
     rgb = [order.index(c) for c in ("red", "green", "blue")]
+    yy, xx = np.mgrid[0:h, 0:w]
+    px_x, px_y = x0 + (xx + 0.5) * res, y1 - (yy + 0.5) * res
+    for cx, cy, rad, col in discs:  # e.g. a cloud
+        m = (px_x - cx) ** 2 + (px_y - cy) ** 2 <= rad * rad
+        for k, v in zip(rgb, col):
+            a[k][m] = v
+    for (bx0, by0, bx1, by1), col in boxes:  # e.g. a roof
+        m = (px_x >= bx0) & (px_x < bx1) & (px_y >= by0) & (px_y < by1)
+        for k, v in zip(rgb, col):
+            a[k][m] = v
     for wx0, wy0, wx1, wy1 in white:
         a[rgb, int(round((y1 - wy1) / res)) : int(round((y1 - wy0) / res)), int(round((wx0 - x0) / res)) : int(round((wx1 - x0) / res))] = 255
     if marker is not None:
@@ -421,6 +431,21 @@ class OneYearTest(_Base):
         meta, west, _e, _c = self.bake(cat)
         self.assertEqual(meta["year"]["year"], 2023)
 
+    def test_within_the_year_the_state_covering_most_of_the_world_leads(self):
+        # MD 2021-06 covers 90 % of the world, VA 2021-09 the western half; where both have ground
+        # the later date used to win (VA's hazy September across downtown DC). Now MD leads, and
+        # VA shows only where MD has nothing — the seam sits at the edge of MD's coverage.
+        cat = self.cat(("md_2021", (355060, 4317900, 355700, 4318700), "2021-06-17", BLUE, {}),
+                       ("va_2021", WEST, "2021-09-10", PURPLE, {}))
+        meta, _w, _e, _c = self.bake(cat)
+        self.assertEqual(meta["year"]["year"], 2021)
+        self.assertEqual(meta["year"]["state_order"], ["md", "va"])
+        with rasterio.open(self.dir / "naip_1m.tif") as ds:
+            px = lambda x: tuple(int(v) for v in ds.read(window=rasterio.windows.Window(int((x - AREA[0]) / 0.6), 500, 1, 1))[:, 0, 0])
+            self.assertTrue(self.near(px(355200), BLUE), px(355200))   # both cover: Maryland leads
+            self.assertTrue(self.near(px(355020), PURPLE), px(355020))  # only Virginia: Virginia
+        self.assertIn("md > va", meta["rule"])
+
     def test_the_year_is_in_the_cache_name(self):
         tiles = {}
         for tag in ("y2021", "y2023"):
@@ -428,6 +453,40 @@ class OneYearTest(_Base):
             tiles[tag] = naip.plan_tiles(FRAME, AREA, 0.6, self.cache, policy=pol)[0][2].pc.name
         self.assertNotEqual(tiles["y2021"], tiles["y2023"])
         self.assertTrue(tiles["y2021"].endswith("y2021.jpg"))
+
+
+class CloudTest(_Base):
+    """A cloud is bright where another flight over the same ground is not; a white roof is white in
+    every flight. The Shaw cumulus in VA 2021-09-10 is the real case (12.6 ha, 81 brighter). Opt-in
+    (CORRIDOR_NAIP_CLOUDS=1): it also took water glint for cloud."""
+
+    def compose(self, env=None):
+        d = self.dir
+        cloud, small, roof = (355150, 4318450, 120), (355450, 4318150, 50), (355350, 4318350, 355550, 4318550)
+        white, roof_c = (235, 235, 232), (240, 240, 238)
+        write_cog(d / "a.tif", ALL, 0.6, GREY, discs=[(*cloud, white), (*small, white)], boxes=[(roof, roof_c)])
+        write_cog(d / "b.tif", ALL, 0.6, (60, 100, 60), boxes=[(roof, roof_c)])
+        items = [naip_pc.item_from_feature(feature("a", d / "a.tif", ALL, 2021, 0.6, "va", date="2021-09-10")),
+                 naip_pc.item_from_feature(feature("b", d / "b.tif", ALL, 2021, 0.6, "md", date="2021-06-17"))]
+        with mock.patch.dict(os.environ, env or {}):
+            arr, used = naip_pc.compose(FRAME, AREA, 0.6, items, year=2021, states=("va", "md"))
+        px = lambda x, y: tuple(int(v) for v in arr[:, int((AREA[3] - y) / 0.6), int((x - AREA[0]) / 0.6)])
+        return px, [u.id for u in used]
+
+    def test_a_cloud_is_a_hole_the_other_flight_fills_and_a_roof_is_not(self):
+        px, used = self.compose({"CORRIDOR_NAIP_CLOUDS": "1"})
+        self.assertEqual(px(355150, 4318450), (60, 100, 60))   # the 4.5 ha cloud: the other flight's ground
+        self.assertEqual(px(355450, 4318450), (240, 240, 238))  # the 4 ha white roof, white in both: kept
+        self.assertEqual(px(355450, 4318150), (235, 235, 232))  # a 0.8 ha cloud is let through (conservative)
+        self.assertEqual(px(355050, 4318100), GREY)             # ground away from the cloud: still flight a
+        self.assertEqual(used, ["a", "b"])
+
+    def test_the_cloud_mask_is_off_unless_asked(self):
+        # it took Tidal Basin sun glint for a 33 ha cloud on the dc central block: opt-in only
+        os.environ.pop("CORRIDOR_NAIP_CLOUDS", None)
+        px, used = self.compose()
+        self.assertEqual(px(355150, 4318450), (235, 235, 232))
+        self.assertEqual(used, ["a"])
 
 
 class RegistrationTest(_Base):

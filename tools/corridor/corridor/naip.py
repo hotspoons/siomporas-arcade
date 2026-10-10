@@ -257,8 +257,9 @@ def read_tile(t: Tile) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(path.read_bytes())).convert("RGB"))
 
 
-def _fetch_pc_tile(t: Tile, frame: Frame, items: list, tries: int, year: int | None = None) -> None:
-    arr, used = naip_pc.compose(frame, t.bbox, t.res, items, jobs=1, tries=tries, year=year)
+def _fetch_pc_tile(t: Tile, frame: Frame, items: list, tries: int, policy=None) -> None:
+    arr, used = naip_pc.compose(frame, t.bbox, t.res, items, jobs=1, tries=tries,
+                                year=policy.year if policy else None, states=policy.states if policy else ())
     buf = io.BytesIO()
     Image.fromarray(np.ascontiguousarray(np.moveaxis(arr, 0, -1))).save(buf, format="JPEG", quality=90)
     # the sidecar first: the .jpg is what says "cached", so it must never exist without its items
@@ -319,7 +320,7 @@ def fetch_tiles(frame: Frame, tiles: list[Tile], label: str = "naip", jobs: int 
     def one(t: Tile) -> str:
         if mode != "usgs" and breaker["down"] is None:
             try:
-                _fetch_pc_tile(t, frame, items or [], naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES, policy.year if policy else None)
+                _fetch_pc_tile(t, frame, items or [], naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES, policy)
                 return "pc"
             except Exception as exc:
                 if mode == "pc":
@@ -357,7 +358,7 @@ def provenance(tiles: list[Tile], mode: str | None = None, policy=None) -> dict:
     names = {"pc": "Planetary Computer NAIP (USDA quarter-quad COGs)", "usgs": "USGS NAIPPlus ImageServer (current mosaic)"}
     out: dict = {"source": " + ".join(names[k] for k in sorted(by_source)) or None, "tiles_by_source": by_source}
     if by_source.get("pc"):
-        lead = (f"one year: {policy.year}'s leaf-on items first, finer first ({policy.why}); then " if policy and policy.year is not None
+        lead = (f"one year: {policy.year}'s leaf-on items first, by state ({' > '.join(policy.states)}: most of the world first), then finer, then later ({policy.why}); then " if policy and policy.year is not None
                 else (f"{policy.why}; " if policy else ""))
         out["rule"] = lead + naip_pc.ranking_rule()
         if policy is not None:
@@ -549,7 +550,7 @@ def fetch_horizon_image(frame: Frame, out: Path, bbox: tuple[float, float, float
             items = naip_pc.search(frame.bbox_wgs(*bbox), tries=tries)
             if items:
                 pol = naip_pc.year_policy(frame, bbox, tries=tries)
-                arr, used = naip_pc.compose(frame, bbox, res, items, jobs=max(8, _jobs()), tries=tries, year=pol.year)
+                arr, used = naip_pc.compose(frame, bbox, res, items, jobs=max(8, _jobs()), tries=tries, year=pol.year, states=pol.states)
                 buf = io.BytesIO()
                 Image.fromarray(np.ascontiguousarray(np.moveaxis(arr, 0, -1))).save(buf, format="JPEG", quality=90)
                 _atomic_write(out, buf.getvalue())

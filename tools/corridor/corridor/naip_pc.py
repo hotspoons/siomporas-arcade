@@ -85,6 +85,20 @@ GAP_MIN_FRAC = 0.0005
 #: ground. A white rectangle at least this big (and filling its own bounding box) is treated as a
 #: hole, so the next item fills it. A saturated white roof is far smaller, or not a full rectangle.
 REDACT_MIN_M2 = 10_000.0
+#: CLOUD. Virginia's 2021-09-10 flight has a 12 ha cumulus over Shaw, DC. Brightness, low
+#: saturation and smoothness find it — and also find big white warehouse roofs and the gravel of the
+#: National Mall (measured on dc-metro's central block, 2026-10-10), so a candidate is only called
+#: cloud when ANOTHER flight over the same ground is much darker there: a roof is white every year,
+#: a cloud is there once. Even that is fooled by real change — a 1.5 ha white roof that carried solar
+#: panels by 2023, a 1.4 ha Mall lawn panel covered in September 2021 — so a blob must also be at
+#: least 3 ha: the Shaw cloud is 12.6 ha; its 1.6 ha fragment is let through, which is the side to
+#: err on (a missed cloud is better than a roof from another year). And it is still fooled: on the
+#: dc central block it called sun glint on the Tidal Basin in Maryland's 2021-06 flight a 33 ha cloud
+#: and swapped in Virginia's September water, no better. Not reliable enough to run unasked, so it is
+#: OFF unless CORRIDOR_NAIP_CLOUDS=1 (2026-10-10).
+CLOUD_MIN_M2 = 30_000.0
+CLOUD_LUM, CLOUD_SAT, CLOUD_TEX = 165.0, 40.0, 10.0
+CLOUD_DARKER = 35.0   # median luminance drop, cloud flight minus the other, to call it cloud
 
 #: GDAL over HTTP. The COGs are 512 px blocks, pixel-interleaved: merge adjacent ranges into one
 #: request and keep the headers cached so re-opening an item at an overview level is free.
@@ -261,7 +275,7 @@ def rule_tag() -> str:
     """The ranking knobs as a cache-name suffix: a piece composed under one rule is never reused
     under another (changing CORRIDOR_NAIP_LEAF_ON* re-reads, it does not silently keep old pieces)."""
     lo, hi = leaf_on_months()
-    return f"lo{lo}-{hi}y{leaf_on_years()}"
+    return f"lo{lo}-{hi}y{leaf_on_years()}" + ("c" if clouds_enabled() else "")
 
 
 def rgb_bands(asset: dict) -> tuple[int, int, int] | None:
@@ -375,11 +389,25 @@ class YearPolicy:
     coverage: dict = field(default_factory=dict)
 
     @property
+    def states(self) -> tuple[str, ...]:
+        """The chosen year's states, the one covering most of the WORLD first (then by name).
+
+        Within 2021 over DC the later date won, so Virginia's hazy 2021-09-10 flight, cloud and
+        all, took downtown and the seam ran north-south through the city (coordinator review of
+        dc12_leaf_vs_year.jpg, 2026-10-10). Maryland's 2021-06-17 covers 82 % of the world against
+        Virginia's 39 %: leading with it puts downtown on one flight and the seam at the edge of
+        Maryland's coverage, which is about the Potomac."""
+        by = (self.coverage or {}).get("by_state") or {}
+        return tuple(sorted(by, key=lambda st: (-by[st], st)))
+
+    @property
     def tag(self) -> str:
-        return f"y{self.year}" if self.year is not None else ("yoff" if self.why.startswith("off") else "ynone")
+        if self.year is None:
+            return "yoff" if self.why.startswith("off") else "ynone"
+        return f"y{self.year}" + (f"-{'.'.join(self.states)}" if self.states else "")
 
     def record(self) -> dict:
-        return {"year": self.year, "why": self.why, "coverage": self.coverage}
+        return {"year": self.year, "why": self.why, "coverage": self.coverage, "state_order": list(self.states)}
 
 
 def year_setting() -> str:
@@ -432,11 +460,13 @@ def year_policy(frame, area_bbox, tries: int = TRIES) -> YearPolicy:
     return YearPolicy(None, f"no leaf-on year covers {100 * (1 - year_max_bare()):.0f}% of the area ({best}): the per-pixel ranking")
 
 
-def rank_with_year(item: Item, year: int | None):
-    """The order under a YearPolicy: the chosen year's leaf-on items first (finer, then later), then
-    everything else in `Item.rank_key` order — which is the whole order when `year` is None."""
+def rank_with_year(item: Item, year: int | None, states: tuple[str, ...] = ()):
+    """The order under a YearPolicy: the chosen year's leaf-on items first — the state covering most
+    of the world first (`YearPolicy.states`), then finer, then later — then everything else in
+    `Item.rank_key` order, which is the whole order when `year` is None."""
     if year is not None and item.year == year and item.leaf_on():
-        return (0, item.gsd, tuple(-int(p) for p in item.date.split("-")))
+        st = states.index(item.state) if item.state in states else len(states)
+        return (0, st, item.gsd, tuple(-int(p) for p in item.date.split("-")))
     return (1, *item.rank_key())
 
 
@@ -543,6 +573,32 @@ def redacted(sub: np.ndarray, res: float) -> np.ndarray:
     return ndimage.binary_dilation(out, iterations=2) if out.any() else out
 
 
+def clouds_enabled() -> bool:
+    return os.environ.get("CORRIDOR_NAIP_CLOUDS", "0").strip().lower() in ("1", "on", "yes", "true")
+
+
+def cloud_candidates(sub: np.ndarray, res: float) -> list:
+    """`(slice, mask)` for each bright, grey, smooth blob of at least CLOUD_MIN_M2 in a (3, h, w)
+    piece. Candidates only: white roofs pass this too, `compose` asks another flight."""
+    from scipy import ndimage
+
+    a = sub.astype(np.float32)
+    lum = a.mean(axis=0)
+    cand = (lum > CLOUD_LUM) & (a.max(axis=0) - a.min(axis=0) < CLOUD_SAT)
+    if cand.sum() * res * res < CLOUD_MIN_M2:
+        return []
+    m = ndimage.uniform_filter(lum, 9)
+    tex = np.sqrt(np.maximum(ndimage.uniform_filter(lum * lum, 9) - m * m, 0))
+    cand = ndimage.binary_opening(cand & (tex < CLOUD_TEX), iterations=3)
+    lab, _n = ndimage.label(cand)
+    out = []
+    for i, sl in enumerate(ndimage.find_objects(lab), 1):
+        blob = lab[sl] == i
+        if blob.sum() * res * res >= CLOUD_MIN_M2:
+            out.append((sl, blob))
+    return out
+
+
 def _gap_geometry(gap: np.ndarray, x0: float, y1: float, res: float, cells: int = 32):
     """The holes in `gap` as a union of coarse cell boxes in the frame CRS, for the footprint test."""
     h, w = gap.shape
@@ -556,7 +612,8 @@ def _gap_geometry(gap: np.ndarray, x0: float, y1: float, res: float, cells: int 
     return shapely.union_all(boxes) if boxes else None
 
 
-def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: int = TRIES, max_fill: int = 12, year: int | None = None):
+def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: int = TRIES, max_fill: int = 12,
+            year: int | None = None, states: tuple[str, ...] = ()):
     """The (3, h, w) RGB mosaic of `items` over a frame-CRS bbox at `res`, and the items that fed it.
 
     Pass 1 reads the PLAN: items in rank order that each add footprint the ones before them did not
@@ -573,7 +630,7 @@ def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: in
     piece = box(xmin, ymin, xmax, ymax)
     out = np.zeros((3, h, w), dtype=np.uint8)
     gap = np.ones((h, w), dtype=bool)
-    cands = sorted((it for it in items if it.footprint_in(frame).intersects(piece)), key=lambda it: rank_with_year(it, year))
+    cands = sorted((it for it in items if it.footprint_in(frame).intersects(piece)), key=lambda it: rank_with_year(it, year, states))
     plan: list[Item] = []
     bare = piece
     for it in cands:
@@ -595,12 +652,41 @@ def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: in
             print(f"  naip    SKIPPED {it.id}: {exc}", flush=True)
             return it, (r0, r1, c0, c1), None
 
+    def cloud(it: Item, win, sub) -> np.ndarray:
+        """Pixels of `sub` that are cloud: a candidate blob that another flight sees much darker."""
+        mask = np.zeros(sub.shape[1:], dtype=bool)
+        if not clouds_enabled():
+            return mask
+        r0, _r1, c0, _c1 = win
+        for sl, blob in cloud_candidates(sub, res):
+            ys, xs = sl
+            bx0, by1 = xmin + (c0 + xs.start) * res, ymax - (r0 + ys.start) * res
+            bw, bh = xs.stop - xs.start, ys.stop - ys.start
+            bb = box(bx0, by1 - bh * res, bx0 + bw * res, by1)
+            ref = next((o for o in cands if o.id != it.id and o.footprint_in(frame).contains(bb.centroid)), None)
+            if ref is None:
+                continue
+            try:
+                other = warp_item(ref, frame, bx0, by1, res, bw, bh, tries)
+            except Exception:  # noqa: BLE001 — no second opinion is not a cloud
+                continue
+            seen = blob & (other != 0).any(axis=0)
+            if seen.sum() < 0.8 * blob.sum():
+                continue
+            drop = np.median(sub[:, sl[0], sl[1]].astype(np.float32).mean(axis=0)[seen] - other.astype(np.float32).mean(axis=0)[seen])
+            if drop > CLOUD_DARKER:
+                from scipy import ndimage
+
+                mask[sl] |= ndimage.binary_dilation(blob, iterations=6) & ~mask[sl]
+                print(f"  naip    cloud {blob.sum() * res * res / 1e4:.1f} ha in {it.id} ({drop:.0f} brighter than {ref.id}): a hole", flush=True)
+        return mask
+
     def paste(it: Item, win, sub) -> None:
         if sub is None:
             return
         r0, r1, c0, c1 = win
         g = gap[r0:r1, c0:c1]
-        take = g & (sub != 0).any(axis=0) & ~redacted(sub, res)
+        take = g & (sub != 0).any(axis=0) & ~redacted(sub, res) & ~cloud(it, win, sub)
         if take.any():
             out[:, r0:r1, c0:c1][:, take] = sub[:, take]
             g[take] = False

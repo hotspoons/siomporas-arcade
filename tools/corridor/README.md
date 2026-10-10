@@ -182,7 +182,11 @@ free SAS token — no account, no credentials; it is refreshed when it nears `ms
 Open Data NAIP buckets were measured too and are requester-pays, so they are not used. ONE YEAR
 first (Rich, 2026-10-10): over the whole area being baked — the WORLD's bbox, so every shard picks
 the same — the newest year whose leaf-on items cover all but `CORRIDOR_NAIP_YEAR_MAX_BARE` (default
-2 %) of what any year covers is read alone, finer first; everything else only fills its holes.
+2 %) of what any year covers is read alone — the state covering most of the world first (over DC,
+Maryland's 2021-06 at 82 % before Virginia's hazy 2021-09 at 39 %), then finer, then later —
+and everything else only fills its holes. A cloud mask (bright, grey, smooth blobs ≥ 3 ha that
+another flight sees ≥ 35 darker) exists but is OFF unless `CORRIDOR_NAIP_CLOUDS=1`: it found the
+12.6 ha cloud over Shaw and also took sun glint on the Tidal Basin for a 33 ha one.
 dc-metro-take-2 picks 2021 (MD June, VA September; 2023 covers 81.9 %, Virginia's 2023 is leaf-off),
 crofton-triangle 2023 at 0.3 m. `CORRIDOR_NAIP_YEAR=auto|<yyyy>|off`; `off`, or no year covering
 enough, is the per-pixel ranking that follows, and `naip.year` in the manifest says which and why

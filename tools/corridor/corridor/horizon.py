@@ -71,27 +71,22 @@ def fetch_horizon(frame: Frame, out: Path, cache: Path, radius_m: float = 30000.
         raise RuntimeError(f"3DEP exportImage returned {r.headers.get('content-type')}: {r.text[:200]}")
     out.write_bytes(r.content)
     print(f"  horizon {size}x{size} @ {RES:g} m, ±{radius_m / 1000:g} km", flush=True)
-    fetch_horizon_naip(frame, out.with_name("horizon_naip_60m.jpg"), radius_m)
-    return {"file": out.name, "res_m": RES, "radius_m": radius_m, "size": [size, size], "source": "USGS 3DEP seamless (1/3 arc-second)", "imagery": "horizon_naip_60m.jpg"}
+    imagery = fetch_horizon_naip(frame, out.with_name("horizon_naip_60m.jpg"), radius_m)
+    meta = {"file": out.name, "res_m": RES, "radius_m": radius_m, "size": [size, size], "source": "USGS 3DEP seamless (1/3 arc-second)", "imagery": "horizon_naip_60m.jpg"}
+    if imagery:
+        meta["imagery_source"] = imagery
+    return meta
 
 
-NAIP = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
-
-
-def fetch_horizon_naip(frame: Frame, out: Path, radius_m: float, res: float = 60.0) -> None:
+def fetch_horizon_naip(frame: Frame, out: Path, radius_m: float, res: float = 60.0) -> dict | None:
     """Colour for the far terrain: NAIP resampled to 60 m over the same square. Without it the
     horizon is a hypsometric ramp, which reads as beige from the road; with it the ridges are the
-    forest-green and field-tan they actually are."""
+    forest-green and field-tan they actually are. From the Planetary Computer or the ImageServer —
+    `naip.fetch_horizon_image` chooses, as every NAIP read does (CORRIDOR_NAIP_SOURCE)."""
+    from . import naip
+
     if out.exists():
-        return
+        return None
     ox, oy = frame.origin
     size = int(round(2 * radius_m / res))
-    r = _get_with_retry(
-        NAIP,
-        params={"bbox": f"{ox - radius_m},{oy - radius_m},{ox + radius_m},{oy + radius_m}", "bboxSR": frame.epsg, "imageSR": frame.epsg, "size": f"{size},{size}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "f": "image"},
-        timeout=300,
-    )
-    r.raise_for_status()
-    if r.headers.get("content-type", "").startswith("image"):
-        out.write_bytes(r.content)
-        print(f"  horizon imagery {size}x{size} @ {res:g} m", flush=True)
+    return naip.fetch_horizon_image(frame, out, (ox - radius_m, oy - radius_m, ox + radius_m, oy + radius_m), size)

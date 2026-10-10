@@ -29,7 +29,7 @@ tools/corridor/.venv/bin/python -m corridor flora all     # backfill flora.json 
 | `osm.geojson` | every tagged way/node in the corridor, raw tags | OSM (Overpass) |
 | `crossings.json` | ways that cross the spine, and OSM's guess whether they pass over or under | OSM |
 | `dem_1m.tif` | bare earth, 1 m | USGS 3DEP via TNM |
-| `naip.tif` | natural colour, 0.3 m | USGS NAIPPlus |
+| `naip.tif` (`naip_1m.tif` on a network site, 0.6 m) | natural colour, 0.3 m | NAIP: Planetary Computer COGs, USGS NAIPPlus as the fallback (below); Sentinel-2 outside the US |
 | `lidar/corridor.laz` | the classified points within 200 m of the spine, in the site frame | USGS 3DEP / NOAA Digital Coast Entwine, TNM tiles as fallback |
 | `lidar/dtm.tif` `dsm.tif` `chm.tif` `deck_z.tif` `deck_n.tif` `building_n.tif` | ground, surface, canopy height, bridge-deck height and density, building density — 1 m | derived |
 | `profile.json` | every 2 m along the spine: road z; ground height relative to the road at 8/15/25/40/60 m left and right (cut vs fill); canopy at the same offsets; **structures** — bridges we are on and overpasses over us, measured from class-17 returns | derived |
@@ -174,6 +174,50 @@ at the depth that reaches `CORRIDOR_LIDAR_DENSITY` points/m² (default 8). `CORR
 forces the delivery tiles when the newest vintage matters more than the hours. Tests:
 `.venv/bin/python -m unittest discover -s tests`.
 
+**NAIP comes from Microsoft's Planetary Computer first, USGS's ImageServer second** (2026-10-10,
+after USGSNAIPPlus answered 504 for an hour and killed two dc-metro bakes). The Planetary Computer
+holds the USDA's own quarter-quad COGs (RGB+NIR, 0.3 m in Maryland's 2023 cycle, 0.6 m in
+Virginia's), found by a STAC search and read with HTTP range requests over GDAL's `/vsicurl/` with a
+free SAS token — no account, no credentials; it is refreshed when it nears `msft:expiry`. The AWS
+Open Data NAIP buckets were measured too and are requester-pays, so they are not used. ONE YEAR
+first (Rich, 2026-10-10): over the whole area being baked — the WORLD's bbox, so every shard picks
+the same — the newest year whose leaf-on items cover all but `CORRIDOR_NAIP_YEAR_MAX_BARE` (default
+2 %) of what any year covers is read alone — the state covering most of the world first (over DC,
+Maryland's 2021-06 at 82 % before Virginia's hazy 2021-09 at 39 %), then finer, then later —
+and everything else only fills its holes. A cloud mask (bright, grey, smooth blobs ≥ 3 ha that
+another flight sees ≥ 35 darker) exists but is OFF unless `CORRIDOR_NAIP_CLOUDS=1`: it found the
+12.6 ha cloud over Shaw and also took sun glint on the Tidal Basin for a 33 ha one.
+dc-metro-take-2 picks 2021 (MD June, VA September; 2023 covers 81.9 %, Virginia's 2023 is leaf-off),
+crofton-triangle 2023 at 0.3 m. `CORRIDOR_NAIP_YEAR=auto|<yyyy>|off`; `off`, or no year covering
+enough, is the per-pixel ranking that follows, and `naip.year` in the manifest says which and why
+(the year is part of the cached piece's name too). Within the per-pixel ranking a
+LEAF-ON flight (`CORRIDOR_NAIP_LEAF_ON`, months, default `5-9`) beats a leaf-off one up to
+`CORRIDOR_NAIP_LEAF_ON_YEARS` (default 2) years newer — Virginia flew 2023 in October and November,
+red maples beside Maryland's September, so Arlington takes VA 2021-09-10 instead — then the newest
+year wins, the finer item, the later date, and older items fill only the pixels the ones before
+leave black (a state line, a quarter-quad's collar, a missing quarter-quad, NAIP's white redaction
+rectangles). The rule is recorded in the manifest's `naip.rule` and keys the cached pieces. Red,
+green and blue are read by NAME — the asset's `eo:bands` and the COG's colour interpretation must
+agree, an item where they do not (or a CIR product) is skipped, never painted. Each item is read at
+the coarsest overview no coarser than the lattice, then warped onto it — the lattice and the file
+names do not change (`naip.tif` at 0.3 m, `naip_1m.tif` at `NAIP_RES_M`, the 60 m horizon JPEG).
+Pieces cache under `data/cache/naip/` as `pc_<tile>_<rule>.jpg` beside a `.json` naming the items that fed
+them, and the manifest's `naip` records the source, the items, their years and resolutions.
+`CORRIDOR_NAIP_SOURCE=auto|pc|usgs` (default `auto`): `auto` turns to the ImageServer when the
+Planetary Computer cannot answer (about two minutes of 5xx, then a breaker sends every remaining
+tile there), and asks it for a second opinion where the catalogue is empty (it has no Hawaii or
+Alaska); a forced source never falls back. An outage is never "no imagery": only an empty search
+whose control over Crofton is full means "not covered" and drops to Sentinel-2; when neither source
+can answer the bake stops with a `BakeFault`. `CORRIDOR_NAIP_PC_STAC` / `CORRIDOR_NAIP_PC_TOKEN`
+override the endpoints, `CORRIDOR_NAIP_JOBS` (default 6) the tiles fetched at once.
+Registration: the Planetary Computer path matches `gdalwarp` of the COG to 0.003 px; the ImageServer,
+asked for the site's WGS84 UTM, shifts the same photograph 0.6-1 m north (it matches the COG exactly
+in the COG's own NAD83 UTM), so imagery moves that much south against older bakes — onto the DEM and
+lidar, which PROJ reprojects the same way this path does. Measured: ImageServer rasters sit exactly
+one row (0.6 m) north at the 0.6 m lattice, 0.96 m at 0.3 m. Caveat: in `auto`, a bake whose
+tiles came from both sources shows that step as a seam at the tile edges; `tiles_by_source` in the
+manifest says when that happened.
+
 **LANDFIRE's class at the centre of a corridor is always `Developed-Roads`.** The site point is on
 the pavement by construction, and LANDFIRE has a 30 m class for pavement. Vegetation is read as AREA
 SHARES over the whole corridor polygon, the way land use already was. The other traps in the flora
@@ -239,5 +283,5 @@ new here and is the part this game is actually about.
 
 ## Licences
 
-USGS 3DEP, NAIP: public domain. OpenStreetMap: ODbL (attribute; share-alike applies to derived
+USGS 3DEP, NAIP (USDA FSA; read from the Planetary Computer or USGS): public domain. OpenStreetMap: ODbL (attribute; share-alike applies to derived
 *data*, not to a rendered game). Macrostrat: CC-BY. Say so in the credits.

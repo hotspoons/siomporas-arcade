@@ -48,7 +48,7 @@ let bad = 0
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) bad++ }
 
 // place it on the real road: load once to read the spine, then write the file and reload
-await p.goto(`${VIEWER}?phys=1#${SLUG}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`${VIEWER}#${SLUG}?phys=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.__apex?.site, null, { timeout: 240000 })
 await p.waitForTimeout(6000)
 const where = await p.evaluate(() => {

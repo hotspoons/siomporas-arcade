@@ -15,7 +15,7 @@
 //   node probes/corridor-presets.mjs
 import { chromium } from 'playwright'
 
-const url = process.env.PROBE_URL ?? 'http://localhost:5185/?lite#arrowhead-farms'
+const url = process.env.PROBE_URL ?? 'http://localhost:5185/#arrowhead-farms?lite'
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] })
 const page = await browser.newPage({ viewport: { width: 1200, height: 700 } })
 const errs = []

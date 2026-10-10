@@ -7,9 +7,24 @@ just corridor-view      # :5185 — reads tools/corridor/data/sites straight off
 just corridor-tunnel    # phone: devproxy :5190 + cloudflared quick tunnel
 ```
 
-`?data=https://<bucket>` points it at a published R2 prefix instead of the local bake; the layout
-(`/sites/index.json`, `/sites/<slug>/web/*`) is the same. `?lite` forces the phone build (a quarter
-of the terrain vertices, 4k imagery, fewer near trees); touch devices get it automatically.
+**The address** is all in the hash: the world, then its options as a query string *inside* the
+hash — never a `?query` before the `#`:
+
+```
+http://localhost:5185/#crofton-triangle?level=crofton-jam&phys=1&lite
+https://dc-nightmare.siomporas.com/#dc-metro-take-2?stance=eyJ2Ijox…&season=summer
+```
+
+`src/url.ts` is the one reader and writer (`param`, `hasParam`, `worldSlug`, `write`, `navigate`,
+`href`). Old links still work — `/?lite=1&season=summer#crofton`, `#/crofton`, the world editor's
+`/index.html?site=crofton` — and are rewritten into the form above as the page boots. A hash typed
+into the address bar reloads the page onto it. The options: `level`, `stance`, `season`, `style`,
+`relief`, `ui`, `phys`, `car`, `profile`, `depth`, `aa`, `grade`, `splats`, `lite`, `fresh`, `data`,
+`assetsvc`.
+
+`#<world>?data=https://<bucket>` points it at a published R2 prefix instead of the local bake; the
+layout (`/sites/index.json`, `/sites/<slug>/web/*`) is the same. `lite` forces the phone build (a
+quarter of the terrain vertices, 4k imagery, fewer near trees); touch devices get it automatically.
 
 | file | role |
 |---|---|
@@ -27,12 +42,13 @@ of the terrain vertices, 4k imagery, fewer near trees); touch devices get it aut
 | `src/fly.ts` | trailworks-style fly camera |
 | `src/car.ts` | the car: stuntin's ground regime + lateral grip model, tree collision |
 | `src/main.ts` | UI, orbit/drive cameras, phone layout, picking |
+| `src/url.ts` | the address: `#world?k=v&flag`, legacy forms folded in, `replaceState` writes |
 | `public/surfaces/` | texture sets from `tools/surfaces/gen.py` |
 
 **Game mode.** A production build opens as a GAME: no bar, a dashboard and the objective in the
 lower-left widget, and an Escape menu with the settings as screens (display, layers, audio,
 controls with key and pad rebinding, the tuning panel) and a Developer view toggle that brings
-the bar back. `?ui=game` / `?ui=dev` force either; the dev server opens as the developer view.
+the bar back. `#<world>?ui=game` / `?ui=dev` force either; the dev server opens as the developer view.
 The gamepad works in both (triggers pedals, left stick steers, Start pauses; the sticks fly the
 free camera), with rumble. Double-clicking the inset map drops the car there. A program may take
 the developer view, the teleport, the transport switch, and any settings tab or control away:
@@ -46,7 +62,7 @@ ground. **Drive** (Tab; stuntin dynamics ported in `src/car.ts`): W/S throttle/b
 Space handbrake, R resets to the photo; drag looks around the chase camera. **C copies a stance**: a URL that reproduces exactly this view (site, season, mode, camera or car, layers) — paste it in a bug report and `node probes/corridor-stance.mjs '<url>' out.png` renders it headlessly. **M** hides the panel. The car collides with
 tree trunks (radius from canopy height) and gets grass drag and grip off the pavement. P = photo,
 H = top.
-`?season=winter|spring|summer|autumn` or the picker in the header. **rock** and **water** layer
+`#<world>?season=winter|spring|summer|autumn` or the picker in the header. **rock** and **water** layer
 toggles; F6 → terrain tab for their knobs. `probes/corridor-terrain.mjs <slug> rock|water` flies to
 the tallest measured face or the longest stream, counts what was placed, checks clearance and
 grounding, and shoots it with and without the layer. Phones get a move pad (hold to glide) and drive buttons.

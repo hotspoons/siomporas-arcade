@@ -330,5 +330,5 @@ dedupes replicated ways by id. The new kinds below no longer inherit the holes.
 **Testing it on an unbaked world.** `probes/vtproxy.mjs` replays the same replication at serve time:
 it scans every branch tile the manifest names and injects each road into every tile it crosses, so
 the viewer's dedup and the deck streamer can be exercised against dc-metro as it is today. Load
-`http://localhost:5186/?data=http://127.0.0.1:5190#dc-metro-take-2` (or tunnel :5190 and pass that
-URL as `?data=`). It is a stopgap — delete it once the world is next baked.
+`http://localhost:5186/#dc-metro-take-2?data=http://127.0.0.1:5190` (or tunnel :5190 and pass that
+URL as `data=`). It is a stopgap — delete it once the world is next baked.

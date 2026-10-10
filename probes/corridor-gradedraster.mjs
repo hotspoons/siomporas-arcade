@@ -53,7 +53,7 @@ async function open(query) {
   await page.addInitScript(() => {
     try { localStorage.setItem('apex-corridor-visuals.tune.v1', JSON.stringify({ v: 2, values: { STREAM_LOCAL: 0 }, touched: ['STREAM_LOCAL'] })) } catch {}
   })
-  await page.goto(`http://127.0.0.1:${PORT}/?lite${query}#${site}`, { waitUntil: 'load' })
+  await page.goto(`http://127.0.0.1:${PORT}/#${site}?lite${query}`, { waitUntil: 'load' })
   await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 1500000 })
   if (errors.length) throw new Error(`page errors during boot: ${errors.join(' | ')}`)
   return page

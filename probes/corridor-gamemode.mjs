@@ -29,7 +29,7 @@ const to = async (label) => { for (let i = 0; i < 14 && (await selected()) !== l
 const carX = () => p.evaluate(() => window.corridor.car ? { x: window.corridor.car.pos.x, z: window.corridor.car.pos.z } : null)
 
 async function load(query) {
-  await p.goto(`http://localhost:${PORT}/?lite=1&fresh=1&${query}#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+  await p.goto(`http://localhost:${PORT}/#${slug}?lite=1&fresh=1&${query}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
   await p.waitForFunction(() => !!window.corridor?.site, null, { timeout: 600000 })
   await p.waitForTimeout(1200)
 }

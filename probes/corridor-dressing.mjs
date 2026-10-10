@@ -9,7 +9,7 @@
 import { chromium } from 'playwright'
 
 const out = process.argv[2] ?? 'shots/dressing.png'
-const url = process.env.PROBE_URL ?? 'http://localhost:5185/?lite#arrowhead-farms'
+const url = process.env.PROBE_URL ?? 'http://localhost:5185/#arrowhead-farms?lite'
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] })
 const page = await browser.newPage({ viewport: { width: 1100, height: 620 } })
 const errs = []

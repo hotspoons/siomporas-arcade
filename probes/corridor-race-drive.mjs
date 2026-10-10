@@ -54,7 +54,7 @@ check(saved === 'ok', `saved (${saved})`)
 check(existsSync(FILE), 'courses.json is on disk')
 
 /* ---- drive it in the game -------------------------------------------------------------------- */
-await p.goto(`http://127.0.0.1:5185/index.html?phys=0#${SLUG}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`http://127.0.0.1:5185/index.html#${SLUG}?phys=0`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.__apex?.site && !!window.__apex?.races, null, { timeout: 240000 }).catch(() => {})
 await p.waitForTimeout(8000)
 

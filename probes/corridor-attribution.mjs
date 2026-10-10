@@ -18,7 +18,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 160)))
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`http://localhost:${PORT}/#${slug}?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForSelector('#attribution .attrib-short', { timeout: 900000 })
 // WAIT FOR THE CREDITS, not just the button. The widget is built at startup and populated when a
 // site's manifest lands, so clicking early toggles an empty list — which passes the height check

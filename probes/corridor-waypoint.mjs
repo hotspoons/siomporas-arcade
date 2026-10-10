@@ -12,7 +12,7 @@ p.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 200)))
 await p.route('**/@vite/client', (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body: 'export const createHotContext = () => ({ accept(){}, acceptExports(){}, dispose(){}, prune(){}, invalidate(){}, on(){}, off(){}, send(){}, data:{} }); export const updateStyle = () => {}; export const removeStyle = () => {}; export const injectQuery = (u) => u; export const ErrorOverlay = class {}; export default {}' }))
 let bad = 0
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) bad++ }
-await p.goto('http://127.0.0.1:5185/index.html?level=crofton-jam#crofton-triangle', { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto('http://127.0.0.1:5185/index.html#crofton-triangle?level=crofton-jam', { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.__apex?.game && !!window.__apex?.drive?.on, null, { timeout: 240000 })
 await p.waitForFunction(() => !document.querySelector('.waypoint')?.hidden, null, { timeout: 60000 }).catch(() => {})
 const read = () => p.evaluate(() => { const w = document.querySelector('.waypoint'); return { hidden: w.hidden, text: w.querySelector('.waypoint-msg')?.textContent ?? '', dist: w.querySelector('.waypoint-dist')?.textContent ?? '', folded: w.querySelector('.waypoint-msg')?.classList.contains('folded') } })

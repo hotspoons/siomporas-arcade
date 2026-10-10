@@ -25,7 +25,7 @@ const page = await browser.newPage({ viewport: { width: 560, height: 380 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 300)))
 page.on('console', (m) => { if (m.type() === 'error' && /shader|GLSL|program/i.test(m.text())) console.log('SHADER', m.text().slice(0, 400)) })
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`http://localhost:${PORT}/#${slug}?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 600000 })
 await page.waitForTimeout(4000)
 

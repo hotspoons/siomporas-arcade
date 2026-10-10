@@ -30,7 +30,7 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   check(!j.error && !j.result?.isError, `the level was written over MCP (${j.result?.content?.[0]?.text ?? j.error?.message})`)
 }
 
-await p.goto(`${VIEWER}?level=${LEVEL}#${SLUG}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`${VIEWER}#${SLUG}?level=${LEVEL}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.__apex?.site, null, { timeout: 240000 })
 await p.waitForFunction(() => !!window.__apex?.traffic, null, { timeout: 120000 }).catch(() => {})
 await p.waitForTimeout(3000)

@@ -13,7 +13,7 @@ async function load(relief) {
   const page = await browser.newPage({ viewport: { width: 800, height: 500 } })
   page.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 200)))
   await page.route('**/@vite/client', (r) => r.abort())
-  const url = `http://localhost:${PORT}/?lite=1${relief !== 1 ? `&relief=${relief}` : ''}#${slug}`
+  const url = `http://localhost:${PORT}/#${slug}?lite=1${relief !== 1 ? `&relief=${relief}` : ''}`
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 })
   await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 600000 })
   // the tile stream keeps swapping the 8 m overview for 1 m tiles after the site is ready; sample

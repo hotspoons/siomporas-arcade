@@ -74,7 +74,7 @@ const wrote = await fetch(`http://localhost:${PORT}/sites/${WORLD}/placements.js
 say('wrote the fixture', wrote)
 if (wrote >= 400 || !wrote) { console.log('\nSKIP: could not write a placement to this volume'); await browser.close(); process.exit(0) }
 
-await page.goto(`http://localhost:${PORT}/?site=${WORLD}#${WORLD}`, { waitUntil: 'networkidle', timeout: 120000 })
+await page.goto(`http://localhost:${PORT}/#${WORLD}`, { waitUntil: 'networkidle', timeout: 120000 })
 const up = await page.waitForFunction(() => window.__apex?.site, null, { timeout: 120000 }).then(() => true).catch(() => false)
 if (!up) { await restore(); console.log(`\nSKIP: ${WORLD} did not load in the viewer`); await browser.close(); process.exit(0) }
 await page.waitForTimeout(6000)

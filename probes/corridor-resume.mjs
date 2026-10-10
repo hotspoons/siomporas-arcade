@@ -14,7 +14,7 @@ await p.route('**/@vite/client', (r) => r.abort())
 let fails = 0
 const ok = (what, cond, detail = '') => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}${detail ? ` — ${detail}` : ''}`); if (!cond) fails++ }
 const ready = async () => { await p.waitForFunction(() => !!window.corridor?.site, null, { timeout: 600000 }); await p.waitForTimeout(2500) }
-await p.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`http://localhost:${PORT}/#${slug}?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await ready()
 // drive: into the seat, hold the throttle, let it run
 await p.keyboard.press('Tab') // Tab is the drive-mode toggle
@@ -49,7 +49,7 @@ const lag = await p.evaluate(() => {
 ok('the world follows the car in the cockpit', lag.lag < 12, `the site was last told about an eye ${lag.lag} m from the car (speed ${lag.speed} m/s)`)
 await p.keyboard.press('KeyC')
 // 1. reload with no stance in the URL
-await p.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`http://localhost:${PORT}/#${slug}?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.reload({ waitUntil: 'commit', timeout: 120000 })
 await ready()
 const after = await p.evaluate(() => { const c = window.corridor.drive?.car; return c ? { x: +c.pos.x.toFixed(1), z: +c.pos.z.toFixed(1), yaw: +c.yaw.toFixed(3), speed: +c.speed.toFixed(1), drive: window.corridor.drive.on } : { drive: window.corridor.drive?.on } })

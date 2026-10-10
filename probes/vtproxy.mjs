@@ -13,7 +13,7 @@
 // viewer at it with `?data=`:
 //
 //     node probes/vtproxy.mjs                       # listens on :5190
-//     # then load:  http://localhost:5186/?data=http://127.0.0.1:5190#dc-metro-take-2
+//     # then load:  http://localhost:5186/#dc-metro-take-2?data=http://127.0.0.1:5190
 //
 // (Or, to expose it to a browser elsewhere, tunnel this port and pass that URL as `?data=`.)
 // It is a stopgap: when the world is next baked, delete it. `probes/.build/bridgefix.mjs` drives

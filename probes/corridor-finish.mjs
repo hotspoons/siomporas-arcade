@@ -92,7 +92,7 @@ const waitFinish = async () => {
 }
 
 /* ---- 1 · the run, driving: the screen is not up until the program finishes ---- */
-await p.goto(`http://127.0.0.1:${PORT}/?lite=1&fresh=1&ui=game&level=finish-probe#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`http://127.0.0.1:${PORT}/#${slug}?lite=1&fresh=1&ui=game&level=finish-probe`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.corridor?.site && !!window.corridor?.game, null, { timeout: 600000 })
 ok('the screen is hidden while the run is on', !(await fin()).visible)
 const world = await p.evaluate(() => ({ calls: window.corridor.renderer.info.render.calls, tris: window.corridor.renderer.info.render.triangles }))

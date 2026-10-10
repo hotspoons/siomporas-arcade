@@ -52,6 +52,9 @@ import { MissileLayer } from './game/combat/missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
 import { dentObject, flushDents, repairObject } from './game/vehicle/dents'
 import { GameRun, type ModelHost, type ModelPose, type ProgramHost, type TrafficHitInfo, type WeaponTuning } from './game/session/program'
+import { loadSpawnCatalog } from './assets/catalogmerge'
+import { loadZones } from './editor/store/zonestore'
+import type { ZoneDoc } from './game/world/zones'
 import { loadGameModule } from './game/session/programload'
 import { PROFILES, profile as driveProfile, type DriveProfile } from '@apex/engine/physics/profiles'
 import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './world/placements'
@@ -2208,8 +2211,14 @@ function raceWaypoint(at: { x: number; y: number }): Waypoint | null {
  */
 async function startProgram(path: string): Promise<boolean> {
   stopProgram()
-  // the catalog a program may spawn from, fresh: the library grows while the editor is open
-  placeCatalog = await loadCatalog().catch(() => placeCatalog)
+  // the catalog a program may spawn from, fresh: the library grows while the editor is open. The
+  // SPAWN catalog, not the placement one — every asset with a model and every build by its id,
+  // which is the list the editor's Program pane offers beside the code (catalogmerge.ts)
+  placeCatalog = await loadSpawnCatalog().then((l) => new Map(l.map((e) => [e.id, e as CatalogEntry]))).catch(() => placeCatalog)
+  // the painted zones as OUTLINES, so `on('enters', 'z-01')` works in a level with no traffic
+  // simulation running — the traffic layer only loads them when it has cars to put in them
+  const slugNow = site?.manifest.slug
+  programZones = slugNow ? await loadZones(slugNow).catch(() => null) : null
   let js = ''
   try {
     const r = await fetch(`/api/programs/${path.split('/').map(encodeURIComponent).join('/')}?js=1`)
@@ -2425,8 +2434,10 @@ function fadeProgramModels(): void {
   }
 }
 let programModelSeq = 0
-/** the placement catalog — shipped kit plus the library — read when a program starts */
+/** what a program may spawn — the kit, the library, the builds — read when a program starts */
 let placeCatalog: Map<string, CatalogEntry> | null = null
+/** the world's painted zones, read when a program starts: what `on('enters', 'z-01')` tests against */
+let programZones: ZoneDoc | null = null
 
 function poseModel(holder: THREE.Group, pose: ModelPose, entry: CatalogEntry): void {
   // `z` is metres above the datum as the world draws it (what `api.ground` and `api.player` say)
@@ -2572,6 +2583,8 @@ function programHost(): ProgramHost {
     },
     ground: (x, y) => site?.groundAt(x, -y) ?? null,
     models: modelsHost,
+    // the Points tab's places, at the height they stand: the ground plus a lift, or absolute
+    points: () => worldPoints.points.map((p) => ({ id: p.id, name: p.name, kind: p.kind, x: p.at[0], y: p.at[1], z: site ? pointHeight(p) : null, yaw_deg: p.yaw_deg, ...(p.note ? { note: p.note } : {}) })),
     objectives: { show: (items, selected) => {
       gameHud.setObjectives(items, selected)
       for (const id of zoneMarks.list().map((m) => m.id)) if (id.startsWith('obj:')) zoneMarks.remove(id)
@@ -2620,6 +2633,7 @@ function programHost(): ProgramHost {
         return st ? { phase: st.phase, course: st.course?.id ?? null, time: st.time, penalties: st.penalties, lap: st.lap, laps: st.laps } : null
       },
       trafficIds: () => traffic?.zones.list.map((z) => z.id) ?? [],
+      trafficPolygon: (id) => (traffic?.zones.list ?? programZones?.zones ?? []).find((z) => z.id === id)?.polygon ?? null,
       trafficDensity: (id) => {
         const i = traffic?.zones.list.findIndex((z) => z.id === id) ?? -1
         return i >= 0 ? (traffic!.zones.rolled[i]?.density ?? null) : null

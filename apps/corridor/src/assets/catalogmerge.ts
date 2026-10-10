@@ -16,8 +16,8 @@
 // the footprint is MEASURED from the model the first time it is loaded (`measured: false` until
 // then) rather than typed here.
 
-import { ASSETSVC, MESH_FILE, assetsvc, type AssetItem } from './assetsvc'
-import { heightFor, typeOf } from './classes'
+import { ASSETSVC, MESH_FILE, assetsvc, type AssetItem, type Build } from './assetsvc'
+import { heightFor, typeOf, type AssetType } from './classes'
 
 export interface PlaceableEntry {
   id: string
@@ -33,6 +33,10 @@ export interface PlaceableEntry {
   library?: boolean
   /** the footprint was measured from the model (or typed); false means "a guess until loaded" */
   measured?: boolean
+  /** what it IS — prop, vehicle, actor, weapon, fixture — when it came from the library */
+  type?: AssetType
+  /** a vehicle, actor or weapon BUILD wearing this model: the catalog id it wears */
+  wears?: string
 }
 
 /** the shipped kit, minus anything that has no model: a box with a name on it is not an asset */
@@ -40,12 +44,15 @@ export function shippedEntries(doc: { assets?: PlaceableEntry[] } | null | undef
   return (doc?.assets ?? []).filter((e) => !!e.glb).map((e) => ({ ...e, measured: true }))
 }
 
-/** the library's placeable items: props, buildings and fixtures that have a mesh */
-export function libraryEntries(items: AssetItem[]): PlaceableEntry[] {
+/**
+ * The library's items that have a mesh: by default the PLACEABLE ones — props, buildings and
+ * fixtures. `types` widens it; a program may spawn a car or a person as scenery too.
+ */
+export function libraryEntries(items: AssetItem[], types: readonly AssetType[] = ['prop', 'fixture']): PlaceableEntry[] {
   const out: PlaceableEntry[] = []
   for (const it of items) {
     const type = typeOf(it)
-    if (type !== 'prop' && type !== 'fixture') continue
+    if (!types.includes(type)) continue
     const variant = it.finished ? 'finished' : it.mesh ? 'raw' : null
     if (!variant) continue
     const kind = it.kind || type
@@ -66,6 +73,7 @@ export function libraryEntries(items: AssetItem[]): PlaceableEntry[] {
       fit: 'height',
       library: true,
       measured,
+      type,
     })
   }
   return out
@@ -95,4 +103,55 @@ export async function loadMergedCatalog(): Promise<{ assets: PlaceableEntry[] }>
     /* no library */
   }
   return { assets: mergeCatalog(shipped, library) }
+}
+
+/*
+ * WHAT A PROGRAM MAY SPAWN — `api.models.spawn(id, pose)`.
+ *
+ * Rich, 2026-10-10: *"nor no assets we can reference from the library in case we want to spawn
+ * something at a point for a given condition."* The placement catalog answers "what can the editor
+ * place", which is props and fixtures; a program wants the whole library: the kit, every asset with
+ * a model whatever it is, and every vehicle, actor and weapon BUILD by its own id (a build wears its
+ * model, so `spawn('beltway-nightmare', …)` puts the RX-7 down as a thing, not as a car to drive).
+ *
+ * ONE LIST, TWO READERS. The viewer's ModelHost resolves a spawn through it and the editor's Program
+ * pane lists it beside the code, so what the list offers is what a spawn finds.
+ */
+const BUILD_KINDS = [['vehicles', 'vehicle'], ['actors', 'actor'], ['weapons', 'weapon']] as const
+
+/** The builds, each as an entry wearing its model's. Pure, so a test hands it literals. */
+export function buildEntries(models: Map<string, PlaceableEntry>, builds: { kind: AssetType; build: Pick<Build<unknown>, 'id' | 'name' | 'asset'> }[]): PlaceableEntry[] {
+  const out: PlaceableEntry[] = []
+  for (const { kind, build } of builds) {
+    const wears = build.asset ? models.get(build.asset) : undefined
+    // a build with no model yet is a set of numbers: nothing to draw, so nothing to spawn
+    if (!wears || !build.id) continue
+    out.push({ ...wears, id: build.id, name: build.name || build.id, type: kind, wears: wears.id })
+  }
+  return out
+}
+
+/** The kit, every library asset with a model, and every build that has one. A missing service is the kit alone. */
+export async function loadSpawnCatalog(): Promise<PlaceableEntry[]> {
+  let shipped: PlaceableEntry[] = []
+  try {
+    const r = await fetch('/assets/catalog.json', { cache: 'no-cache' })
+    if (r.ok) shipped = shippedEntries((await r.json()) as { assets?: PlaceableEntry[] })
+  } catch {
+    /* no kit */
+  }
+  let library: PlaceableEntry[] = []
+  const builds: { kind: AssetType; build: Build<unknown> }[] = []
+  try {
+    library = libraryEntries(await assetsvc.list(), ['prop', 'fixture', 'vehicle', 'actor', 'weapon'])
+    await Promise.all(BUILD_KINDS.map(async ([coll, kind]) => {
+      for (const build of await assetsvc.builds<Build<unknown>>(coll).catch(() => [])) builds.push({ kind, build })
+    }))
+  } catch {
+    /* no library */
+  }
+  const models = mergeCatalog(shipped, library)
+  const byId = new Map(models.map((e) => [e.id, e]))
+  // a build id that clashes with a model id loses: the model is what was asked for by that name
+  return [...models, ...buildEntries(byId, builds).filter((b) => !byId.has(b.id))]
 }

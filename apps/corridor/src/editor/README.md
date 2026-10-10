@@ -75,6 +75,8 @@ switch:
 
 A cyan ring marks the point a zoom or an orbit is turning about. Every glide stops the moment you
 press, scroll or touch a movement key. Where you were in each world comes back on reload.
+`probes/corridor-editor-nav.mjs` holds it to its promises with real mouse input (each measured at
+0 px of drift on dc-metro-take-2), and `test/editor-nav.test.ts` states the maths.
 
 The tools still come first: a press on a vertex handle, a gizmo or a stunt piece belongs to that
 tool, exactly as it did under OrbitControls (`orbit.enabled`); while an area or a traffic zone is

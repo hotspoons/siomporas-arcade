@@ -21,7 +21,7 @@ const page = await browser.newPage({ viewport: { width: 700, height: 460 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
 page.on('console', (m) => { if (m.type() === 'error') console.log('console.error', m.text().slice(0, 200)) })
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://127.0.0.1:${PORT}/?lite${DATA ? `&data=${DATA}` : ''}#${slug}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
+await page.goto(`http://127.0.0.1:${PORT}/#${slug}?lite${DATA ? `&data=${DATA}` : ''}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor?.site, null, { timeout: 300000 })
 
 console.log(JSON.stringify(await page.evaluate(() => {

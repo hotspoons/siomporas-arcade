@@ -34,7 +34,7 @@ const near = (page, r) => page.evaluate((rad) => {
 }, r)
 
 /* ---- before: the site as it is ---- */
-await p.goto(`${VIEWER}?phys=1#${SLUG}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`${VIEWER}#${SLUG}?phys=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.__apex?.site, null, { timeout: 240000 })
 await p.waitForTimeout(7000)
 const before = await near(p, 40)

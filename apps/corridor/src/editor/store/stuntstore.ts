@@ -6,9 +6,10 @@
 // the canopy must not touch anybody's loop.
 
 import type { StuntDoc } from '../../game/stunt/stunts'
+import { param } from '../../url'
 
 /** A published viewer is read-only, so authoring is off there — the rule `schema.ts` calls CAN_SAVE. */
-const base = new URLSearchParams(location.search).get('data') ?? ''
+const base = param('data') ?? ''
 export const CAN_SAVE_STUNTS = base === ''
 
 export async function loadStunts(slug: string): Promise<StuntDoc> {

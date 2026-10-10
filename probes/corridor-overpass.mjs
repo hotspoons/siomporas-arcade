@@ -23,7 +23,7 @@ const PORT = process.env.CORRIDOR_PORT ?? '5186'
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] })
 const page = await browser.newPage({ viewport: { width: 480, height: 320 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 200)))
-await page.goto(`http://127.0.0.1:${PORT}/?lite&phys=1#${site}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/#${site}?lite&phys=1`, { waitUntil: 'load' })
 await page.waitForFunction(() => !!window.corridor?.site && !!window.corridor.physics, null, { timeout: 300000 })
 
 const result = await page.evaluate(async () => {

@@ -41,7 +41,7 @@ async function run(kind) {
   page.on('pageerror', (e) => console.log(`pageerror[${kind}]`, e.message))
   await page.route('**/@vite/client', (r) => r.abort())
   const q = kind === 'rapier' ? 'lite&phys=1&car=rapier&profile=stunts' : 'lite&phys=1&car=kinematic'
-  await page.goto(`http://127.0.0.1:${PORT}/?${q}#${site}`, { waitUntil: 'load' })
+  await page.goto(`http://127.0.0.1:${PORT}/#${site}?${q}`, { waitUntil: 'load' })
   await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 240000 })
   await page.waitForFunction(() => !!window.corridor.physics, null, { timeout: 120000 })
 

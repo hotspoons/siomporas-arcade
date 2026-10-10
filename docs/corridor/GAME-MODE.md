@@ -17,7 +17,7 @@ Settings dialog and the Escape menu read and write the same fields, and both ask
 
 Where a page starts (`resolveUiMode` in `src/gamepolicy.ts`):
 
-1. `?ui=game` or `?ui=dev` in the URL.
+1. `ui=game` or `ui=dev` in the address: `#<world>?ui=game` (`src/url.ts`).
 2. The player's remembered choice (`apex-corridor.settings.v1`, field `ui`).
 3. Otherwise a **production build is a game**; the **dev server is a workbench**
    (`import.meta.env.PROD`).
@@ -28,7 +28,7 @@ select) is the player's, whatever the link said, and is remembered. A program th
 `?ui=dev`, which is the developer's own hatch into a level that forbids it.
 
 So a deployed world opens as a game. `just corridor-view` opens as the developer view it always
-was. A link from the world editor that wants the developer view should carry `?ui=dev`.
+was. A link from the world editor that wants the developer view should carry `#<world>?ui=dev`.
 
 ## The Escape menu
 

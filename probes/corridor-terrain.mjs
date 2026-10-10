@@ -46,7 +46,7 @@ if (what === 'rock') {
   note = { line: l.id, kind: l.kind, name: l.name, length_m: l.length_m, width_m: l.width_m, fall_m: l.fall_m, falls: l.falls }
 }
 const stance = { v: 1, site: slug, season: 'summer', mode: 'fly', cam: { p: cam, t: target }, layers: {}, lite: false }
-const url = `${base}/?stance=${Buffer.from(JSON.stringify(stance)).toString('base64')}&season=summer#${slug}`
+const url = `${base}/#${slug}?stance=${Buffer.from(JSON.stringify(stance)).toString('base64')}&season=summer`
 console.log(JSON.stringify({ slug, what, ...note, cam, target }))
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })

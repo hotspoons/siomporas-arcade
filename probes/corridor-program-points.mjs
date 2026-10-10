@@ -50,7 +50,7 @@ page.on('pageerror', (e) => errs.push(e.message.split('\n')[0]))
 const level = { id: 'zz-refs-probe', world, program: 'zz-refs-probe.ts' }
 await page.route('**/api/levels/zz-refs-probe', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ level, ok: true, errors: [], warnings: [] }) }))
 await page.route('**/api/programs/zz-refs-probe.ts?js=1', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'zz-refs-probe.ts', js, errors: [] }) }))
-await page.goto(`${base}/?level=zz-refs-probe#${world}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`${base}/#${world}?level=zz-refs-probe`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 180000 })
 say('booted', true)
 const started = await page.waitForFunction(() => !!window.__refsProbe, null, { timeout: 60000 }).then(() => true, () => false)

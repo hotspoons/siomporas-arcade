@@ -1,7 +1,7 @@
 import { chromium } from 'playwright'
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 1200, height: 800 } })
-await page.goto('http://127.0.0.1:5185/?season=summer#braddock-i70', { waitUntil: 'load' })
+await page.goto('http://127.0.0.1:5185/#braddock-i70?season=summer', { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 180000 })
 // drive, look hard right at the embankment, hide the panel, capture the stance URL
 await page.keyboard.press('Tab')

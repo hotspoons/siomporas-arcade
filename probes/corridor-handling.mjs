@@ -22,7 +22,7 @@ const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
 // several agents edit this tree at once; a Vite full reload mid-probe empties window.corridor.
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://127.0.0.1:${PORT}/?lite#${site}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/#${site}?lite`, { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 180000 })
 await page.keyboard.press('Tab')
 

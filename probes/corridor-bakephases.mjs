@@ -59,7 +59,7 @@ await page.addInitScript((knobs) => {
   } catch {}
 }, knobs)
 const t0 = Date.now()
-await page.goto(`http://127.0.0.1:${PORT}/?${LITE ? 'lite' : ''}#${site}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/#${site}?${LITE ? 'lite' : ''}`, { waitUntil: 'load' })
 await page.waitForFunction(() => !!window.corridor?.site && !!window.__apex, null, { timeout: 900000 })
 if (errors.length) throw new Error(`page errors during boot: ${errors.join(' | ')}`)
 console.log(`booted ${site} in ${((Date.now() - t0) / 1000).toFixed(1)} s (${LITE ? 'lite' : 'full'}, Low)`)

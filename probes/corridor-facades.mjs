@@ -22,7 +22,7 @@ page.on('pageerror', (e) => { errors.push(e.message.slice(0, 200)); console.log(
 const fails = []
 const ok = (name, cond, detail) => { console.log(`${cond ? 'ok  ' : 'FAIL'}  ${name} — ${detail}`); if (!cond) fails.push(name) }
 
-await page.goto(`http://127.0.0.1:${PORT}/?ui=dev#${WORLD}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`http://127.0.0.1:${PORT}/#${WORLD}?ui=dev`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction((slug) => window.corridor?.site?.manifest?.slug === slug, WORLD, { timeout: 300000 })
 // the swiftshader cliff: trees and grass off, or no frame arrives in time to measure anything
 await page.evaluate(() => { const L = window.corridor.site.layers; if (L.trees) L.trees.visible = false; if (L.grass) L.grass.visible = false })
@@ -123,7 +123,7 @@ await page.close()
 // AND OFF: the knob as the F6 panel keeps it, the same questions, nothing pooled
 const off = await browser.newPage({ viewport: { width: 1280, height: 760 } })
 await off.addInitScript(() => { try { localStorage.setItem('apex-corridor-world.tune.v1', JSON.stringify({ v: 2, values: { BUILDING_FACADES: 0 }, touched: ['BUILDING_FACADES'] })) } catch { /* */ } })
-await off.goto(`http://127.0.0.1:${PORT}/?ui=dev#${WORLD}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await off.goto(`http://127.0.0.1:${PORT}/#${WORLD}?ui=dev`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await off.waitForFunction((slug) => window.corridor?.site?.manifest?.slug === slug, WORLD, { timeout: 300000 })
 if (street) await off.evaluate(([x, y]) => { const c = window.corridor; const gy = c.site.groundAt(x + 24, -(y - 18)) ?? 0; c.camera.position.set(x + 24, gy + 7, -(y - 18)); c.orbit.target.set(x, gy + 3, -y); c.orbit.update() }, [street.x, street.y])
 for (let i = 0; i < 120; i++) { if (await off.evaluate(() => { let n = 0; window.corridor.scene.traverse((o) => { if (o.name === 'buildings:massing') n++ }); return n })) break; await off.waitForTimeout(2000) }

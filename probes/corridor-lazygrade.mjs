@@ -15,7 +15,7 @@ const page = await browser.newPage({ viewport: { width: 800, height: 500 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 200)))
 await page.route('**/@vite/client', (r) => r.abort())
 const t0 = Date.now()
-await page.goto(`http://localhost:${PORT}/?lite=1${stance ? `&stance=${stance}` : ''}#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`http://localhost:${PORT}/#${slug}?lite=1${stance ? `&stance=${stance}` : ''}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 600000 })
 const ready = (Date.now() - t0) / 1000
 let fails = 0

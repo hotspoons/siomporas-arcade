@@ -18,7 +18,7 @@ await p.route('**/@vite/client', (r) => r.fulfill({ status: 200, contentType: 'a
 let bad = 0
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) bad++ }
 
-await p.goto(`${VIEWER}?level=crofton-jam#crofton-triangle`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`${VIEWER}#crofton-triangle?level=crofton-jam`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.__apex?.site, null, { timeout: 240000 })
 await p.waitForFunction(() => !!window.__apex?.game && !!window.__apex?.traffic, null, { timeout: 180000 }).catch(() => {})
 await p.waitForTimeout(2000)

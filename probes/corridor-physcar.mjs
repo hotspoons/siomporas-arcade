@@ -35,7 +35,7 @@ const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable
 const page = await browser.newPage({ viewport: { width: 640, height: 420 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://127.0.0.1:${PORT}/?lite&phys=1#${site}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/#${site}?lite&phys=1`, { waitUntil: 'load' })
 await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 240000 })
 await page.waitForFunction(() => !!window.corridor.physics, null, { timeout: 120000 })
 

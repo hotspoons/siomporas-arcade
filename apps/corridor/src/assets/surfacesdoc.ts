@@ -11,9 +11,10 @@
 // drawn from. Nothing in it is required; a class it does not mention draws as it always did.
 
 import type { FacadePatch } from '../world/facades'
+import { param } from '../url'
 
 /** where the bake is served from (site.ts DATA_BASE), read lazily so this module loads under node for its tests */
-const dataBase = () => (typeof location === 'undefined' ? '' : (new URLSearchParams(location.search).get('data') ?? ''))
+const dataBase = () => param('data') ?? ''
 
 export interface SurfacesDoc {
   version: 1

@@ -35,7 +35,7 @@ await page.route(`**/sites/${slug}/splats.json`, async (route) => {
   await route.fulfill({ response: r, body: JSON.stringify(j), headers: { ...r.headers(), 'content-type': 'application/json' } })
 })
 
-await page.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`http://localhost:${PORT}/#${slug}?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction(() => !!window.corridor?.tune, null, { timeout: 600000 })
 await page.waitForFunction(() => !!window.corridor?.site && !!window.corridor.splats?.().length, null, { timeout: 600000 })
 

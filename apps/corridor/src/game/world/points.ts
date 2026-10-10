@@ -14,6 +14,7 @@
 // bake's photo station, which is where every world has always opened.
 
 import type { FrameStamp } from '../../editor/store/schema'
+import { param } from '../../url'
 
 export const POINT_KINDS = ['home', 'start', 'finish', 'checkpoint', 'spot'] as const
 export type PointKind = (typeof POINT_KINDS)[number]
@@ -48,7 +49,7 @@ export interface PointsDoc {
 
 export const EMPTY_POINTS: PointsDoc = { version: 1, points: [] }
 
-const dataBase = () => (typeof location === 'undefined' ? '' : (new URLSearchParams(location.search).get('data') ?? ''))
+const dataBase = () => param('data') ?? ''
 
 export async function loadPoints(slug: string, base = dataBase()): Promise<PointsDoc> {
   try {

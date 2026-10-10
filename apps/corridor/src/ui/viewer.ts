@@ -27,10 +27,11 @@ import { STYLES, type Style } from '../visuals/style'
 /** the exaggerations offered; a URL may carry any value in 0.25–10 and the select grows to show it */
 const RELIEFS = [1, 1.5, 2, 3, 5]
 const clampReliefParam = () => {
-  const k = Number(new URLSearchParams(location.search).get('relief'))
+  const k = Number(param('relief'))
   return Number.isFinite(k) && k > 0 ? Math.min(10, Math.max(0.25, k)) : 1
 }
 import { WEATHERS, type Weather } from '../visuals/weather'
+import { param } from '../url'
 
 /**
  * Layers, grouped by what they are rather than by the order someone happened to add them.
@@ -476,7 +477,7 @@ export class ViewerUI {
       })),
       ...only('display.style', () => select<Style>({
         label: 'Style',
-        value: (new URLSearchParams(location.search).get('style') as Style) || 'realistic',
+        value: (param('style') as Style) || 'realistic',
         options: STYLES.map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) })),
         onChange: (v) => this.o.onStyle(v),
       })),

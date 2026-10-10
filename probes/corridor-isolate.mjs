@@ -4,7 +4,7 @@ const [,, slug, outDir] = process.argv
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log(m.type(), m.text().slice(0, 200)) })
-await page.goto(`http://127.0.0.1:5185/?season=summer#${slug}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:5185/#${slug}?season=summer`, { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 180000 })
 await page.waitForTimeout(2000)
 await page.screenshot({ path: `${outDir}/iso-0-default.png`, timeout: 120000 })

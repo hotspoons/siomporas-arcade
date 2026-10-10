@@ -49,7 +49,7 @@ await page.route('**/@vite/client', (r) => r.abort())
 
 // FIRST WITHOUT THE LEVEL, so the "after" has something to be different from. A test that only
 // looks at the end state cannot tell "the level set this" from "this was already true".
-await page.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`http://localhost:${PORT}/#${slug}?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 900000 })
 await page.evaluate(() => window.corridor.tune.set('TIME_RATE', 0))
 const before = await page.evaluate(() => ({

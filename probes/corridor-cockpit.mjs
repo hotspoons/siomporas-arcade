@@ -13,7 +13,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 640, height: 420 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://127.0.0.1:${PORT}/?lite#${site}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/#${site}?lite`, { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 240000 })
 await page.keyboard.press('Tab') // drive
 

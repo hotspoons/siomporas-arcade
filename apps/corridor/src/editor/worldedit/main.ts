@@ -49,6 +49,7 @@ import { assetsvc, type Build } from '../../assets/assetsvc'
 import type { ZoneDoc } from '../../game/world/zones'
 import type { StuntDoc } from '../../game/stunt/stunts'
 import type { CourseDoc } from '../../game/race/races'
+import { format as gameHash } from '../../url'
 
 /**
  * The tabs, as one list.
@@ -119,10 +120,10 @@ const stagePanel = new StagePanel({
   host: inspector,
   bakedWorlds: () => worlds.filter((w) => w.baked).map((w) => w.slug),
   play: (level) => {
-    // the viewer, on that world, with the level applied — `?level=` in main.ts. `/index.html`
-    // by name: in the pod `/` IS this page (the world editor), so `/?level=` opened a second
-    // editor and never the game (Rich, 2026-09-30). The dev server serves index.html at both.
-    window.open(`/index.html?level=${encodeURIComponent(level.id)}#${level.world}`, '_blank', 'noopener')
+    // the viewer, on that world, with the level applied — `#world?level=id` (url.ts). `/index.html`
+    // by name: in the pod `/` IS this page (the world editor), so `/#…` opened a second editor and
+    // never the game (Rich, 2026-09-30). The dev server serves index.html at both.
+    window.open(`/index.html${gameHash({ slug: level.world, params: { level: level.id } })}`, '_blank', 'noopener')
   },
   onDirty: (d) => setDirty(d, 'level'),
 })
@@ -989,7 +990,7 @@ function renderWorldSelect() {
     variant: 'ghost',
     title: w?.baked ? `drive ${w.slug}` : w ? `${w.slug} is not baked yet` : 'no world selected',
     disabled: !w?.baked,
-    onClick: () => { if (w?.baked) location.href = `/index.html?site=${w.slug}` },
+    onClick: () => { if (w?.baked) location.href = `/index.html${gameHash({ slug: w.slug })}` },
   }))
 }
 

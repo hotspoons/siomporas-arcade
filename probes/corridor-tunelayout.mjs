@@ -17,7 +17,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 520, height: 780 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 200)))
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://localhost:${PORT}/?lite=1#crofton-triangle`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await page.goto(`http://localhost:${PORT}/#crofton-triangle?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction(() => !!window.corridor?.tune, null, { timeout: 600000 })
 
 // the knob table, independent of the DOM

@@ -10,7 +10,7 @@ const p = await b.newPage({ viewport: { width: 800, height: 500 } })
 const errs = []
 p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)))
 await p.route('**/@vite/client', (r) => r.abort())
-await p.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`http://localhost:${PORT}/#${slug}?lite=1`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.corridor?.site, null, { timeout: 600000 })
 await p.waitForTimeout(3000)
 let fails = 0

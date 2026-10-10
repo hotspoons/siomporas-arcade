@@ -37,7 +37,7 @@ const ready = () => page.waitForFunction(() => !!window.corridor?.site, null, { 
 // `?phys=1`, not the F6 knob. PHYS_ENABLED is read once, when the site builds, and `tune.set`
 // persists NOTHING — measured: set it, reload, and it is back to the default with the physics
 // never started. A load-time knob needs a load-time switch.
-await page.goto(`http://127.0.0.1:${PORT}/?lite&phys=1#${site}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/#${site}?lite&phys=1`, { waitUntil: 'load' })
 await ready()
 await page.waitForFunction(() => !!window.corridor.physics, null, { timeout: 120000 })
 

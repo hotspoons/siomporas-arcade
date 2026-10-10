@@ -15,7 +15,7 @@ page.on('pageerror', (e) => console.log('pageerror', e.message))
 const shaderErrors = []
 page.on('console', (m) => { const t = m.text(); if (/WebGLProgram|shader|GLSL/i.test(t)) shaderErrors.push(t.slice(0, 400)) })
 await page.route('**/@vite/client', (r) => r.abort())
-await page.goto(`http://127.0.0.1:${PORT}/?lite#${site}`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/#${site}?lite`, { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 240000 })
 
 const knobs = Object.fromEntries((process.env.CORRIDOR_KNOBS ?? '').split(',').filter(Boolean).map((kv) => { const [k, v] = kv.split(':'); return [k, Number(v)] }))
@@ -73,11 +73,9 @@ if (out && r.first_changes?.length) {
       },
     }
   }, s)
-  const u = new URL(`http://127.0.0.1:${PORT}/`)
-  u.searchParams.set('lite', '')
-  u.searchParams.set('stance', Buffer.from(JSON.stringify(st)).toString('base64'))
-  u.hash = st.site
-  await page.goto(u.toString(), { waitUntil: 'domcontentloaded', timeout: 180000 })
+  // the game's address: the world and then its options, all in the hash (apps/corridor/src/url.ts)
+  const q = new URLSearchParams({ lite: '', stance: Buffer.from(JSON.stringify(st)).toString('base64') })
+  await page.goto(`http://127.0.0.1:${PORT}/#${st.site}?${q}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
   await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 240000 })
   await page.evaluate(async (knobs) => {
     const keys = (window.corridor.tune ?? []).flatMap((t) => t.sections.flatMap((x) => x.keys))

@@ -7,7 +7,7 @@ const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftsha
 const p = await b.newPage({ viewport: { width: 800, height: 500 } })
 p.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 200)))
 await p.route('**/@vite/client', (r) => r.abort())
-await p.goto(`http://localhost:${PORT}/?lite=1&fresh#${slug}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await p.goto(`http://localhost:${PORT}/#${slug}?lite=1&fresh`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await p.waitForFunction(() => !!window.corridor?.site, null, { timeout: 600000 })
 await p.waitForTimeout(3000)
 let fails = 0

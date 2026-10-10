@@ -6,8 +6,9 @@
 // carry a dozen stages and no stunts, or the other way round.
 
 import type { CourseDoc } from '../../game/race/races'
+import { param } from '../../url'
 
-const base = new URLSearchParams(location.search).get('data') ?? ''
+const base = param('data') ?? ''
 export const CAN_SAVE_COURSES = base === ''
 
 export async function loadCourses(slug: string): Promise<CourseDoc> {

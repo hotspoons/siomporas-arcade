@@ -29,7 +29,7 @@ async function visit(facades) {
   page.on('pageerror', (e) => errors.push(e.message.slice(0, 200)))
   // the knob as the F6 panel keeps it, before the page reads it
   await page.addInitScript((on) => { try { localStorage.setItem('apex-corridor-world.tune.v1', JSON.stringify({ v: 2, values: { BUILDING_FACADES: on }, touched: ['BUILDING_FACADES'] })) } catch { /* */ } }, facades)
-  await page.goto(`http://127.0.0.1:${PORT}/?ui=dev#${WORLD}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
+  await page.goto(`http://127.0.0.1:${PORT}/#${WORLD}?ui=dev`, { waitUntil: 'domcontentloaded', timeout: 180000 })
   await page.waitForFunction((slug) => window.corridor?.site?.manifest?.slug === slug, WORLD, { timeout: 600000 })
   // the level places the car after the site loads: wait for it, or the drop below is undone
   await page.waitForFunction(() => !!window.corridor.car, null, { timeout: 300000 }).catch(() => {})

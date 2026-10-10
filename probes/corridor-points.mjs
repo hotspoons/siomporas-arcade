@@ -47,7 +47,7 @@ try {
   const v = await b.newPage({ viewport: { width: 900, height: 640 } })
   v.on('pageerror', (x) => console.log('PAGEERROR', x.message.slice(0, 200)))
   await stub(v)
-  await v.goto('http://127.0.0.1:5185/index.html?nostance=1#crofton-triangle', { waitUntil: 'domcontentloaded', timeout: 120000 })
+  await v.goto('http://127.0.0.1:5185/index.html#crofton-triangle?nostance=1', { waitUntil: 'domcontentloaded', timeout: 120000 })
   await v.waitForFunction(() => !!window.__apex?.site, null, { timeout: 240000 })
   await v.waitForTimeout(1500)
   const vw = await v.evaluate(async () => {

@@ -9,6 +9,8 @@
 // Nothing here is awaited by the frame loop; a browser without the API (or a page that is not
 // secure) simply never holds one, and `wakeLockState()` says which.
 
+import { isBackgrounded, onPageState } from '../../world/pageactive'
+
 type Sentinel = { released: boolean; release(): Promise<void>; addEventListener(t: 'release', fn: () => void): void }
 
 let wanted = false
@@ -38,7 +40,7 @@ async function acquire(): Promise<void> {
 }
 
 function onVisible(): void {
-  if (document.visibilityState === 'visible' && wanted && !held) void setWakeLock(true)
+  if (document.visibilityState === 'visible' && !isBackgrounded() && wanted && !held) void setWakeLock(true)
 }
 
 /** Hold the screen on (true) or let it go (false). Idempotent; safe to call every retune. */
@@ -47,6 +49,9 @@ export function setWakeLock(on: boolean): Promise<void> {
   if (!listening && typeof document !== 'undefined') {
     listening = true
     document.addEventListener('visibilitychange', onVisible)
+    // and on the page-state poll: a tab reloaded in the background never fires visibilitychange when
+    // it comes forward if the browser already called it visible (pageactive.ts)
+    onPageState((st) => { if (!st.backgrounded) onVisible() })
   }
   if (!on) {
     const s = held

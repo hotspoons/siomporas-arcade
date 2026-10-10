@@ -47,7 +47,7 @@ export class StructureMode {
   private handles = new THREE.Group()
   private pickGroup = new THREE.Group()
   /** picking an interval: null = not picking, `{ s0: null }` = waiting for the first click */
-  private pick: { s0: number | null } | null = null
+  private picker: { s0: number | null } | null = null
   private grabbed: 'start' | 'end' | null = null
   /** `false` = only a value changed; the panel must not be rebuilt under the pointer. */
   private onChange: (structural?: boolean) => void
@@ -64,7 +64,7 @@ export class StructureMode {
     this.slug = slug
     this.site = site
     this.catalog = catalog
-    this.pick = null
+    this.picker = null
     this.selected = null
     this.grabbed = null
     this.table = []
@@ -79,7 +79,7 @@ export class StructureMode {
   }
 
   get picking() {
-    return this.pick !== null
+    return this.picker !== null
   }
 
   // --- the spine -------------------------------------------------------------------------------
@@ -217,6 +217,8 @@ export class StructureMode {
     const g = await buildBridges([it], cat, (s) => site.spineAt(s), (x, z) => site.groundAt(x, z) ?? site.heightAt(x, -z), (s) => this.pavedWidthAt(s))
     if (this.builds.get(id) !== serial || !this.doc.items.includes(it)) return // superseded meanwhile
     g.traverse((o) => (o.userData.structureId = id))
+    // a bridge is a structure in the world, not an authoring mark: solid in every mode (view/emphasis.ts)
+    g.userData.emphasisKeep = true
     this.group.add(g)
     this.bridges.set(id, g)
   }
@@ -248,8 +250,8 @@ export class StructureMode {
 
   private refreshPick() {
     this.pickGroup.clear()
-    if (!this.pick || this.pick.s0 === null || !this.site) return
-    const p = this.site.spineAt(this.pick.s0).pos
+    if (!this.picker || this.picker.s0 === null || !this.site) return
+    const p = this.site.spineAt(this.picker.s0).pos
     const m = handleMesh(PICK, 1.8)
     m.position.set(p.x, p.y + 0.8, p.z)
     this.pickGroup.add(m)
@@ -257,14 +259,14 @@ export class StructureMode {
 
   // --- editing -------------------------------------------------------------------------------------
   startPick() {
-    this.pick = { s0: null }
+    this.picker = { s0: null }
     this.select(null)
     this.refreshPick()
     this.onChange()
   }
 
   cancelPick() {
-    this.pick = null
+    this.picker = null
     this.refreshPick()
     this.onChange()
   }
@@ -343,17 +345,17 @@ export class StructureMode {
   // --- input, delegated from main -------------------------------------------------------------------
   /** A click on the ground: an interval end while picking, else select the interval under it. */
   click(pt: { x: number; y: number } | null) {
-    if (this.pick) {
+    if (this.picker) {
       if (!pt) return
       const { s } = this.nearest(pt.x, pt.y)
-      if (this.pick.s0 === null) {
-        this.pick.s0 = s
+      if (this.picker.s0 === null) {
+        this.picker.s0 = s
         this.refreshPick()
         this.onChange()
         return
       }
-      const s0 = this.pick.s0
-      this.pick = null
+      const s0 = this.picker.s0
+      this.picker = null
       this.refreshPick()
       void this.add(s0, s)
       return
@@ -364,6 +366,54 @@ export class StructureMode {
     // shortest interval wins, so a bridge inside a long flatten is still reachable
     const hits = this.doc.items.filter((i) => s >= i.s_start - 1 && s <= i.s_end + 1).sort((p, q) => p.s_end - p.s_start - (q.s_end - q.s_start))
     this.select(hits[0]?.id ?? null)
+  }
+
+  /** Is this tool in the middle of something? Then the click is its own (picking an interval's ends). */
+  get busy(): boolean {
+    return this.picker !== null
+  }
+
+  /**
+   * The interval under a ground point, without taking the click — so a click from any mode can
+   * land on a structure (main.ts `routeClick`). `size` is the ribbon's area: the shortest interval
+   * wins, as it does inside this mode.
+   */
+  pick(pt: { x: number; y: number }): { id: string; size: number } | null {
+    if (!this.table.length || !this.doc.items.length) return null
+    const { s, lateral } = this.nearest(pt.x, pt.y)
+    const half = this.pavedWidthAt(s) / 2
+    if (Math.abs(lateral) > half + 4) return null
+    const hits = this.doc.items.filter((i) => s >= i.s_start - 1 && s <= i.s_end + 1).sort((p, q) => p.s_end - p.s_start - (q.s_end - q.s_start))
+    const it = hits[0]
+    return it ? { id: it.id, size: Math.max(1, it.s_end - it.s_start) * 2 * half } : null
+  }
+
+  /** The ribbon's edge — both sides of the interval — for the editor's hover ring. */
+  outline(id: string): [number, number][] | null {
+    const it = this.doc.items.find((x) => x.id === id)
+    if (!it || !this.site) return null
+    const a = Math.min(it.s_start, it.s_end), b = Math.max(it.s_start, it.s_end)
+    const left: [number, number][] = [], right: [number, number][] = []
+    const n = Math.max(1, Math.ceil((b - a) / 10))
+    for (let i = 0; i <= n; i++) {
+      const s = a + ((b - a) * i) / n
+      const { pos: p, dir } = this.site.spineAt(s)
+      const half = this.pavedWidthAt(s) / 2 + 0.6
+      const l = Math.hypot(dir.x, dir.z) || 1
+      const sx = -dir.z / l, sz = dir.x / l
+      left.push([p.x - sx * half, -(p.z - sz * half)])
+      right.push([p.x + sx * half, -(p.z + sz * half)])
+    }
+    return [...left, ...right.reverse()]
+  }
+
+  /** Each structure's name at the middle of its interval, for the active mode's labels. */
+  labels(): { id: string; text: string; at: [number, number] }[] {
+    if (!this.site) return []
+    return this.doc.items.map((it) => {
+      const p = this.site!.spineAt((it.s_start + it.s_end) / 2).pos
+      return { id: it.id, text: it.name, at: [p.x, -p.z] as [number, number] }
+    })
   }
 
   /** Track the pointer while picking so the panel can show where the click would land. */
@@ -379,7 +429,7 @@ export class StructureMode {
 
   /** Did the pointer land on an end handle? Then the drag is ours and orbit stands down. */
   grab(ray: THREE.Raycaster): boolean {
-    if (this.pick) return false
+    if (this.picker) return false
     const hit = ray.intersectObjects(this.handles.children, false)[0]
     this.grabbed = hit ? (hit.object.userData.end as 'start' | 'end') : null
     return this.grabbed !== null
@@ -408,7 +458,7 @@ export class StructureMode {
   }
 
   key(e: KeyboardEvent): boolean {
-    if (e.key === 'Escape' && this.pick) {
+    if (e.key === 'Escape' && this.picker) {
       this.cancelPick()
       return true
     }
@@ -476,8 +526,8 @@ export class StructureMode {
   }
 
   private kindsTab(root: HTMLElement) {
-    root.append(el('p', 'dim', this.pick
-      ? (this.pick.s0 === null ? 'click the road where the interval STARTS (Esc cancels)' : `start s ${this.pick.s0.toFixed(1)} — click where it ENDS`)
+    root.append(el('p', 'dim', this.picker
+      ? (this.picker.s0 === null ? 'click the road where the interval STARTS (Esc cancels)' : `start s ${this.picker.s0.toFixed(1)} — click where it ENDS`)
       : 'drag a kind onto the road for an 80 m interval there, or pick the interval by hand: two clicks, start then end'))
     const palette = el('div', 'palette')
     for (const k of STRUCTURE_KINDS) {
@@ -486,8 +536,8 @@ export class StructureMode {
     root.append(palette)
     const tools = el('div', 'row')
     const pickBtn = el('button')
-    pickBtn.textContent = this.pick ? 'cancel the pick (Esc)' : 'pick an interval (N)'
-    pickBtn.onclick = () => (this.pick ? this.cancelPick() : this.startPick())
+    pickBtn.textContent = this.picker ? 'cancel the pick (Esc)' : 'pick an interval (N)'
+    pickBtn.onclick = () => (this.picker ? this.cancelPick() : this.startPick())
     tools.append(pickBtn)
     root.append(tools)
     this.hover = el('p', 'dim mono')

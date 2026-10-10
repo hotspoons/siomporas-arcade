@@ -151,6 +151,14 @@ COPY tools/worldeditor/ tools/worldeditor/
 # transpiling worked, checking did not. And the engine-sound list the vocabulary tool reads.
 COPY apps/corridor/src/generated/program-types.json apps/corridor/src/generated/program-types.json
 COPY packages/enginesim/wasm/engines.json packages/enginesim/wasm/engines.json
+# `program_refs` (programrefs.mjs) builds its rows with the app's OWN worldthings.ts — imported as
+# TypeScript, which this Node runs with the types stripped — so an agent is handed the snippets the
+# Program pane inserts rather than a copy that drifts; classes.ts says what a library asset is. And
+# the sound bank, which `level_vocab` and `program_refs` both list: vocab.mjs has read it from this
+# path since the sounds landed, and without the copy the pod answered an empty list for both.
+COPY apps/corridor/src/game/world/worldthings.ts apps/corridor/src/game/world/worldthings.ts
+COPY apps/corridor/src/assets/classes.ts apps/corridor/src/assets/classes.ts
+COPY apps/corridor/public/sounds/bank.json apps/corridor/public/sounds/bank.json
 COPY --from=app /src/node_modules/ws/ node_modules/ws/
 # TypeScript too: `programs.mjs` transpiles and typechecks a level's program on request (`?js=1`
 # is what the viewer asks for when a level names one), and it `require('typescript')`s lazily —

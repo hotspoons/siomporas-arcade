@@ -2,7 +2,7 @@
 
 **Status:** Phase 0 (the two hangs) shipped. Phase 1 (plan → shard → finalize) shipped: the
 corridor engine (`corridor plan|shard|finalize`, `corridor/shards.py`) and the worldeditor
-orchestration (`runs.bake` fans plan → N shard Jobs → finalize above `shardAboveM`). Phase 2
+orchestration (`runs.bake` fans plan → N shard Jobs → finalize above `shardAboveM`). **Default since 2026-10-10:** `shardAboveM` 5000 (a world more than 10 km across), blocks of ≤ 10 km (`shardSideM`), up to 36 of them (`maxShards`); env `WORLDEDITOR_SHARD_ABOVE_M=0` turns it off, a request's `sharded: false` opts one bake out, and the MCP `run_bake` takes `sharded`. Phase 2
 (cluster-aware sizing) is partially shipped — shards spread by `topologySpreadConstraints`, request
 sizing is still the one 384 Gi request.
 

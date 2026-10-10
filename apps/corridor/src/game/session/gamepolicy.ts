@@ -81,6 +81,7 @@ export const SETTING_CONTROLS = {
   'game.tuning': 'the tuning panel (F6) entry',
   'game.developer': 'the developer view toggle',
   'game.restart': 'restart from the start point',
+  'game.levels': 'the level select: the world’s other stages',
   'game.transport': 'the drive / fly switch in the menu',
   'game.physics': 'the physics world: the world’s default, or on, or off',
 } as const

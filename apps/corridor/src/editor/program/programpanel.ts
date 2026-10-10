@@ -17,9 +17,11 @@
 // no renderer behind it, steps it for a few simulated seconds, and reports what happened — the
 // zones declared, the goal set, the messages said, the outcome, and the throw if there was one.
 // That is the difference between "the compiler is happy" and "this is a level".
-import type { WorldThing, WorldThingKind } from '../../game/world/worldthings'
+import { KIND_ABOUT, KIND_LABEL, KIND_ORDER, thingMatches, type WorldThing, type WorldThingKind } from '../../game/world/worldthings'
+import { icon } from '../../ui/icons'
 import { CodeEditor, forget, knowAbout, languageForPath, type Diagnostic } from './codeeditor'
-import { GameRun, type GameDef, type ProgramHost, type Transport } from '../../game/session/program'
+import { GameRun, type FinishResult, type GameDef, type ProgramHost, type Transport } from '../../game/session/program'
+import { formatAmount } from '../../game/session/finish'
 import { rewriteImports } from '../../game/session/programload'
 import { ActorWorld } from '../../game/actors/actorworld'
 import { bodyOf, group, readout } from '../../ui/controls'
@@ -170,6 +172,22 @@ export default defineGame({
         if (e.impulse > 8000) api.say('that was a big one', 'warn')
       })
     }
+
+    // ---- 10 · the score, and the end -----------------------------------------------------
+    //
+    // The score is the run's winnings. A currency makes it money on the HUD and on the finish
+    // screen; a label puts a payment on a line of the breakdown ("Laps ×3 — $1,500").
+    // \`api.finish\` ends the run: the finish screen turns the car (or, on foot, the character)
+    // on a turntable, counts the total up, and offers Restart and Exit to menu. Nothing here
+    // ends this starter level — uncomment the last line to see the screen after a minute.
+    api.score.currency('$')
+    api.on('enters', 'start', () => api.score.add(50, 'Laps'))
+    api.on('finish', (r) => console.log('finished:', r.outcome, r.winnings?.total))
+    // api.after(60, () => api.finish({
+    //   outcome: 'win',
+    //   title: 'Sixty seconds survived',
+    //   stats: [{ label: 'Distance', value: (api.facts().distance_m / 1000).toFixed(1) + ' km' }],
+    // }))
   },
 
   /*
@@ -220,11 +238,40 @@ export interface ProgramPanelOpts {
   instances?: () => Promise<{ world: string | null; items: WorldThing[] }>
 }
 
-const KIND_LABEL: Record<WorldThingKind, string> = {
-  placement: 'Placed',
-  traffic: 'Traffic zones',
-  stunt: 'Stunt fixtures',
-  race: 'Races',
+/**
+ * Something clickable that is not a `<button>`.
+ *
+ * The inspector styles every bare button it holds as a bordered pill (editor.css, `.inspector-body
+ * button:not(.btn)…`), which turns a list of two hundred rows into two hundred boxes; the opt-outs
+ * there are a list of class names other lanes also edit. A focusable element with the button role
+ * and Enter/Space is the same control to a keyboard and a screen reader, and is left alone.
+ */
+function pressable(cls: string): HTMLElement {
+  const e = el('div', cls)
+  e.setAttribute('role', 'button')
+  e.tabIndex = 0
+  e.addEventListener('keydown', (k) => {
+    if (k.key !== 'Enter' && k.key !== ' ') return
+    k.preventDefault()
+    e.click()
+  })
+  return e
+}
+
+/** What a dragged row carries: the snippet, under a type nothing else on the page drops. */
+const SNIPPET_MIME = 'application/x-apex-snippet'
+/** Which "In this world" groups are shut, between visits. */
+const SHUT = 'apex-program-refs-shut.v1'
+/** The big two start shut: sixteen sound slots and a library of fifty-odd would bury the zones. */
+const SHUT_BY_DEFAULT: WorldThingKind[] = ['sound', 'library']
+/** Rows drawn per group before "search to narrow" — a library of a thousand is a list nobody scrolls. */
+const ROWS_PER_GROUP = 200
+
+/** The finish screen in one line: "Mission complete · $1,340 (2 lines) · car", or "no screen". */
+function finishLine(r: FinishResult): string {
+  if (!r.screen) return `${r.title} · no screen`
+  const w = r.winnings ? ` · ${formatAmount(r.winnings.total, r.winnings.currency)}${r.winnings.lines.length ? ` (${r.winnings.lines.length} line${r.winnings.lines.length === 1 ? '' : 's'})` : ''}` : ''
+  return `${r.title}${w} · ${r.show ?? 'car or character'}`
 }
 
 /** What a dry run found out. Every field is something a person would otherwise have to play for. */
@@ -240,6 +287,8 @@ export interface DryRun {
   messages: string[]
   score: number
   outcome: string | null
+  /** what the finish screen would show: the headline, the winnings, the turntable — null while running */
+  finish: string | null
   /** simulated seconds stepped */
   played: number
 }
@@ -279,7 +328,7 @@ export async function dryRun(js: string, { seconds = 5, step = 0.05 }: { seconds
   const blob = URL.createObjectURL(new Blob([rewriteImports(js)], { type: 'text/javascript' }))
   const base: DryRun = {
     ok: false, error: null, goal: '', zones: [], hidden: [], transport: null, presets: [], messages: [],
-    score: 0, outcome: null, played: 0,
+    score: 0, outcome: null, finish: null, played: 0,
   }
   try {
     const mod = (await import(/* @vite-ignore */ blob)) as { default?: GameDef }
@@ -307,6 +356,7 @@ export async function dryRun(js: string, { seconds = 5, step = 0.05 }: { seconds
       messages: run.messages.map((m) => m.text),
       score: run.score,
       outcome: run.outcome,
+      finish: run.result ? finishLine(run.result) : null,
       played: +played.toFixed(2),
     }
   } catch (e) {
@@ -622,6 +672,26 @@ export class ProgramPanel {
       value,
       onChange: () => this.onEdited(path),
     })
+    /*
+     * A ROW DROPPED ON THE CODE is the same insert as a click, at the line it was dropped on.
+     * Caught here, in the capture phase, rather than left to Monaco: its own text drop pastes the
+     * snippet raw at the pixel, mid-line and unindented, which is the thing `insertBlock` exists to
+     * not do. Only our type is taken; anything else dropped here is Monaco's business as before.
+     */
+    host.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer?.types.includes(SNIPPET_MIME)) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'copy'
+    }, true)
+    host.addEventListener('drop', (e) => {
+      const text = e.dataTransfer?.getData(SNIPPET_MIME)
+      if (!text) return
+      e.preventDefault()
+      e.stopPropagation()
+      editor.insertBlock(text, editor.positionAt(e.clientX, e.clientY) ?? undefined)
+      void this.check()
+    }, true)
     const o: Open = { path, editor, host, saved }
     this.open.set(path, o)
     await editor.whenReady()
@@ -728,6 +798,7 @@ export class ProgramPanel {
       if (d.goal) b.append(readout('goal', d.goal))
       b.append(readout('outcome', d.outcome ?? 'still running'))
       b.append(readout('score', String(d.score)))
+      if (d.finish) b.append(readout('finish screen', d.finish))
       if (d.zones.length) b.append(readout('zones', d.zones.join(', ')))
       if (d.hidden.length) b.append(readout('hidden', d.hidden.join(', ')))
       if (d.transport) b.append(readout('transport', d.transport))
@@ -738,41 +809,139 @@ export class ProgramPanel {
   }
 
   /**
-   * The things in this world, by the id a program says.
+   * EVERYTHING A PROGRAM CAN NAME IN THIS WORLD, by the id a program says.
    *
-   * Clicking one puts `api.placed('p-07')` at the caret, because the useful thing to do with an
-   * id you just found is use it, and retyping it from a list is where the typo comes from.
+   * Rich, 2026-10-10: *"The game editor has no sound or placed items (e.g. traffic zones, points)
+   * listing in the right, nor no assets we can reference from the library in case we want to spawn
+   * something at a point for a given condition."* It listed traffic zones and nothing else, so the
+   * ids a program most wants — the finish point, the crash sound, the thing to spawn — were in
+   * three JSON files and a library tab.
+   *
+   * A GROUP PER KIND, each shut or open (remembered), one search over all of them, and every row
+   * the same three things: the id, a line about it, and the code that uses it — inserted on click
+   * or dropped onto a line (see `insertBlock`), already written for this id and this world, and
+   * typechecked by test (test/worldthings.test.ts). The hover is everything else known about it.
+   * The rows themselves come from `worldThings`, which the MCP server's `program_refs` also uses,
+   * so an agent and a person are offered the same code.
    */
   private instances: WorldThing[] = []
   private instanceWorld: string | null = null
+  private refQuery = ''
+  private refShut: Set<WorldThingKind> | null = null
   private drawInstances(into: HTMLElement): void {
     if (!this.o.instances) return
     const g = group(`In this world (${this.instances.length})`, { collapsed: !this.instances.length, note: this.instanceWorld ?? undefined })
+    g.classList.add('refs')
     const b = bodyOf(g)
     if (!this.instances.length) {
       b.append(el('p', 'note', this.instanceWorld
-        ? 'Nothing in this world yet. Place things, paint traffic, stand up a stunt or lay out a race and they appear here.'
+        ? 'Nothing in this world yet. Place things, paint traffic, drop points, stand up a stunt or lay out a race and they appear here.'
         : 'No world open.'))
+      into.append(g)
+      return
     }
-    /*
-     * GROUPED BY LAYER, and each group is there only when the world has one. A heading that says
-     * "Traffic zones (0)" teaches you nothing; a world with three zones and no races should read as
-     * a world with three zones.
-     */
-    const kinds: WorldThingKind[] = ['placement', 'traffic', 'stunt', 'race']
-    for (const kind of kinds) {
+    if (!this.refShut) {
+      let saved: WorldThingKind[] | null = null
+      try { saved = JSON.parse(localStorage.getItem(SHUT) ?? 'null') } catch { /* a fresh browser */ }
+      this.refShut = new Set(saved ?? SHUT_BY_DEFAULT)
+    }
+    const shut = this.refShut
+
+    // THE SEARCH FILTERS IN PLACE. `drawReport` rebuilds this whole inspector on every check, and a
+    // box rebuilt under the caret loses it; so typing hides rows, and only the query is kept for
+    // the next rebuild.
+    const filter = el('div', 'tree-filter refs-filter')
+    const box = el('input', 'input wide') as HTMLInputElement
+    box.type = 'search'
+    box.placeholder = `search ${this.instances.length} ids, sounds and assets`
+    box.value = this.refQuery
+    filter.append(icon('magnifying-glass', 14), box)
+    b.append(filter)
+
+    const sections: { kind: WorldThingKind; sec: HTMLElement; head: HTMLElement; count: HTMLElement; rows: { row: HTMLElement; it: WorldThing }[]; more: HTMLElement }[] = []
+    for (const kind of KIND_ORDER) {
       const items = this.instances.filter((i) => i.kind === kind)
       if (!items.length) continue
-      b.append(el('p', 'note dim', `${KIND_LABEL[kind]} (${items.length})`))
-      for (const it of items.slice(0, 200)) {
-        const row = el('button', 'row')
-        row.append(el('span', 'row-name', it.id), el('span', 'row-note', `${it.what}${it.tags.length ? ` · ${it.tags.join(' ')}` : ''}`))
-        row.title = `insert ${it.insert}`
-        row.onclick = () => this.editor()?.insert(it.insert)
-        b.append(row)
+      const sec = el('div', `refs-group${shut.has(kind) ? ' shut' : ''}`)
+      sec.dataset.kind = kind
+      const head = pressable('refs-head')
+      const count = el('span', 'refs-count', String(items.length))
+      head.append(icon('chevron-down', 12), el('span', 'refs-title', KIND_LABEL[kind]), count)
+      head.title = KIND_ABOUT[kind]
+      head.onclick = () => {
+        if (shut.has(kind)) shut.delete(kind)
+        else shut.add(kind)
+        sec.classList.toggle('shut', shut.has(kind))
+        try { localStorage.setItem(SHUT, JSON.stringify([...shut])) } catch { /* private window */ }
+      }
+      const list = el('div', 'refs-rows')
+      const rows: { row: HTMLElement; it: WorldThing }[] = []
+      for (const it of items) {
+        const row = this.refRow(it)
+        rows.push({ row, it })
+        list.append(row)
+      }
+      const more = el('p', 'note dim refs-more')
+      sec.append(head, list, more)
+      b.append(sec)
+      sections.push({ kind, sec, head, count, rows, more })
+    }
+
+    const apply = () => {
+      const q = this.refQuery.trim()
+      for (const s of sections) {
+        let shown = 0
+        let matched = 0
+        for (const { row, it } of s.rows) {
+          const hit = thingMatches(it, q)
+          if (hit) matched++
+          row.hidden = !hit || ++shown > ROWS_PER_GROUP
+        }
+        s.count.textContent = q ? `${matched} / ${s.rows.length}` : String(s.rows.length)
+        // a search shows what it found, open, whatever was shut; a group with no hit steps aside
+        s.sec.hidden = !!q && matched === 0
+        s.sec.classList.toggle('searching', !!q)
+        s.more.hidden = matched <= ROWS_PER_GROUP
+        s.more.textContent = `${matched - ROWS_PER_GROUP} more — search to narrow`
       }
     }
+    box.oninput = () => { this.refQuery = box.value; apply() }
+    apply()
     into.append(g)
+  }
+
+  /** One row: the id, its line, the code it inserts; a ▶ on a sound. */
+  private refRow(it: WorldThing): HTMLElement {
+    const row = el('div', 'refs-row')
+    const pick = pressable('row')
+    pick.append(el('span', 'row-name', it.id), el('span', 'row-note', it.desc))
+    pick.title = `${it.detail}\n\nClick, or drag onto a line, to insert:\n${it.insert}`
+    pick.draggable = true
+    pick.ondragstart = (e) => {
+      e.dataTransfer?.setData(SNIPPET_MIME, it.insert)
+      // plain text too, so a drop anywhere else (another editor, a note) gets the code
+      e.dataTransfer?.setData('text/plain', it.insert)
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+    }
+    pick.onclick = () => this.insertRef(it)
+    row.append(pick)
+    if (it.kind === 'sound') {
+      // the library's own preview player, the one the Sounds tab plays through. Imported when
+      // pressed: it brings the asset service's client with it, which reads `location` the moment
+      // it loads — and this panel is imported by tests that run with no page at all
+      const play = button({ icon: 'play', variant: 'ghost', title: `listen to ${it.id}`, onClick: () => void import('../library/soundpicker').then((m) => m.listen(it.id)) })
+      play.classList.add('refs-play')
+      row.append(play)
+    }
+    return row
+  }
+
+  /** A row's code at the caret, then a check — so "No type errors." is about the code with it in. */
+  private insertRef(it: WorldThing): void {
+    const ed = this.editor()
+    if (!ed) { toast('open a file first — the code goes in at its caret', 'info', 3000); return }
+    ed.insertBlock(it.insert)
+    void this.check()
   }
 
   /** Read them again — after a world changes, or after something is placed. */
@@ -812,6 +981,15 @@ export class ProgramPanel {
       openFile: (p: string) => this.openFile(p),
       save: () => this.save(),
       check: () => this.check().then(() => this.diagnostics),
+      /** the "In this world" rows, and inserting one at the caret as a click does */
+      refs: () => this.instances.map((t) => ({ id: t.id, kind: t.kind, desc: t.desc, insert: t.insert })),
+      insertRef: (kind: string, id: string) => {
+        const it = this.instances.find((t) => t.kind === kind && t.id === id)
+        if (it) this.insertRef(it)
+        return !!it
+      },
+      /** put the caret somewhere, so an insert lands where a probe means it to */
+      caret: (line: number, column = 1) => this.editor()?.reveal(line, column),
       emit: () => this.editor()?.emit() ?? Promise.resolve(null),
       dryRun: async () => {
         const js = await this.editor()?.emit()

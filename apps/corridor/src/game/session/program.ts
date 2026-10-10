@@ -27,6 +27,7 @@
 import { addComponent, addEntity, type World } from 'bitecs'
 import { Transform, Visual } from '../actors/actors'
 import type { ActorWorld } from '../actors/actorworld'
+import { inside } from '../../world/polygon'
 import type { Freedom, HudPart, SettingId, UiMode } from './gamepolicy'
 
 /* ---- what a program can ask the world to do ---------------------------------------------- */
@@ -79,8 +80,11 @@ export interface ProgramHost {
   /** a level-start post at a place. `kind` is start, pickup, dropoff, checkpoint, finish, goal. */
   mark?: (id: string, at: { x: number; y: number }, kind?: string) => void
   unmark?: (id: string) => void
-  /** the program ended: the viewer may open the next stage */
-  onFinish?: (outcome: 'win' | 'lose' | 'abandoned') => void
+  /**
+   * The program ended: the viewer may open the next stage, or put up the finish screen when
+   * `result.screen` says so. The result is absent only from a host written before it existed.
+   */
+  onFinish?: (outcome: 'win' | 'lose' | 'abandoned', result?: FinishResult) => void
   /** swap the player's controller */
   transport: (mode: Transport) => void
   /** apply or tween a named look from the world's presets library */
@@ -142,6 +146,8 @@ export interface ProgramHost {
   ground?: (x: number, y: number) => number | null
   /** models a program puts into the world itself, when the app can draw them */
   models?: ModelHost
+  /** the world's named places (points.json): starts, finishes, checkpoints, spots. Site metres */
+  points?: () => WorldPoint[]
   /** the objective list, as the HUD draws it */
   objectives?: ObjectivesHost
 }
@@ -174,6 +180,32 @@ export interface ModelPose {
 }
 
 /**
+ * ONE OF THE WORLD'S NAMED PLACES, as a program reads it: the Points tab's start, finish,
+ * checkpoint, spot and home, in site metres.
+ *
+ * Rich, 2026-10-10: *"nor no assets we can reference from the library in case we want to spawn
+ * something at a point for a given condition."* A program could put a model anywhere and could not
+ * ask where the finish line somebody placed IS — so "spawn the water tower at p-03" meant copying
+ * two numbers out of points.json by hand and watching them go stale the next time the point moved.
+ *
+ * `z` is the height the point stands at — the ground there plus its lift, or its absolute height —
+ * so a flying checkpoint is where the editor drew it. Null where nothing knows the ground (a dry run).
+ */
+export interface WorldPoint {
+  id: string
+  name: string
+  /** home, start, finish, checkpoint or spot */
+  kind: string
+  x: number
+  y: number
+  z: number | null
+  /** degrees anticlockwise from east, as the point was laid */
+  yaw_deg: number
+  /** what the level shows on arrival, when the point says */
+  note?: string
+}
+
+/**
  * MODELS A PROGRAM PUTS IN THE WORLD. Rich, 2026-09-30, after the pizza level had to reach
  * `window.corridor.site.layers.placements` to hide a pizza stack and clone a wad of cash: the
  * program API could name a placed thing and not show, hide, move or make one.
@@ -182,7 +214,10 @@ export interface ModelPose {
  * still a program a test can step — `spawn` answers null there, and the rest answer false.
  */
 export interface ModelHost {
-  /** put a catalog asset at a pose; the id to move it by, or null when there is no such asset */
+  /**
+   * put a library asset at a pose — a catalog id, or a vehicle, actor or weapon BUILD id, which
+   * wears its model — and answer the id to move it by, or null when there is no such asset
+   */
   spawn?: (asset: string, pose: ModelPose) => string | null
   move?: (id: string, pose: ModelPose) => boolean
   show?: (id: string, on: boolean) => boolean
@@ -367,6 +402,8 @@ export interface WorldLayersHost {
 
   /** the ids of the painted traffic zones */
   trafficIds?: () => string[]
+  /** one zone's outline, site metres, so `on('enters', id)` can be about it; null when there is none */
+  trafficPolygon?: (id: string) => [number, number][] | null
   /** how busy one is now, 0…1, or null when there is no such zone */
   trafficDensity?: (id: string) => number | null
   /** make one busier or clearer, optionally easing over `over` seconds. False when there is no such zone */
@@ -448,9 +485,19 @@ export interface PlacedThing {
 export type Zone =
   | { kind: 'circle'; x: number; y: number; r: number }
   | { kind: 'box'; x0: number; y0: number; x1: number; y1: number }
+  /**
+   * An outline, site metres — what a painted traffic zone is. Added 2026-10-10, when the "nobody
+   * has one yet" above stopped being true: the editor draws these, and a program asking "is the
+   * player in the jam" should not have to approximate a road-shaped polygon with a circle.
+   */
+  | { kind: 'polygon'; points: [number, number][] }
+
+/** How far from a point counts as being AT it, when a program names a point as a zone. Metres. */
+export const POINT_RADIUS_M = 15
 
 export function inZone(z: Zone, x: number, y: number): boolean {
   if (z.kind === 'circle') return (x - z.x) ** 2 + (y - z.y) ** 2 <= z.r * z.r
+  if (z.kind === 'polygon') return Array.isArray(z.points) && z.points.length >= 3 && inside(z.points, x, y)
   return x >= Math.min(z.x0, z.x1) && x <= Math.max(z.x0, z.x1) && y >= Math.min(z.y0, z.y1) && y <= Math.max(z.y0, z.y1)
 }
 
@@ -478,6 +525,89 @@ export interface Facts {
 }
 
 export type Outcome = 'win' | 'lose' | 'abandoned'
+
+/* ---- the end of a run: what it paid, and the screen that says so ---------------------------- */
+
+/*
+ * Rich, 2026-10-10: *"when the mission is complete we should have a finish screen that defaults to
+ * showing the hero car or main character depending on game mode, along with a representation of
+ * winnings (cash for our simple game), and an option to restart or exit to menu. This should all
+ * have API hooks."*
+ *
+ * THE SCORE IS THE WINNINGS. There was already one number a run kept — `award(points)` and
+ * `facts().score` — and a second "money" number beside it would be two things to keep in step and
+ * a program that pays into one and wins on the other. So the score grows a unit (`score.currency`)
+ * and a breakdown (`score.add(amount, label)`), and the finish screen reads it as it stands.
+ */
+
+/** One row of what a run paid: "Hits ×12 — $1,340". */
+export interface WinningsLine {
+  label: string
+  amount: number
+  /** how many times it was paid; the screen shows ×n when this is more than one */
+  count?: number
+}
+
+/** What a run won, as the finish screen counts it up. */
+export interface Winnings {
+  /** '$', '€', '£'… written before the number; '' (or absent with no `score.currency`) is points */
+  currency?: string
+  /** absent: the lines added up, or the score when there are no lines */
+  total?: number
+  lines?: WinningsLine[]
+}
+
+/** Anything else worth a line on the finish screen: "Deliveries 5/5", "Top speed 142 mph". */
+export interface FinishStat {
+  label: string
+  value: string | number
+}
+
+/** What turns on the finish screen's turntable. */
+export type FinishShow = 'car' | 'character' | 'none'
+
+/** `api.finish(…)`: how a run ends, and what its finish screen says. Everything but nothing is optional. */
+export interface FinishOpts {
+  /** default 'win' */
+  outcome?: Outcome
+  /** the headline; default "Mission complete" / "Mission failed" / "Mission abandoned" */
+  title?: string
+  /** a line under it, and on screen as the run ends — what `win(text)` and `lose(text)` say */
+  text?: string
+  /** absent: the score as it stands (`score.add`, `award`); null: this run won nothing worth showing */
+  winnings?: Winnings | null
+  stats?: FinishStat[]
+  /** what is on the turntable; absent: the car while driving, the character on foot */
+  show?: FinishShow
+  /** a catalog asset to put on the turntable instead of the player's own car or character */
+  model?: string
+  /** false: no finish screen for this ending — the program draws its own (see GameDef.finishScreen) */
+  screen?: boolean
+}
+
+/** How a run ended, as `on('finish')` hears it and the finish screen draws it. */
+export interface FinishResult {
+  outcome: Outcome
+  title: string
+  text: string
+  winnings: { currency: string; total: number; lines: WinningsLine[] } | null
+  stats: FinishStat[]
+  /** null: the app decides — the car when driving, the character on foot */
+  show: FinishShow | null
+  model: string | null
+  /** will the app draw its finish screen for this ending */
+  screen: boolean
+  /** run seconds when it ended */
+  time: number
+  score: number
+}
+
+/** The headline when a program gives none. */
+export const FINISH_TITLES: Record<Outcome, string> = {
+  win: 'Mission complete',
+  lose: 'Mission failed',
+  abandoned: 'Mission abandoned',
+}
 
 /* ---- the API a program is written against ------------------------------------------------ */
 
@@ -665,12 +795,49 @@ export interface GameApi {
   /** hurt something directly. Returns the health it has left */
   hurt(entity: number, amount: number): number
 
-  /** name a region, so `on('enters', …)` and `in()` can refer to it */
+  /**
+   * Name a region, so `on('enters', …)` and `in()` can refer to it.
+   *
+   * THE WORLD'S OWN NAMES WORK WITHOUT THIS. A name the program never declared is looked up in the
+   * world: a painted traffic zone's id (`'z-01'`) is its outline, and a point's id
+   * (`'beltway-start'`) is a ring of `POINT_RADIUS_M` around it — so `on('enters', 'z-01', …)` is a
+   * whole trigger in one line. Declaring a zone with the same name wins, which is how a point gets
+   * a bigger ring.
+   */
   zone(name: string, z: Zone): void
-  /** is the player in it right now */
+  /** is the player in it right now — a declared zone, or a world zone or point by id */
   in(name: string): boolean
 
+  /** one of the world's named places by id (the Points tab), site metres; null when there is none */
+  point(id: string): WorldPoint | null
+  /** every named place in this world */
+  points(): WorldPoint[]
+
+  /** add to the score — `score.add(points)` with no label */
   award(points: number): void
+  /**
+   * THE SCORE, which is the run's winnings. `currency('$')` makes it money on the HUD and on the
+   * finish screen; `add(amount, label)` pays into a line of the breakdown ("Hits ×12 — $1,340"),
+   * and the same label again adds to the same line. The finish screen counts the total up and lists
+   * the lines unless `finish({ winnings })` says otherwise.
+   */
+  readonly score: {
+    /** what the score is counted in: '$', '€', '£'… before the number; '' or null is points */
+    currency(symbol: string | null): void
+    /** pay `amount` (negative takes it back), into the line `label` if given. Answers the new total */
+    add(amount: number, label?: string): number
+    /** make the line `label` exactly `amount`; with no label, make the TOTAL `amount`. Answers the new total */
+    set(amount: number, label?: string): number
+    get(): number
+    /** the breakdown so far, in the order the lines were first paid into */
+    lines(): WinningsLine[]
+  }
+  /**
+   * END THE RUN with a result: the outcome, a headline, the winnings, a few stats, and what stands
+   * on the finish screen's turntable. `win(text)` is `finish({ outcome: 'win', text })`.
+   * The first ending wins; anything after it is ignored.
+   */
+  finish(opts?: FinishOpts): void
   /** what the player is trying to do, in a sentence the HUD can show */
   goal(text: string): void
   /**
@@ -692,7 +859,12 @@ export interface GameApi {
 
   /**
    * MODELS OF THE PROGRAM'S OWN: a pickup on the ground, a reward flying at the car. Assets are
-   * catalog ids (anything the editor could place). Safe with no host: `spawn` answers null.
+   * library ids — anything the editor could place, any asset with a model, or a vehicle, actor or
+   * weapon build id (it wears its model). `remove` is the despawn. Safe with no host: `spawn`
+   * answers null.
+   *
+   * At a named place: `const at = api.point('p-03'); if (at) api.models.spawn('water-tower-01', at)`
+   * — a point carries x, y, z and yaw_deg, which is a pose.
    */
   readonly models: {
     spawn(asset: string, pose: ModelPose): string | null
@@ -754,6 +926,8 @@ export interface GameApi {
   on(event: 'enters' | 'leaves', zone: string, fn: () => void): void
   /** the run ended */
   on(event: 'ends', fn: (outcome: Outcome) => void): void
+  /** the run ended, with everything the finish screen is about to show (after the 'ends' listeners) */
+  on(event: 'finish', fn: (result: FinishResult) => void): void
   /** when a fact crosses a threshold, once per crossing */
   when(condition: (f: Facts) => boolean, fn: () => void): void
 }
@@ -765,6 +939,12 @@ export interface GameDef {
   update?: (dt: number, api: GameApi) => void
   /** run when the level is torn down */
   teardown?: (api: GameApi) => void
+  /**
+   * false: the app never puts up its finish screen for this program — draw your own from
+   * `api.on('finish', …)`. Default true: a win or a loss gets the screen; an abandoned run gets it
+   * only when the program itself said `finish({ outcome: 'abandoned' })`.
+   */
+  finishScreen?: boolean
 }
 
 /** What `programs/<id>.ts` default-exports. A function only so the shape is checkable. */
@@ -820,6 +1000,14 @@ export class GameRun {
   private last: { x: number; y: number } | null = null
 
   score = 0
+  /** what the score is counted in ('$'), or null for points; the HUD and the finish screen read it */
+  currency: string | null = null
+  /** the breakdown, by label, in the order first paid; `unlabelled` is the rest of the total */
+  private scoreLines = new Map<string, { amount: number; count: number }>()
+  private unlabelled = 0
+  /** how the run ended, once it has: what `on('finish')` heard and the finish screen draws */
+  result: FinishResult | null = null
+  private finishFns: ((r: FinishResult) => void)[] = []
   goalText = ''
   outcome: Outcome | null = null
   /** the objective list and which one the arrow follows; what a HUD and a probe read */
@@ -967,15 +1155,30 @@ export class GameRun {
       placements: () => H.placements?.() ?? [],
 
       zone: (name, z) => { this.zones.set(name, z) },
-      in: (name) => this.inside.has(name),
+      in: (name) => {
+        if (this.zones.has(name)) return this.inside.has(name)
+        // a world name: watched from the first time it is asked about, answered by the tick
+        return this.worldZone(name) !== null && this.inside.has(name)
+      },
 
-      award: (p) => { this.score += p },
+      point: (id) => (typeof id === 'string' ? this.worldPoints().find((p) => p.id === id) ?? null : null),
+      points: () => this.worldPoints(),
+
+      award: (p) => { this.payScore(p, undefined, false) },
+      score: {
+        currency: (s) => { this.currency = typeof s === 'string' && s ? s.slice(0, 4) : null },
+        add: (amount, label) => this.payScore(amount, label, false),
+        set: (amount, label) => this.payScore(amount, label, true),
+        get: () => this.score,
+        lines: () => this.winningsLines(),
+      },
+      finish: (opts) => this.finishWith(opts ?? {}, true),
       goal: (text) => { this.goalText = text },
       waypoint: (at, text) => this.host.waypoint?.(at, text),
       mark: (id, at, kind) => { if (id && at && Number.isFinite(at.x) && Number.isFinite(at.y)) this.host.mark?.(id, at, kind) },
       unmark: (id) => { if (id) this.host.unmark?.(id) },
-      win: (text) => this.finish('win', text),
-      lose: (text) => this.finish('lose', text),
+      win: (text) => this.finishWith({ outcome: 'win', text }, true),
+      lose: (text) => this.finishWith({ outcome: 'lose', text }, true),
 
       player: () => {
         const at = H.playerAt()
@@ -1014,8 +1217,11 @@ export class GameRun {
       every: (s, fn) => { this.timers.push({ at: this.t + s, every: Math.max(1e-3, s), fn }) },
       on: ((event: string, a: unknown, b?: unknown) => {
         if (event === 'ends') { this.endFns.push(a as (o: Outcome) => void); return }
+        if (event === 'finish') { if (typeof a === 'function') this.finishFns.push(a as (r: FinishResult) => void); return }
         const map = event === 'enters' ? this.enters : this.leaves
         const name = a as string
+        // a world zone or point by id needs no `zone()` first; looked up now so it is watched
+        if (!this.zones.has(name)) this.worldZone(name)
         const list = map.get(name) ?? []
         list.push(b as () => void)
         map.set(name, list)
@@ -1099,6 +1305,50 @@ export class GameRun {
   /** The zones this program declared, by name — what a dry run reports and a HUD can list. */
   get zoneNames(): string[] {
     return [...this.zones.keys()]
+  }
+
+  /** The world's points, copied, every one with finite numbers — a host's typo is not a program's crash. */
+  private worldPoints(): WorldPoint[] {
+    const out: WorldPoint[] = []
+    for (const p of this.host.points?.() ?? []) {
+      if (!p || typeof p.id !== 'string' || !finite(p.x) || !finite(p.y)) continue
+      out.push({ ...p, z: finite(p.z) ? p.z : null, yaw_deg: finite(p.yaw_deg) ? p.yaw_deg : 0 })
+    }
+    return out
+  }
+
+  /**
+   * A name the program did not declare, looked up in the world: a painted traffic zone's outline,
+   * else a ring around a named point. Found once and kept, so the tick tests it like any other
+   * zone and `in()` answers from the same set. Null — and nothing kept — when the world has neither.
+   *
+   * TRAFFIC FIRST, because a zone is a region and a point is a place: an id that is both is the
+   * region somebody drew. A `zone()` with the same name replaces either (see `allZones`).
+   */
+  private worldZones = new Map<string, Zone>()
+  private worldZone(name: string): Zone | null {
+    const known = this.worldZones.get(name)
+    if (known) return known
+    if (typeof name !== 'string' || !name) return null
+    let z: Zone | null = null
+    const poly = this.host.layers?.trafficPolygon?.(name)
+    if (Array.isArray(poly) && poly.length >= 3) z = { kind: 'polygon', points: poly }
+    else {
+      const p = this.worldPoints().find((x) => x.id === name)
+      if (p) z = { kind: 'circle', x: p.x, y: p.y, r: POINT_RADIUS_M }
+    }
+    if (!z) return null
+    // and it behaves as a declared zone does from here: the next tick decides inside or out, so a
+    // level that opens ON the point hears `enters` on its first frame, exactly as it would for a
+    // `zone()` drawn round the start
+    this.worldZones.set(name, z)
+    return z
+  }
+
+  /** Declared zones, then the world's that nothing declared over. */
+  private *allZones(): Iterable<[string, Zone]> {
+    yield* this.zones
+    for (const [name, z] of this.worldZones) if (!this.zones.has(name)) yield [name, z]
   }
 
   /* ---- objectives ------------------------------------------------------------------------- */
@@ -1194,7 +1444,7 @@ export class GameRun {
     if (at) {
       if (this.last) this.travelled += Math.hypot(at.x - this.last.x, at.y - this.last.y)
       this.last = { x: at.x, y: at.y }
-      for (const [name, z] of this.zones) {
+      for (const [name, z] of this.allZones()) {
         const now = inZone(z, at.x, at.y)
         const was = this.inside.has(name)
         if (now && !was) { this.inside.add(name); this.fire(this.enters.get(name)) }
@@ -1231,19 +1481,99 @@ export class GameRun {
     this.syncPlaced()
   }
 
-  finish(outcome: Outcome, text?: string): void {
+  /* ---- the score and the end ------------------------------------------------------------- */
+
+  /**
+   * Pay into the score. `set` makes the line (or, with no label, the total) exactly `amount`.
+   * A number that is not a number pays nothing: a NaN in a payout would show as "$NaN" on the one
+   * screen the player is meant to be proud of.
+   */
+  private payScore(amount: number, label: string | undefined, set: boolean): number {
+    if (!finite(amount)) return this.score
+    const name = typeof label === 'string' ? label.trim() : ''
+    if (name) {
+      const line = this.scoreLines.get(name) ?? { amount: 0, count: 0 }
+      line.amount = set ? amount : line.amount + amount
+      line.count = set ? Math.max(1, line.count) : line.count + 1
+      this.scoreLines.set(name, line)
+    } else if (set) {
+      let lines = 0
+      for (const l of this.scoreLines.values()) lines += l.amount
+      this.unlabelled = amount - lines
+    } else {
+      this.unlabelled += amount
+    }
+    let total = this.unlabelled
+    for (const l of this.scoreLines.values()) total += l.amount
+    this.score = total
+    return total
+  }
+
+  private winningsLines(): WinningsLine[] {
+    return [...this.scoreLines].map(([label, l]) => ({ label, amount: l.amount, count: l.count }))
+  }
+
+  /**
+   * What the run won, as the finish screen will show it. A program's own `winnings` wins field by
+   * field; what it leaves out comes from the score. A run that never scored and never named a
+   * currency won nothing worth a count-up, and says so with null.
+   */
+  private resolveWinnings(w: Winnings | null | undefined): FinishResult['winnings'] {
+    if (w === null) return null
+    const cleanLines = (ls: unknown): WinningsLine[] => (Array.isArray(ls) ? ls : [])
+      .filter((l) => l && typeof l.label === 'string' && finite(l.amount))
+      .map((l) => ({ label: l.label, amount: l.amount, ...(finite(l.count) ? { count: Math.max(0, Math.floor(l.count)) } : {}) }))
+    if (w && typeof w === 'object') {
+      const lines = w.lines ? cleanLines(w.lines) : this.winningsLines()
+      const total = finite(w.total) ? w.total! : w.lines ? lines.reduce((s, l) => s + l.amount, 0) : this.score
+      const currency = typeof w.currency === 'string' ? w.currency.slice(0, 4) : (this.currency ?? '')
+      return { currency, total, lines }
+    }
+    if (this.currency === null && this.score === 0 && this.scoreLines.size === 0) return null
+    return { currency: this.currency ?? '', total: this.score, lines: this.winningsLines() }
+  }
+
+  /**
+   * End the run. `asked` is a program's own ending (win, lose, finish); the abandon that `stop()`
+   * makes of a run nobody finished is not, and gets no finish screen.
+   */
+  private finishWith(opts: FinishOpts, asked: boolean): void {
     if (this.outcome) return
+    const outcome: Outcome = opts.outcome === 'lose' || opts.outcome === 'abandoned' ? opts.outcome : 'win'
     this.outcome = outcome
+    const text = typeof opts.text === 'string' ? opts.text : ''
     if (text) {
       this.messages.push({ text, kind: outcome === 'win' ? 'ok' : 'warn', at: this.t })
       this.host.say(text, outcome === 'win' ? 'ok' : 'warn')
     }
+    const show = opts.show === 'car' || opts.show === 'character' || opts.show === 'none' ? opts.show : null
+    const result: FinishResult = {
+      outcome,
+      title: typeof opts.title === 'string' && opts.title.trim() ? opts.title.trim() : FINISH_TITLES[outcome],
+      text,
+      winnings: this.resolveWinnings(opts.winnings),
+      stats: (Array.isArray(opts.stats) ? opts.stats : [])
+        .filter((s) => s && typeof s.label === 'string' && (typeof s.value === 'string' || finite(s.value)))
+        .map((s) => ({ label: s.label, value: s.value })),
+      show,
+      model: typeof opts.model === 'string' && opts.model ? opts.model : null,
+      screen: asked && this.def.finishScreen !== false && opts.screen !== false && (outcome !== 'abandoned' || opts.outcome === 'abandoned'),
+      time: this.t,
+      score: this.score,
+    }
+    this.result = result
     for (const fn of this.endFns) this.guard(fn as () => void, outcome)
-    this.host.onFinish?.(outcome)
+    for (const fn of this.finishFns) this.guard(fn as () => void, { ...result, stats: [...result.stats] })
+    this.host.onFinish?.(outcome, result)
+  }
+
+  /** End the run from outside the program — the editor, a test. The program's own calls are `api.win/lose/finish`. */
+  finish(outcome: Outcome, text?: string): void {
+    this.finishWith({ outcome, text }, outcome !== 'abandoned')
   }
 
   stop(): void {
-    if (!this.outcome) this.finish('abandoned')
+    if (!this.outcome) this.finishWith({ outcome: 'abandoned' }, false)
     this.guard(() => this.def.teardown?.(this.api))
     for (const fn of this.cleanups.splice(0)) this.guard(fn)
     this.objectiveItems = []

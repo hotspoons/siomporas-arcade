@@ -233,7 +233,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     T('run_list', 'Every bake and publish, newest first, with state and duration.', {}, [], () => get('/api/runs')),
     T('run_get', 'One run.', { id: str('') }, ['id'], (a) => get(`/api/runs/${a.id}`)),
     T('run_log', 'A run’s log.', { id: str('') }, ['id'], (a) => get(`/api/runs/${a.id}/log`)),
-    T('run_bake', 'Bake a world: OSM, terrain, imagery, lidar, and a tile pyramid. LOD is the bake — there is no monolithic one. HOURS, and it occupies the runner. Check run_list before starting another.', { slug: str('') }, ['slug'], (a) => post('/api/runs/bake', { slug: a.slug })),
+    T('run_bake', 'Bake a world: OSM, terrain, imagery, lidar, and a tile pyramid. LOD is the bake — there is no monolithic one. HOURS, and it occupies the runner. Check run_list before starting another. A world more than 10 km across is baked SHARDED (plan → ≤ 10 km blocks in parallel → finalize) by default; `sharded` forces it on or off for this bake.', { slug: str(''), sharded: bool('true forces a sharded bake, false a single Job; omit for the default (sharded above 10 km across)') }, ['slug'], (a) => post('/api/runs/bake', a.sharded === undefined ? { slug: a.slug } : { slug: a.slug, sharded: !!a.sharded })),
     T('run_publish', 'Publish a baked world to the bucket the viewer reads.', { slug: str('') }, ['slug'], (a) => post('/api/runs/publish', { slug: a.slug })),
     T('run_cancel', 'Stop a running bake or publish.', { id: str('') }, ['id'], (a) => post(`/api/runs/${a.id}/cancel`, {})),
 
@@ -392,7 +392,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     /* ---- what an agent needs to know before it writes anything ------------------------------ */
     T(
       'program_api',
-      'The program API’s declarations — the TypeScript a level program is written against: `@apex/program` (GameApi: objectives, models, player, zones, timers, physics, traffic, races, stunts, the interface). Read it before writing a program; program_check and the editor’s code_check check against exactly this text. `module` picks one of the other importable modules (actors, actorworld, ecsconfig, traffic, races, zones, stunts, objectives, vehicles, trafficsets).',
+      'The program API’s declarations — the TypeScript a level program is written against: `@apex/program` (GameApi: objectives, models — spawn any library asset or build by id, and remove it — player, points — api.point(id) is a named place in site metres — zones — a world traffic-zone or point id works in on(\'enters\', id) undeclared — timers, physics, traffic, races, stunts, audio, the interface, the score as winnings — `score.currency/add/set` — and `finish({ outcome, title, winnings, stats, show })`, which ends a run on the finish screen). program_refs lists the ids one world offers, with snippets. Read it before writing a program; program_check and the editor’s code_check check against exactly this text. `module` picks one of the other importable modules (actors, actorworld, ecsconfig, traffic, races, zones, stunts, objectives, vehicles, trafficsets).',
       { module: str('default: program') },
       [],
       async (a) => ({ ...(await declarations(a.module ?? 'program')), modules: await modules() }),
@@ -493,6 +493,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
         if (i >= 0) doc.points[i] = point
         else doc.points.push(point)
         if (a.home) doc.home = a.id
+        await stamp(root, a.slug, doc)
         const wrote = await siteDoc.write(a.slug, 'points.json', doc)
         return { point, replaced: i >= 0, points: doc.points.length, home: doc.home ?? null, wrote }
       },
@@ -557,6 +558,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
         if (a.obey_rate !== undefined) traffic.obeyRate = clamp01(a.obey_rate)
         if (a.speed_factor !== undefined) traffic.speedFactor = a.speed_factor
         doc.zones.push({ id, name: a.name ?? id, kind: 'traffic', polygon: polygon.map(([x, y]) => [round(x), round(y)]), traffic })
+        await stamp(root, a.slug, doc)
         const wrote = await siteDoc.write(a.slug, 'zones.json', doc)
         return { id, zones: doc.zones.length, wrote }
       },
@@ -583,6 +585,13 @@ export function serverTools({ apiFetch, root, siteDoc }) {
 
     /* ---- programs: built and checked without a browser ---------------------------------------- */
     T('program_check', 'Typecheck a program against the level API’s declarations — the same check the editor’s Program pane runs, with no tab open. Returns every problem with its line. A program that passes here loads in the viewer.', { path: str('e.g. crofton/jam.ts') }, ['path'], (a) => get(`/api/programs/${a.path}?check=1`)),
+    T(
+      'program_refs',
+      'Everything a level program can name in one world, grouped, with the code that uses each — the editor Program pane\'s "In this world" list. Groups: traffic (painted zones: a trigger and a density), point (named places: api.point(id) is where, in site metres), placement (api.placed(id), api.placedWith(tag)), stunt, race, build (the vehicle/actor/weapon builds this world\'s levels name, with their sound overrides), sound (every bank slot with what it is for: api.audio.play(slot)), library (every id api.models.spawn(id, pose) can put down: the kit, library assets with a model, builds). Each row has id, desc, detail and `snippet` — code that typechecks inside setup(api) as it stands, using this world\'s real ids (e.g. a library row: when the player enters the first zone, spawn the asset at the first point, remove it after a minute). Read this before writing a program for a world; program_check it after. `kinds` narrows the groups, `q` searches ids and descriptions, `limit` caps rows per group (default 100).',
+      { slug: str('the world slug'), kinds: { type: 'array', items: { type: 'string' }, description: 'traffic | point | placement | stunt | race | build | sound | library; default all' }, q: str('words that must all appear in a row (id, tags, description)'), limit: num('rows per group, default 100') },
+      ['slug'],
+      (a) => programRefs({ get, siteDoc }, a),
+    ),
     T('program_build', 'Transpile a program to the JavaScript the viewer runs. Mostly for seeing that it builds; the viewer asks for this itself when a level names the program.', { path: str('') }, ['path'], async (a) => { const r = await get(`/api/programs/${a.path}?js=1`); return { id: r.id, bytes: r.js.length, errors: r.errors } }),
 
     /* ---- the editor itself --------------------------------------------------------------------- */
@@ -598,6 +607,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { siteProjector } from './geo.mjs'
 import { apiHash, declarations, modules } from './programs.mjs'
+import { programRefs } from './programrefs.mjs'
 import { POINT_KINDS, POINT_MODES, vocab } from './vocab.mjs'
 
 const round = (v) => Math.round(v * 10) / 10
@@ -749,6 +759,26 @@ async function frameOf(root, slug) {
     if (m.frame) return m.frame
   }
   throw new Error(`${slug} has no baked manifest with a frame — bake it first`)
+}
+
+/**
+ * Stamp a site document with the frame its coordinates are in — the bake's, which is what every
+ * tool here speaks (site_project, site_roads, site_road_polygon). The same block the place editor
+ * writes on save (apps/corridor/src/editor/store/schema.ts `frameOf`).
+ *
+ * WITHOUT IT THE EDITOR HAD TO GUESS. dc-metro-take-2's five Beltway zones were written by
+ * traffic_zone_add on 2026-10-08 in exactly the bake's ENU frame, carried no stamp, and the editor
+ * put a red "authored in a different frame … will sit off the road" banner over them (Rich,
+ * 2026-10-10: "This screenshot about zones.json is bullshit"). The editor measures now
+ * (editor/store/framecheck.ts); a stamp means it does not have to.
+ *
+ * A world with no baked manifest gets no stamp rather than a refusal: the zone is still worth
+ * writing, and the editor will measure it when there is a bake to measure against.
+ */
+async function stamp(root, slug, doc) {
+  const f = await frameOf(root, slug).catch(() => null)
+  if (!f) return
+  doc.frame = { kind: f.kind ?? 'utm', epsg: f.epsg, anchor: f.anchor }
 }
 
 /** the centroid of whatever geometry a feature has, lon/lat */

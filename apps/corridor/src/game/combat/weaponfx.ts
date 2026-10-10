@@ -14,6 +14,7 @@
 // the first solid thing and the traffic layer is told where and which way.
 
 import * as THREE from 'three'
+import { surfaceCrossing } from './surface'
 import * as T from '../../tuning'
 
 /* ---- built-in hardware ------------------------------------------------------------------------ */
@@ -212,14 +213,17 @@ export class GunLayer {
   lastHit: GunHit | null = null
   private hitTest: (from: THREE.Vector3, to: THREE.Vector3) => THREE.Vector3 | null
   private groundAt: (x: number, z: number) => number | null
+  /** the ground UNDER a deck at a crossing (`site.physGroundAt`); absent, `groundAt` is all there is */
+  private lowerAt: ((x: number, z: number) => number | null) | null
   private onHit: (hit: GunHit) => void
   /** a round left a muzzle — the sound. Optional: the test rig and the probes fire silently */
   private onFire: ((from: THREE.Vector3) => void) | null
 
-  constructor(o: { hitTest: GunLayer['hitTest']; groundAt: GunLayer['groundAt']; onHit: GunLayer['onHit']; onFire?: (from: THREE.Vector3) => void }) {
+  constructor(o: { hitTest: GunLayer['hitTest']; groundAt: GunLayer['groundAt']; lowerAt?: (x: number, z: number) => number | null; onHit: GunLayer['onHit']; onFire?: (from: THREE.Vector3) => void }) {
     this.group.name = 'gun'
     this.hitTest = o.hitTest
     this.groundAt = o.groundAt
+    this.lowerAt = o.lowerAt ?? null
     this.onHit = o.onHit
     this.onFire = o.onFire ?? null
   }
@@ -257,10 +261,13 @@ export class GunLayer {
       const far = from.clone().addScaledVector(dir, T.GUN_RANGE)
       if (!at) {
         // the ground, by walking the ray: the sweep only knows what has a collider
+        // and a round under an overpass flies on under it, as a car drives on (surface.ts)
+        let prevY = from.y
         for (let s = 4; s < T.GUN_RANGE; s += 4) {
           const p = from.clone().addScaledVector(dir, s)
-          const g = this.groundAt(p.x, p.z)
-          if (g !== null && p.y <= g) { at = p.setY(g); break }
+          const g = surfaceCrossing(prevY, p, this.groundAt, this.lowerAt)
+          if (g !== null) { at = p.setY(g); break }
+          prevY = p.y
         }
       }
       const end = at ?? far

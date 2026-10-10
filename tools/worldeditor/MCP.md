@@ -87,6 +87,7 @@ the world editor"* rather than "no such tool", which would send an agent hunting
 | `place_*` | search the earth, and the saved place index |
 | `editor_config`, `editor_ready`, `editor_version` | what is configured, what is answering, and WHICH BUILD — a program that typechecks against one editor can fail in another |
 | `program_api` | the program API's declarations (`@apex/program` and the other importable modules) — read before writing a program; nothing else says what `api` can do |
+| `program_refs` | everything a program can name in ONE world — traffic zones, points, placements, stunts, races, the level's builds, every sound slot, every spawnable library id — each with a description and a snippet that typechecks as inserted (the Program pane's "In this world" list, the same rows) |
 | `level_vocab` | the words a level and a program may use: weather, season, profiles, point kinds, hideables, transports, HUD parts, setting ids, every engine-sound setup |
 | `site_roads`, `site_road_polygon`, `site_road_gate` | the roads of a bake in site metres; a zone polygon along one; a race gate across one |
 | `site_project`, `address_search`, `point_add` | lat/lon → site metres through the bake's own frame; the bake's OSM addresses, places and roads by name; a named point (start, finish, home) into points.json — by metres, by lat/lon, or along a road |

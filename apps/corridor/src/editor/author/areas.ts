@@ -8,11 +8,15 @@
 // What is authored here is x/y only. Height is never stored: the polygon is draped at draw time
 // and re-draped whenever the terrain under it changes, so a re-bake cannot leave an area floating.
 import * as THREE from 'three'
-import { fillMesh, handleMesh, outlineMesh, type HeightAt } from '../view/drape'
-import { areaOf, frameMismatch, frameOf, inside, loadAdjustments, nextId, saveAdjustments, CROP_FIELDS, NEUTRAL, PICKERS, SLIDERS, type Adjust, type Adjustments, type Area } from '../store/schema'
+import { fillMesh, handleMesh, outlineMesh, OUTLINE_PX, OUTLINE_SELECTED_PX, type HeightAt } from '../view/drape'
+import type { Line2 } from 'three/addons/lines/Line2.js'
+import { frameNotice, guardFrame } from '../store/frameguard'
+import type { FrameVerdict } from '../store/framecheck'
+import { labelAt } from '../view/labels'
+import { areaOf, frameOf, inside, loadAdjustments, nextId, saveAdjustments, CROP_FIELDS, NEUTRAL, PICKERS, SLIDERS, type Adjust, type Adjustments, type Area } from '../store/schema'
 import type { Site } from '../../world/scene'
 import { bearingOf, nearestStation, normDeg } from './corridor'
-import { dragChip, el, frameBanner, paneTabs, slider } from './ui'
+import { dragChip, el, paneTabs, slider } from './ui'
 
 const COLOR = { idle: 0x5c93c4, edited: 0xffdc00, selected: 0x2ee6c0, draw: 0xff8a2b }
 const MIN_VERTS = 3
@@ -29,13 +33,13 @@ export class AreaMode {
   private h: HeightAt = () => 0
   /** only for corridor-frame defaults (the crop-row heading); areas themselves are site-frame */
   private site: Site | null = null
-  private meshes = new Map<string, { fill: THREE.Mesh; outline: THREE.LineLoop }>()
+  private meshes = new Map<string, { fill: THREE.Mesh; outline: Line2 }>()
   private handles = new THREE.Group()
   private draw: [number, number][] | null = null
   private drawGroup = new THREE.Group()
   private grabbed = -1
-  /** set when the file's coordinates were authored in a different frame from the bake's */
-  frameWarning: string | null = null
+  /** what the roads say about this file's frame — see store/framecheck.ts */
+  frame: FrameVerdict | null = null
   /** `false` = only a value changed; the panel must not be rebuilt under the pointer. */
   private onChange: (structural?: boolean) => void
 
@@ -50,7 +54,7 @@ export class AreaMode {
     this.h = h
     this.site = site
     this.doc = await loadAdjustments(slug)
-    this.frameWarning = site ? frameMismatch(this.doc.frame, site.manifest, this.doc.areas.length) : null
+    this.frame = site ? guardFrame(this.doc, site, { polygons: this.doc.areas.map((a) => ({ id: a.id, ring: a.polygon })), points: [] }, 'areas') : null
     this.dirty = false
     this.selected = null
     this.draw = null
@@ -93,7 +97,7 @@ export class AreaMode {
     if (a.polygon.length < MIN_VERTS) return
     const c = this.colorFor(a)
     const fill = fillMesh(a.polygon, this.h, c, a.id === this.selected ? 0.3 : 0.16)
-    const outline = outlineMesh(a.polygon, this.h, c)
+    const outline = outlineMesh(a.polygon, this.h, c, 0.5, a.id === this.selected ? OUTLINE_SELECTED_PX : OUTLINE_PX)
     fill.userData.areaId = a.id
     this.group.add(fill, outline)
     this.meshes.set(a.id, { fill, outline })
@@ -119,7 +123,8 @@ export class AreaMode {
       const c = this.colorFor(a)
       ;(got.fill.material as THREE.MeshBasicMaterial).color.setHex(c)
       ;(got.fill.material as THREE.MeshBasicMaterial).opacity = a.id === this.selected ? 0.3 : 0.16
-      ;(got.outline.material as THREE.LineBasicMaterial).color.setHex(c)
+      got.outline.material.color.setHex(c)
+      got.outline.material.linewidth = a.id === this.selected ? OUTLINE_SELECTED_PX : OUTLINE_PX
     }
   }
 
@@ -221,6 +226,28 @@ export class AreaMode {
       .filter((a) => inside(a.polygon, pt.x, pt.y))
       .sort((p, q) => areaOf(p.polygon) - areaOf(q.polygon))
     return hits[0] ? { id: hits[0].id, size: areaOf(hits[0].polygon) } : null
+  }
+
+  /** Turn every area by the bake's recorded UTM→ENU fit — a frame notice's button (store/framecheck.ts). */
+  moveIntoFrame() {
+    if (this.frame?.state !== 'old' || !this.site) return
+    const move = this.frame.move
+    for (const a of this.doc.areas) a.polygon = a.polygon.map((p) => move(p).map((v) => Math.round(v * 10) / 10) as [number, number])
+    this.doc.frame = frameOf(this.site.manifest)
+    this.frame = { state: 'stamped' }
+    this.dirty = true
+    this.rebuild()
+    this.onChange()
+  }
+
+  /** An area's outline, for the editor's hover ring. */
+  outline(id: string): [number, number][] | null {
+    return this.doc.areas.find((a) => a.id === id)?.polygon ?? null
+  }
+
+  /** Name and anchor of every area, for the active mode's labels. */
+  labels(): { id: string; text: string; at: [number, number] }[] {
+    return this.doc.areas.filter((a) => a.polygon.length >= MIN_VERTS).map((a) => ({ id: a.id, text: a.name, at: labelAt(a.polygon) }))
   }
 
   /** Is this tool in the middle of something? Then the click is its own. */
@@ -327,7 +354,8 @@ export class AreaMode {
   }
 
   private drawTab(root: HTMLElement) {
-    if (this.frameWarning) root.append(frameBanner('adjustments.json', this.frameWarning))
+    const notice = frameNotice('adjustments.json', this.frame, () => this.moveIntoFrame())
+    if (notice) root.append(notice)
     root.append(el('p', 'dim', this.draw
       ? `drawing… ${this.draw.length} pts — Enter closes it, Esc cancels`
       : 'drag a square onto the world, or draw the outline by hand (N); tune what it adjusts once it is placed'))

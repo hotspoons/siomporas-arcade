@@ -127,7 +127,7 @@ test('a failed shard cancels its siblings and fails the run', async () => {
   }
 })
 
-test('auto-sharding is off unless shardAboveM is configured', async () => {
+test('auto-sharding is off when shardAboveM is 0 or unset in the Runs config', async () => {
   const { root, store } = await setup()
   await writeFile(path.join(store.worlds, 'big.json'), JSON.stringify({ slug: 'big', lat: 38.9, lon: -77.0, radius_m: 19933 }))
   const k8s = cluster()
@@ -154,6 +154,15 @@ test('auto-sharding turns on above the configured ceiling', async () => {
     await until(() => commands(k8s.jobs).length === 1)
     assert.match(commands(k8s.jobs)[0], / corridor plan big$/)
     await on.cancel(a.id)
+    // the block size and count the service is configured with reach the plan
+    const sized = new Runs(store, k8s, { force: 'kubernetes', image: 'c', claim: 'd', resources: {}, shardAboveM: 5000, shardSideM: 10000, maxShards: 36 })
+    const b = await sized.bake('big')
+    await until(() => commands(k8s.jobs).some((c) => / corridor plan big --max-side 10000 --max-shards 36$/.test(c)))
+    await sized.cancel(b.id)
+    // and one bake can opt out
+    const c = await sized.bake('big', { sharded: false })
+    await until(() => commands(k8s.jobs).some((x) => / corridor fetch big$/.test(x)))
+    await sized.cancel(c.id)
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }

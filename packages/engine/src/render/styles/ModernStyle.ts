@@ -2,7 +2,7 @@
 // blur and chromatic aberration, film grain, ACES tone mapping, SMAA. All of it
 // is a single merged EffectPass, and all of it is off in XR.
 
-import { HalfFloatType, type Camera, type Scene, type WebGLRenderer, Uniform, Vector2 } from 'three'
+import { HalfFloatType, type Camera, type Scene, type WebGLRenderer, type WebGLRenderTarget, Uniform, Vector2 } from 'three'
 import {
   BlendFunction,
   BloomEffect,
@@ -19,6 +19,7 @@ import {
   VignetteEffect,
 } from 'postprocessing'
 import type { ModernOptions, Style, StyleFrameInfo } from './Style'
+import { useFloatDepth } from '../depth'
 
 /** Radial blur toward the screen centre, strength driven per frame. */
 class RadialBlurEffect extends Effect {
@@ -96,6 +97,11 @@ export class ModernStyle implements Style {
     if (!this.renderer || !this.scene || !this.camera) return
     this.composer?.dispose()
     const composer = new EffectComposer(this.renderer, { frameBufferType: HalfFloatType, multisampling: 0 })
+    // The scene is drawn into the composer's input buffer, so that is where the depth buffer the
+    // game actually tests against lives. Under a reversed depth buffer it gets a float one (a 24-bit
+    // fixed buffer reversed is no more precise than forwards; see render/depth.ts). The typings do
+    // not list the buffer; it is the composer's own field, read and resized by it.
+    useFloatDepth((composer as unknown as { inputBuffer: WebGLRenderTarget }).inputBuffer, this.renderer)
     composer.addPass(new RenderPass(this.scene, this.camera))
     const effects: Effect[] = []
     const o = this.opts
@@ -168,6 +174,14 @@ export class ModernStyle implements Style {
     this.composer.render(info.dt)
     // After post, not before: the composer owns its own buffers, so an extra pass lands on the
     // presented image rather than going through the stack with it.
-    this.extra?.(this.renderer)
+    if (this.extra) {
+      // ON A DEPTH BUFFER NOBODY HAS CLEARED THIS FRAME but the browser, which resets the canvas's
+      // depth to 1.0 after every composite — the far plane forwards and the NEAR plane under a
+      // reversed buffer, where every fragment of the pass then failed its test (coast's solid
+      // models, gone, 2026-10-10). three's clear writes its own far value either way.
+      this.renderer.setRenderTarget(null)
+      this.renderer.clearDepth()
+      this.extra(this.renderer)
+    }
   }
 }

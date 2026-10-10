@@ -416,6 +416,48 @@ export class CodeEditor {
     ed.focus()
   }
 
+  /**
+   * Put a STATEMENT in at the caret, on lines of its own, indented to fit.
+   *
+   * What the "In this world" rows insert is a whole statement — `api.on('enters', 'z-01', () => {
+   * … })` — and pasted raw at the caret it lands mid-line, with its inner lines at column one. So:
+   * on a blank line it replaces that line, anywhere else it goes on a new line after this one, and
+   * every line takes the indentation of where it lands (one level deeper after a line that opens a
+   * block, which is what the caret is on when it sits at the end of `setup(api) {`).
+   */
+  insertBlock(text: string, at?: { lineNumber: number; column: number }): void {
+    const ed = this.editor
+    const model = this.model
+    if (!ed || !model) return
+    const pos = at ?? ed.getPosition()
+    if (!pos) return
+    const line = model.getLineContent(pos.lineNumber)
+    const blank = line.trim() === ''
+    const lead = /^\s*/.exec(line)![0]
+    // a blank line inherits the indentation of the code above it, not its own (Monaco trims it)
+    let indent = lead
+    if (blank) {
+      for (let n = pos.lineNumber - 1; n >= 1; n--) {
+        const above = model.getLineContent(n)
+        if (!above.trim()) continue
+        indent = /^\s*/.exec(above)![0] + (/[{([]\s*$/.test(above) ? '  ' : '')
+        break
+      }
+    } else if (/[{([]\s*$/.test(line)) indent = lead + '  '
+    const body = text.split('\n').map((l) => (l ? indent + l : l)).join('\n')
+    const end = model.getLineMaxColumn(pos.lineNumber)
+    const range = blank
+      ? { startLineNumber: pos.lineNumber, startColumn: 1, endLineNumber: pos.lineNumber, endColumn: end }
+      : { startLineNumber: pos.lineNumber, startColumn: end, endLineNumber: pos.lineNumber, endColumn: end }
+    ed.executeEdits('insert', [{ range, text: blank ? body : `\n${body}`, forceMoveMarkers: true }])
+    ed.focus()
+  }
+
+  /** Where in the text a point on the screen is — for a drop. Null outside the text. */
+  positionAt(clientX: number, clientY: number): { lineNumber: number; column: number } | null {
+    return this.editor?.getTargetAtClientPoint(clientX, clientY)?.position ?? null
+  }
+
   dispose(): void {
     this.editor?.dispose()
     // the MODEL is deliberately kept: reopening the same program should not lose its undo history

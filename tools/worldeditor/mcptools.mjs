@@ -392,7 +392,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     /* ---- what an agent needs to know before it writes anything ------------------------------ */
     T(
       'program_api',
-      'The program API’s declarations — the TypeScript a level program is written against: `@apex/program` (GameApi: objectives, models, player, zones, timers, physics, traffic, races, stunts, the interface). Read it before writing a program; program_check and the editor’s code_check check against exactly this text. `module` picks one of the other importable modules (actors, actorworld, ecsconfig, traffic, races, zones, stunts, objectives, vehicles, trafficsets).',
+      'The program API’s declarations — the TypeScript a level program is written against: `@apex/program` (GameApi: objectives, models — spawn any library asset or build by id, and remove it — player, points — api.point(id) is a named place in site metres — zones — a world traffic-zone or point id works in on(\'enters\', id) undeclared — timers, physics, traffic, races, stunts, audio, the interface). program_refs lists the ids one world offers, with snippets. Read it before writing a program; program_check and the editor’s code_check check against exactly this text. `module` picks one of the other importable modules (actors, actorworld, ecsconfig, traffic, races, zones, stunts, objectives, vehicles, trafficsets).',
       { module: str('default: program') },
       [],
       async (a) => ({ ...(await declarations(a.module ?? 'program')), modules: await modules() }),
@@ -583,6 +583,13 @@ export function serverTools({ apiFetch, root, siteDoc }) {
 
     /* ---- programs: built and checked without a browser ---------------------------------------- */
     T('program_check', 'Typecheck a program against the level API’s declarations — the same check the editor’s Program pane runs, with no tab open. Returns every problem with its line. A program that passes here loads in the viewer.', { path: str('e.g. crofton/jam.ts') }, ['path'], (a) => get(`/api/programs/${a.path}?check=1`)),
+    T(
+      'program_refs',
+      'Everything a level program can name in one world, grouped, with the code that uses each — the editor Program pane\'s "In this world" list. Groups: traffic (painted zones: a trigger and a density), point (named places: api.point(id) is where, in site metres), placement (api.placed(id), api.placedWith(tag)), stunt, race, build (the vehicle/actor/weapon builds this world\'s levels name, with their sound overrides), sound (every bank slot with what it is for: api.audio.play(slot)), library (every id api.models.spawn(id, pose) can put down: the kit, library assets with a model, builds). Each row has id, desc, detail and `snippet` — code that typechecks inside setup(api) as it stands, using this world\'s real ids (e.g. a library row: when the player enters the first zone, spawn the asset at the first point, remove it after a minute). Read this before writing a program for a world; program_check it after. `kinds` narrows the groups, `q` searches ids and descriptions, `limit` caps rows per group (default 100).',
+      { slug: str('the world slug'), kinds: { type: 'array', items: { type: 'string' }, description: 'traffic | point | placement | stunt | race | build | sound | library; default all' }, q: str('words that must all appear in a row (id, tags, description)'), limit: num('rows per group, default 100') },
+      ['slug'],
+      (a) => programRefs({ get, siteDoc }, a),
+    ),
     T('program_build', 'Transpile a program to the JavaScript the viewer runs. Mostly for seeing that it builds; the viewer asks for this itself when a level names the program.', { path: str('') }, ['path'], async (a) => { const r = await get(`/api/programs/${a.path}?js=1`); return { id: r.id, bytes: r.js.length, errors: r.errors } }),
 
     /* ---- the editor itself --------------------------------------------------------------------- */
@@ -598,6 +605,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { siteProjector } from './geo.mjs'
 import { apiHash, declarations, modules } from './programs.mjs'
+import { programRefs } from './programrefs.mjs'
 import { POINT_KINDS, POINT_MODES, vocab } from './vocab.mjs'
 
 const round = (v) => Math.round(v * 10) / 10

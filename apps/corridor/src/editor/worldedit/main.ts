@@ -40,7 +40,10 @@ import { actorExtension } from '../library/actors'
 import { weaponExtension } from '../library/weapons'
 import { soundsExtension } from '../library/sounds'
 import { vehicleExtension } from '../library/vehicles'
-import { worldThings, type PlacementDoc } from '../../game/world/worldthings'
+import { levelBuilds, worldThings, type LevelBuild, type PlacementDoc, type SoundSlotInfo } from '../../game/world/worldthings'
+import type { PointsDoc } from '../../game/world/points'
+import { loadSpawnCatalog } from '../../assets/catalogmerge'
+import { assetsvc, type Build } from '../../assets/assetsvc'
 import type { ZoneDoc } from '../../game/world/zones'
 import type { StuntDoc } from '../../game/stunt/stunts'
 import type { CourseDoc } from '../../game/race/races'
@@ -177,6 +180,32 @@ async function siteDoc<T>(slug: string, name: string): Promise<T | null> {
   }
 }
 
+/** The sound bank's slots, as `api.audio.slots()` answers them — read from the bank the game plays. */
+async function bankSlots(): Promise<SoundSlotInfo[]> {
+  try {
+    const r = await fetch('/sounds/bank.json', { cache: 'no-cache' })
+    if (!r.ok) return []
+    const bank = (await r.json()) as { slots?: Record<string, { desc?: string; loop?: boolean; clips?: unknown[] }> }
+    return Object.entries(bank.slots ?? {}).map(([slot, x]) => ({ slot, desc: x.desc ?? '', loop: !!x.loop, clips: x.clips?.length ?? 0 }))
+  } catch {
+    return []
+  }
+}
+
+/** The vehicle, actor and weapon builds this world's levels name — the hero car and what it overrides. */
+async function worldBuilds(world: string): Promise<LevelBuild[]> {
+  try {
+    const [levels, ...colls] = await Promise.all([
+      api.levels().then((r) => r.levels).catch(() => []),
+      ...(['vehicles', 'actors', 'weapons'] as const).map((c) => assetsvc.builds<Build<unknown>>(c).catch(() => [])),
+    ])
+    const kinds = ['vehicle', 'actor', 'weapon'] as const
+    return levelBuilds(levels as { id: string; world: string; player?: { vehicle?: string } | null }[], world, colls.flatMap((list, i) => list.map((build) => ({ kind: kinds[i], build }))))
+  } catch {
+    return []
+  }
+}
+
 const programPanel = new ProgramPanel({
   host: pane('program'),
   reportHost: inspector,
@@ -201,13 +230,25 @@ const programPanel = new ProgramPanel({
      * worlds have no stunts and no races, and a list that fails because one file is a 404 shows
      * nothing at all, which is exactly the symptom.
      */
-    const [placements, zones, stunts, courses] = await Promise.all([
-      siteDoc<PlacementDoc>(selected, 'placements.json'),
-      siteDoc<ZoneDoc>(selected, 'zones.json'),
-      siteDoc<StuntDoc>(selected, 'stunts.json'),
-      siteDoc<CourseDoc>(selected, 'courses.json'),
+    /*
+     * AND WHAT A PROGRAM BRINGS TO IT (Rich, 2026-10-10: *"no sound or placed items (e.g. traffic
+     * zones, points) listing in the right, nor no assets we can reference from the library"*): the
+     * points, the bank's slots, everything `api.models.spawn` can find, and the builds this world's
+     * levels name. Each of those is optional in the same way — no asset service is a list without a
+     * library, not an empty list.
+     */
+    const world = selected
+    const [placements, zones, stunts, courses, points, sounds, library, builds] = await Promise.all([
+      siteDoc<PlacementDoc>(world, 'placements.json'),
+      siteDoc<ZoneDoc>(world, 'zones.json'),
+      siteDoc<StuntDoc>(world, 'stunts.json'),
+      siteDoc<CourseDoc>(world, 'courses.json'),
+      siteDoc<PointsDoc>(world, 'points.json'),
+      bankSlots(),
+      loadSpawnCatalog().catch(() => []),
+      worldBuilds(world),
     ])
-    return { world: selected, items: worldThings({ placements, zones, stunts, courses }) }
+    return { world, items: worldThings({ placements, zones, stunts, courses, points, sounds, library, builds }) }
   },
   makeDir: async (id) => { await api.makeProgramDir(id) },
   removeDir: async (id) => { await api.deleteProgramDir(id) },

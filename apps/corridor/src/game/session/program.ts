@@ -27,6 +27,7 @@
 import { addComponent, addEntity, type World } from 'bitecs'
 import { Transform, Visual } from '../actors/actors'
 import type { ActorWorld } from '../actors/actorworld'
+import { inside } from '../../world/polygon'
 import type { Freedom, HudPart, SettingId, UiMode } from './gamepolicy'
 
 /* ---- what a program can ask the world to do ---------------------------------------------- */
@@ -142,6 +143,8 @@ export interface ProgramHost {
   ground?: (x: number, y: number) => number | null
   /** models a program puts into the world itself, when the app can draw them */
   models?: ModelHost
+  /** the world's named places (points.json): starts, finishes, checkpoints, spots. Site metres */
+  points?: () => WorldPoint[]
   /** the objective list, as the HUD draws it */
   objectives?: ObjectivesHost
 }
@@ -174,6 +177,32 @@ export interface ModelPose {
 }
 
 /**
+ * ONE OF THE WORLD'S NAMED PLACES, as a program reads it: the Points tab's start, finish,
+ * checkpoint, spot and home, in site metres.
+ *
+ * Rich, 2026-10-10: *"nor no assets we can reference from the library in case we want to spawn
+ * something at a point for a given condition."* A program could put a model anywhere and could not
+ * ask where the finish line somebody placed IS — so "spawn the water tower at p-03" meant copying
+ * two numbers out of points.json by hand and watching them go stale the next time the point moved.
+ *
+ * `z` is the height the point stands at — the ground there plus its lift, or its absolute height —
+ * so a flying checkpoint is where the editor drew it. Null where nothing knows the ground (a dry run).
+ */
+export interface WorldPoint {
+  id: string
+  name: string
+  /** home, start, finish, checkpoint or spot */
+  kind: string
+  x: number
+  y: number
+  z: number | null
+  /** degrees anticlockwise from east, as the point was laid */
+  yaw_deg: number
+  /** what the level shows on arrival, when the point says */
+  note?: string
+}
+
+/**
  * MODELS A PROGRAM PUTS IN THE WORLD. Rich, 2026-09-30, after the pizza level had to reach
  * `window.corridor.site.layers.placements` to hide a pizza stack and clone a wad of cash: the
  * program API could name a placed thing and not show, hide, move or make one.
@@ -182,7 +211,10 @@ export interface ModelPose {
  * still a program a test can step — `spawn` answers null there, and the rest answer false.
  */
 export interface ModelHost {
-  /** put a catalog asset at a pose; the id to move it by, or null when there is no such asset */
+  /**
+   * put a library asset at a pose — a catalog id, or a vehicle, actor or weapon BUILD id, which
+   * wears its model — and answer the id to move it by, or null when there is no such asset
+   */
   spawn?: (asset: string, pose: ModelPose) => string | null
   move?: (id: string, pose: ModelPose) => boolean
   show?: (id: string, on: boolean) => boolean
@@ -367,6 +399,8 @@ export interface WorldLayersHost {
 
   /** the ids of the painted traffic zones */
   trafficIds?: () => string[]
+  /** one zone's outline, site metres, so `on('enters', id)` can be about it; null when there is none */
+  trafficPolygon?: (id: string) => [number, number][] | null
   /** how busy one is now, 0…1, or null when there is no such zone */
   trafficDensity?: (id: string) => number | null
   /** make one busier or clearer, optionally easing over `over` seconds. False when there is no such zone */
@@ -448,9 +482,19 @@ export interface PlacedThing {
 export type Zone =
   | { kind: 'circle'; x: number; y: number; r: number }
   | { kind: 'box'; x0: number; y0: number; x1: number; y1: number }
+  /**
+   * An outline, site metres — what a painted traffic zone is. Added 2026-10-10, when the "nobody
+   * has one yet" above stopped being true: the editor draws these, and a program asking "is the
+   * player in the jam" should not have to approximate a road-shaped polygon with a circle.
+   */
+  | { kind: 'polygon'; points: [number, number][] }
+
+/** How far from a point counts as being AT it, when a program names a point as a zone. Metres. */
+export const POINT_RADIUS_M = 15
 
 export function inZone(z: Zone, x: number, y: number): boolean {
   if (z.kind === 'circle') return (x - z.x) ** 2 + (y - z.y) ** 2 <= z.r * z.r
+  if (z.kind === 'polygon') return Array.isArray(z.points) && z.points.length >= 3 && inside(z.points, x, y)
   return x >= Math.min(z.x0, z.x1) && x <= Math.max(z.x0, z.x1) && y >= Math.min(z.y0, z.y1) && y <= Math.max(z.y0, z.y1)
 }
 
@@ -665,10 +709,23 @@ export interface GameApi {
   /** hurt something directly. Returns the health it has left */
   hurt(entity: number, amount: number): number
 
-  /** name a region, so `on('enters', …)` and `in()` can refer to it */
+  /**
+   * Name a region, so `on('enters', …)` and `in()` can refer to it.
+   *
+   * THE WORLD'S OWN NAMES WORK WITHOUT THIS. A name the program never declared is looked up in the
+   * world: a painted traffic zone's id (`'z-01'`) is its outline, and a point's id
+   * (`'beltway-start'`) is a ring of `POINT_RADIUS_M` around it — so `on('enters', 'z-01', …)` is a
+   * whole trigger in one line. Declaring a zone with the same name wins, which is how a point gets
+   * a bigger ring.
+   */
   zone(name: string, z: Zone): void
-  /** is the player in it right now */
+  /** is the player in it right now — a declared zone, or a world zone or point by id */
   in(name: string): boolean
+
+  /** one of the world's named places by id (the Points tab), site metres; null when there is none */
+  point(id: string): WorldPoint | null
+  /** every named place in this world */
+  points(): WorldPoint[]
 
   award(points: number): void
   /** what the player is trying to do, in a sentence the HUD can show */
@@ -692,7 +749,12 @@ export interface GameApi {
 
   /**
    * MODELS OF THE PROGRAM'S OWN: a pickup on the ground, a reward flying at the car. Assets are
-   * catalog ids (anything the editor could place). Safe with no host: `spawn` answers null.
+   * library ids — anything the editor could place, any asset with a model, or a vehicle, actor or
+   * weapon build id (it wears its model). `remove` is the despawn. Safe with no host: `spawn`
+   * answers null.
+   *
+   * At a named place: `const at = api.point('p-03'); if (at) api.models.spawn('water-tower-01', at)`
+   * — a point carries x, y, z and yaw_deg, which is a pose.
    */
   readonly models: {
     spawn(asset: string, pose: ModelPose): string | null
@@ -967,7 +1029,14 @@ export class GameRun {
       placements: () => H.placements?.() ?? [],
 
       zone: (name, z) => { this.zones.set(name, z) },
-      in: (name) => this.inside.has(name),
+      in: (name) => {
+        if (this.zones.has(name)) return this.inside.has(name)
+        // a world name: watched from the first time it is asked about, answered by the tick
+        return this.worldZone(name) !== null && this.inside.has(name)
+      },
+
+      point: (id) => (typeof id === 'string' ? this.worldPoints().find((p) => p.id === id) ?? null : null),
+      points: () => this.worldPoints(),
 
       award: (p) => { this.score += p },
       goal: (text) => { this.goalText = text },
@@ -1016,6 +1085,8 @@ export class GameRun {
         if (event === 'ends') { this.endFns.push(a as (o: Outcome) => void); return }
         const map = event === 'enters' ? this.enters : this.leaves
         const name = a as string
+        // a world zone or point by id needs no `zone()` first; looked up now so it is watched
+        if (!this.zones.has(name)) this.worldZone(name)
         const list = map.get(name) ?? []
         list.push(b as () => void)
         map.set(name, list)
@@ -1099,6 +1170,50 @@ export class GameRun {
   /** The zones this program declared, by name — what a dry run reports and a HUD can list. */
   get zoneNames(): string[] {
     return [...this.zones.keys()]
+  }
+
+  /** The world's points, copied, every one with finite numbers — a host's typo is not a program's crash. */
+  private worldPoints(): WorldPoint[] {
+    const out: WorldPoint[] = []
+    for (const p of this.host.points?.() ?? []) {
+      if (!p || typeof p.id !== 'string' || !finite(p.x) || !finite(p.y)) continue
+      out.push({ ...p, z: finite(p.z) ? p.z : null, yaw_deg: finite(p.yaw_deg) ? p.yaw_deg : 0 })
+    }
+    return out
+  }
+
+  /**
+   * A name the program did not declare, looked up in the world: a painted traffic zone's outline,
+   * else a ring around a named point. Found once and kept, so the tick tests it like any other
+   * zone and `in()` answers from the same set. Null — and nothing kept — when the world has neither.
+   *
+   * TRAFFIC FIRST, because a zone is a region and a point is a place: an id that is both is the
+   * region somebody drew. A `zone()` with the same name replaces either (see `allZones`).
+   */
+  private worldZones = new Map<string, Zone>()
+  private worldZone(name: string): Zone | null {
+    const known = this.worldZones.get(name)
+    if (known) return known
+    if (typeof name !== 'string' || !name) return null
+    let z: Zone | null = null
+    const poly = this.host.layers?.trafficPolygon?.(name)
+    if (Array.isArray(poly) && poly.length >= 3) z = { kind: 'polygon', points: poly }
+    else {
+      const p = this.worldPoints().find((x) => x.id === name)
+      if (p) z = { kind: 'circle', x: p.x, y: p.y, r: POINT_RADIUS_M }
+    }
+    if (!z) return null
+    // and it behaves as a declared zone does from here: the next tick decides inside or out, so a
+    // level that opens ON the point hears `enters` on its first frame, exactly as it would for a
+    // `zone()` drawn round the start
+    this.worldZones.set(name, z)
+    return z
+  }
+
+  /** Declared zones, then the world's that nothing declared over. */
+  private *allZones(): Iterable<[string, Zone]> {
+    yield* this.zones
+    for (const [name, z] of this.worldZones) if (!this.zones.has(name)) yield [name, z]
   }
 
   /* ---- objectives ------------------------------------------------------------------------- */
@@ -1194,7 +1309,7 @@ export class GameRun {
     if (at) {
       if (this.last) this.travelled += Math.hypot(at.x - this.last.x, at.y - this.last.y)
       this.last = { x: at.x, y: at.y }
-      for (const [name, z] of this.zones) {
+      for (const [name, z] of this.allZones()) {
         const now = inZone(z, at.x, at.y)
         const was = this.inside.has(name)
         if (now && !was) { this.inside.add(name); this.fire(this.enters.get(name)) }

@@ -8,11 +8,13 @@ waiting on one request at a time. These tests pin the concurrency contract witho
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from corridor import naip  # noqa: E402
@@ -116,10 +118,14 @@ class NaipTiledTest(unittest.TestCase):
         self.cache = Path(self.tmp.name)
         self._orig_get = naip._get_with_retry
         self._orig_covered = naip.covered
+        # the ImageServer path; the Planetary Computer's has its own tests (test_naip_pc.py)
+        self._env = mock.patch.dict(os.environ, {"CORRIDOR_NAIP_SOURCE": "usgs"})
+        self._env.start()
 
     def tearDown(self):
         naip._get_with_retry = self._orig_get
         naip.covered = self._orig_covered
+        self._env.stop()
         self.tmp.cleanup()
 
     def test_every_corridor_tile_is_fetched_and_written(self):

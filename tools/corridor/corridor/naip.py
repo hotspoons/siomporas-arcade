@@ -1,10 +1,24 @@
 """Imagery on the site's UTM lattice: NAIP at 30 cm in the United States, Sentinel-2 at 10 m elsewhere.
 
-Ported from trailworks `fetch_naip_rgb`, with two changes: the resolution is the service's native
-0.3 m rather than 1 m (USGSNAIPPlus reports pixelSize 0.3 — the current NAIP cycle is 60 cm and
-some states 30 cm, so 0.3 is at or past the source and never below it), and `bandIds=0,1,2` is
-passed explicitly because the service carries a fourth NIR band and we want natural colour, not
-whatever the default rendering rule feels like today.
+TWO NAIP SOURCES since 2026-10-10, chosen by CORRIDOR_NAIP_SOURCE (auto | pc | usgs; default auto):
+
+  pc     Microsoft's Planetary Computer: the USDA quarter-quad COGs, found by STAC search and read
+         over HTTP range requests (`naip_pc.py`, which says why and what was measured). PRIMARY.
+  usgs   USGS's NAIPPlus ImageServer `exportImage`, below. The fallback: on 2026-10-10 it answered
+         504 for an hour and killed two dc-metro bakes, which is why it is no longer the only one.
+
+`auto` asks the Planetary Computer first and turns to the ImageServer when it cannot be reached (a
+tile at a time, with a breaker so an outage is paid for once), or when it has no NAIP somewhere the
+ImageServer might (it carries no Hawaii or Alaska). Forcing one source turns the other off — the
+bake then fails rather than mixing. Either way the files are the same: same names, same lattice,
+same `res_m`, cached under `<cache>/naip/` (the ImageServer's tiles as before, the Planetary
+Computer's as `pc_*.jpg` with a `.json` naming the items that fed each).
+
+THE USGS SOURCE was ported from trailworks `fetch_naip_rgb`, with two changes: the resolution is
+the service's native 0.3 m rather than 1 m (USGSNAIPPlus reports pixelSize 0.3 — the current NAIP
+cycle is 60 cm and some states 30 cm, so 0.3 is at or past the source and never below it), and
+`bandIds=0,1,2` is passed explicitly because the service carries a fourth NIR band and we want
+natural colour, not whatever the default rendering rule feels like today.
 
 exportImage caps at 4000 px a side, so the corridor is fetched as 1200 m tiles and stitched. The
 response JPEGs are cached; a re-run never leaves the machine.
@@ -19,8 +33,10 @@ at any distance from the car.
 from __future__ import annotations
 
 import io
+import json
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +47,7 @@ from rasterio.transform import from_origin
 
 from . import BakeFault
 from .geo import Frame
+from . import naip_pc
 from . import rastercache
 
 SERVICE = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
@@ -94,20 +111,34 @@ def _thread_session() -> requests.Session:
     return s
 
 
-def _fetch_one(hit: Path, params: dict, timeout: int = 300) -> bool:
+def source_choice() -> str:
+    """CORRIDOR_NAIP_SOURCE: `pc`, `usgs`, or `auto` (the default, and anything unrecognised)."""
+    v = os.environ.get("CORRIDOR_NAIP_SOURCE", "auto").strip().lower()
+    return v if v in ("auto", "pc", "usgs") else "auto"
+
+
+def _jobs(n: int | None = None) -> int:
+    return int(n) if n is not None else int(os.environ.get("CORRIDOR_NAIP_JOBS", "6") or "6")
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    # Private temp + os.replace: several shards may race the same cache key, and the RWX cache is
+    # lock-free by design (a published entry is immutable). A half-written file must never publish.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}-{threading.get_ident()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def _fetch_one(hit: Path, params: dict, timeout: int = 300, tries: int = 9) -> bool:
     """Fetch one service tile into `hit` (atomic), returning False if it was already cached."""
     if hit.exists():
         return False
-    r = _get_with_retry(SERVICE, params=params, timeout=timeout, session=_thread_session())
+    r = _get_with_retry(SERVICE, params=params, timeout=timeout, tries=tries, session=_thread_session())
     r.raise_for_status()
     if not r.headers.get("content-type", "").startswith("image"):
         raise RuntimeError(f"NAIP exportImage returned {r.headers.get('content-type')}: {r.text[:200]}")
-    hit.parent.mkdir(parents=True, exist_ok=True)
-    # Private temp + os.replace: several shards may race the same cache key, and the RWX cache is
-    # lock-free by design (a published entry is immutable). A half-written JPEG must never publish.
-    tmp = hit.with_name(f"{hit.name}.{os.getpid()}-{threading.get_ident()}.tmp")
-    tmp.write_bytes(r.content)
-    os.replace(tmp, hit)
+    _atomic_write(hit, r.content)
     return True
 
 
@@ -121,29 +152,235 @@ def fetch_tiles_parallel(tasks, jobs: int | None = None, label: str = "naip") ->
     sockets at USGS at once.
     """
     missing = [(h, p) for h, p in tasks if not h.exists()]
-    if not missing:
-        return 0
-    jobs = jobs if jobs is not None else int(os.environ.get("CORRIDOR_NAIP_JOBS", "6") or "6")
-    jobs = max(1, min(int(jobs), len(missing)))
+    return sum(1 for got in _pool([lambda h=h, p=p: _fetch_one(h, p) for h, p in missing], jobs, label) if got)
+
+
+def _pool(work: list, jobs: int | None, label: str) -> list:
+    """Run the callables in `work` on at most `jobs` threads (CORRIDOR_NAIP_JOBS, default 6),
+    printing progress; return their results. The first failure is raised."""
+    if not work:
+        return []
+    jobs = max(1, min(_jobs(jobs), len(work)))
     if jobs == 1:
-        n = sum(1 for h, p in missing if _fetch_one(h, p))
-        print(f"  {label}    fetched {n}/{len(missing)} tiles", flush=True)
-        return n
+        out = [fn() for fn in work]
+        print(f"  {label}    fetched {len(out)}/{len(work)} tiles", flush=True)
+        return out
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    n = 0
+    out = []
     with ThreadPoolExecutor(max_workers=jobs) as ex:
-        futs = [ex.submit(_fetch_one, h, p) for h, p in missing]
+        futs = [ex.submit(fn) for fn in work]
         for done, fut in enumerate(as_completed(futs), 1):
-            n += 1 if fut.result() else 0
-            if done % 5 == 0 or done == len(missing):
-                print(f"  {label}    fetched {done}/{len(missing)} tiles ({jobs} parallel)", flush=True)
-    return n
+            out.append(fut.result())
+            if done % 5 == 0 or done == len(work):
+                print(f"  {label}    fetched {done}/{len(work)} tiles ({jobs} parallel)", flush=True)
+    return out
+
+
+# ------------------------------------------------------------------------- the tile plan, either source
+
+
+@dataclass(frozen=True)
+class Tile:
+    """One piece of an output raster, at most TILE_PX a side, cached on its own under <cache>/naip/.
+
+    The cache names are keyed on the tile's own lattice (top-left corner, size, resolution), exactly
+    as before, so the ImageServer tiles already on the cluster's cache volume are found again."""
+
+    x0: float
+    y1: float
+    w: int
+    h: int
+    res: float
+    epsg: int
+    cache: Path
+
+    @property
+    def bbox(self) -> tuple[float, float, float, float]:
+        return (self.x0, self.y1 - self.h * self.res, self.x0 + self.w * self.res, self.y1)
+
+    @property
+    def stem(self) -> str:
+        return f"{self.epsg}_{self.x0:.1f}_{self.y1:.1f}_{self.w}x{self.h}_{self.res:g}"
+
+    @property
+    def usgs(self) -> Path:
+        return self.cache / "naip" / f"{self.stem}.jpg"
+
+    @property
+    def pc(self) -> Path:
+        return self.cache / "naip" / f"pc_{self.stem}.jpg"
+
+    @property
+    def pc_meta(self) -> Path:
+        return self.cache / "naip" / f"pc_{self.stem}.json"
+
+    def params(self) -> dict:
+        x0, y0, x1, y1 = self.bbox
+        return {
+            "bbox": f"{x0},{y0},{x1},{y1}", "bboxSR": self.epsg, "imageSR": self.epsg,
+            "size": f"{self.w},{self.h}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
+        }
+
+    def file(self, mode: str | None = None) -> Path | None:
+        """The cached piece to read: the Planetary Computer's, else (unless forced to `pc`) the ImageServer's."""
+        mode = mode or source_choice()
+        if mode != "usgs" and self.pc.exists():
+            return self.pc
+        if mode != "pc" and self.usgs.exists():
+            return self.usgs
+        return None
+
+
+def plan_tiles(frame: Frame, bbox, res: float, cache: Path, keep=None) -> list[tuple[int, int, Tile]]:
+    """`(row, col, tile)` for every TILE_PX piece of the bbox's lattice at `res` that `keep(box)` wants."""
+    xmin, ymin, xmax, ymax = bbox
+    width = int(round((xmax - xmin) / res))
+    height = int(round((ymax - ymin) / res))
+    out = []
+    for r0 in range(0, height, TILE_PX):
+        for c0 in range(0, width, TILE_PX):
+            tw, th = min(TILE_PX, width - c0), min(TILE_PX, height - r0)
+            t = Tile(xmin + c0 * res, ymax - r0 * res, tw, th, res, frame.epsg, cache)
+            if keep is None or keep(t.bbox):
+                out.append((r0, c0, t))
+    return out
+
+
+def read_tile(t: Tile) -> np.ndarray:
+    """The cached piece as (h, w, 3) uint8."""
+    path = t.file()
+    if path is None:
+        raise RuntimeError(f"NAIP tile {t.stem} was planned and fetched but nothing is cached for it")
+    return np.asarray(Image.open(io.BytesIO(path.read_bytes())).convert("RGB"))
+
+
+def _fetch_pc_tile(t: Tile, frame: Frame, items: list, tries: int) -> None:
+    arr, used = naip_pc.compose(frame, t.bbox, t.res, items, jobs=1, tries=tries)
+    buf = io.BytesIO()
+    Image.fromarray(np.ascontiguousarray(np.moveaxis(arr, 0, -1))).save(buf, format="JPEG", quality=90)
+    # the sidecar first: the .jpg is what says "cached", so it must never exist without its items
+    _atomic_write(t.pc_meta, json.dumps({"items": [u.record() for u in used]}).encode())
+    _atomic_write(t.pc, buf.getvalue())
+
+
+def fetch_tiles(frame: Frame, tiles: list[Tile], label: str = "naip", jobs: int | None = None) -> dict:
+    """Make sure every tile has a cached piece, from whichever source CORRIDOR_NAIP_SOURCE allows.
+
+    `auto`: Planetary Computer first, with SHORT patience (about two minutes of 5xx); when it fails
+    — the search, or a tile read — a breaker trips and every remaining tile goes to the ImageServer
+    with the full patience. A tile only fails the bake when BOTH sources failed it. Returns the
+    provenance for the manifest (`provenance`)."""
+    mode = source_choice()
+    missing = [t for t in tiles if t.file(mode) is None]
+    breaker = {"down": None}
+    lock = threading.Lock()
+    items: list | None = None
+    if missing and mode != "usgs":
+        xs = [b for t in missing for b in (t.bbox[0], t.bbox[2])]
+        ys = [b for t in missing for b in (t.bbox[1], t.bbox[3])]
+        try:
+            items = naip_pc.search(frame.bbox_wgs(min(xs), min(ys), max(xs), max(ys)), tries=naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES)
+        except Exception as exc:
+            if mode == "pc":
+                raise BakeFault(f"naip: CORRIDOR_NAIP_SOURCE=pc and the Planetary Computer search failed: {exc}") from exc
+            breaker["down"] = f"search failed: {exc}"
+            print(f"  {label}    Planetary Computer unreachable ({exc}); the USGS ImageServer serves these tiles", flush=True)
+        if items == [] and mode == "auto":
+            # covered() said yes, so the ImageServer must have it where the catalogue does not
+            breaker["down"] = "no Planetary Computer items over these tiles"
+            print(f"  {label}    Planetary Computer has no NAIP over these tiles; the USGS ImageServer serves them", flush=True)
+        elif items:
+            years = sorted({i.year for i in items}, reverse=True)
+            print(f"  {label}    Planetary Computer: {len(items)} items over {len(missing)} tiles, years {', '.join(map(str, years))}", flush=True)
+
+    def one(t: Tile) -> str:
+        if mode != "usgs" and breaker["down"] is None:
+            try:
+                _fetch_pc_tile(t, frame, items or [], naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES)
+                return "pc"
+            except Exception as exc:
+                if mode == "pc":
+                    raise BakeFault(f"naip: CORRIDOR_NAIP_SOURCE=pc and tile {t.stem} could not be read: {exc}") from exc
+                with lock:
+                    if breaker["down"] is None:
+                        breaker["down"] = str(exc)
+                        print(f"  {label}    Planetary Computer failed ({exc}); the remaining tiles come from the USGS ImageServer", flush=True)
+        try:
+            _fetch_one(t.usgs, t.params())
+        except Exception as exc:
+            if mode == "usgs":
+                raise
+            raise BakeFault(f"naip: tile {t.stem}: neither source answered — Planetary Computer: {breaker['down']}; USGS ImageServer: {exc}") from exc
+        return "usgs"
+
+    _pool([lambda t=t: one(t) for t in missing], jobs, label)
+    return provenance(tiles, mode)
+
+
+def provenance(tiles: list[Tile], mode: str | None = None) -> dict:
+    """Which source and which NAIP items fed these tiles: the manifest's record of the imagery."""
+    mode = mode or source_choice()
+    by_source: dict[str, int] = {}
+    items: dict[str, dict] = {}
+    for t in tiles:
+        f = t.file(mode)
+        if f is None:
+            continue
+        src = "pc" if f == t.pc else "usgs"
+        by_source[src] = by_source.get(src, 0) + 1
+        if src == "pc" and t.pc_meta.exists():
+            for rec in json.loads(t.pc_meta.read_text()).get("items", []):
+                items.setdefault(rec["id"], {**rec, "tiles": 0})["tiles"] += 1
+    names = {"pc": "Planetary Computer NAIP (USDA quarter-quad COGs)", "usgs": "USGS NAIPPlus ImageServer (current mosaic)"}
+    out: dict = {"source": " + ".join(names[k] for k in sorted(by_source)) or None, "tiles_by_source": by_source}
+    if items:
+        recs = sorted(items.values(), key=lambda r: (-r["year"], r["gsd_m"], r["id"]))
+        out["items"] = recs
+        out["years"] = sorted({r["year"] for r in recs}, reverse=True)
+        out["source_res_m"] = sorted({r["gsd_m"] for r in recs})
+    return out
 
 
 def covered(frame: Frame, bbox: tuple[float, float, float, float]) -> bool:
     """
-    Does NAIP actually have imagery here?
+    Does NAIP have imagery here? Asked of the Planetary Computer's catalogue first (a STAC search,
+    with the Crofton control — `naip_pc.covered`), and of the ImageServer when that cannot answer.
+
+    An outage is never "no": a source that cannot be reached is skipped (auto) or stops the bake
+    (forced), and when neither can be reached this raises BakeFault rather than dropping to
+    Sentinel-2. "No" is the catalogue's empty search with a full control — and in `auto` the
+    ImageServer is asked for a second opinion then, because the catalogue has no Hawaii or Alaska.
+    """
+    mode = source_choice()
+    if mode != "usgs":
+        try:
+            if naip_pc.covered(frame.bbox_wgs(*bbox), tries=naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES):
+                return True
+        except Exception as exc:
+            if mode == "pc":
+                raise BakeFault(f"naip coverage probe (Planetary Computer) could not get an answer, so this bake cannot tell whether NAIP covers it: {exc}") from exc
+            print(f"  naip    Planetary Computer could not answer the coverage probe ({exc}); asking the USGS ImageServer", flush=True)
+            return _usgs_covered(frame, bbox)
+        if mode == "pc":
+            print("  naip    Planetary Computer has no NAIP here (its control over Crofton answered)", flush=True)
+            return False
+        try:
+            has = _usgs_covered(frame, bbox, tries=naip_pc.SHORT_TRIES)
+        except BakeFault as exc:
+            # The catalogue's "no" is a real answer, with a control; the second opinion is only
+            # for the places it does not carry. Say so loudly and go with the answer we have.
+            print(f"  naip    WARNING Planetary Computer has no NAIP here and the USGS ImageServer could not be asked ({exc}); treating it as uncovered", flush=True)
+            return False
+        if has:
+            print("  naip    Planetary Computer has no NAIP here but the USGS ImageServer does; using it", flush=True)
+        return has
+    return _usgs_covered(frame, bbox)
+
+
+def _usgs_covered(frame: Frame, bbox: tuple[float, float, float, float], tries: int = 9) -> bool:
+    """
+    Does the USGS ImageServer have imagery here?
 
     NOT A STATUS-CODE CHECK, because the service does not fail outside its coverage — it answers
     **HTTP 200 with a valid, entirely black JPEG**. Measured with one 32x32 export from each of two
@@ -166,6 +403,7 @@ def covered(frame: Frame, bbox: tuple[float, float, float, float]) -> bool:
                 "size": "32,32", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
             },
             timeout=120,
+            tries=tries,
         )
     except Exception as exc:
         # NOT "no NAIP here". On 2026-10-10 a four-minute 504 from the ImageServer was read as an
@@ -255,24 +493,55 @@ def fetch_naip(frame: Frame, bbox: tuple[float, float, float, float], out: Path,
     width = int(round((xmax - xmin) / RES))
     height = int(round((ymax - ymin) / RES))
     mosaic = np.zeros((3, height, width), dtype=np.uint8)
-    plan = []  # (r0, c0, tw, th, cache_path, params)
-    for r0 in range(0, height, TILE_PX):
-        for c0 in range(0, width, TILE_PX):
-            tw, th = min(TILE_PX, width - c0), min(TILE_PX, height - r0)
-            bx0, by1 = xmin + c0 * RES, ymax - r0 * RES
-            hit = cache / "naip" / f"{frame.epsg}_{bx0:.1f}_{by1:.1f}_{tw}x{th}_{RES:g}.jpg"
-            plan.append((r0, c0, tw, th, hit, {
-                "bbox": f"{bx0},{by1 - th * RES},{bx0 + tw * RES},{by1}", "bboxSR": frame.epsg, "imageSR": frame.epsg,
-                "size": f"{tw},{th}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
-            }))
-    fetch_tiles_parallel([(h, p) for _, _, _, _, h, p in plan])
-    for i, (r0, c0, tw, th, hit, _params) in enumerate(plan, 1):
-        tile = np.asarray(Image.open(io.BytesIO(hit.read_bytes())).convert("RGB"))
-        mosaic[:, r0 : r0 + th, c0 : c0 + tw] = np.moveaxis(tile, -1, 0)
+    plan = plan_tiles(frame, bbox, RES, cache)
+    prov = fetch_tiles(frame, [t for _, _, t in plan])
+    for i, (r0, c0, t) in enumerate(plan, 1):
+        mosaic[:, r0 : r0 + t.h, c0 : c0 + t.w] = np.moveaxis(read_tile(t), -1, 0)
         print(f"  naip    tile {i}/{len(plan)}", flush=True)
     with rasterio.open(
         out, "w", driver="GTiff", width=width, height=height, count=3, dtype="uint8", crs=frame.crs,
         transform=from_origin(xmin, ymax, RES, RES), compress="jpeg", photometric="ycbcr", tiled=True, jpeg_quality=88,
     ) as dst:
         dst.write(mosaic)
-    return {"file": out.name, "res_m": RES, "size": [width, height]}
+    return {"file": out.name, "res_m": RES, "size": [width, height], **prov}
+
+
+def fetch_horizon_image(frame: Frame, out: Path, bbox: tuple[float, float, float, float], size: int) -> dict | None:
+    """A size x size JPEG of NAIP over a square frame-CRS bbox (the horizon's 60 m colour).
+
+    No georeferencing in the file: the reader knows the square. From the Planetary Computer this is
+    a hundred-odd quarter-quads read at their coarsest overviews, eight at a time; from the
+    ImageServer, one request. None when there is nothing to write."""
+    res = (bbox[2] - bbox[0]) / size
+    mode = source_choice()
+    if mode != "usgs":
+        tries = naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES
+        try:
+            items = naip_pc.search(frame.bbox_wgs(*bbox), tries=tries)
+            if items:
+                arr, used = naip_pc.compose(frame, bbox, res, items, jobs=max(8, _jobs()), tries=tries)
+                buf = io.BytesIO()
+                Image.fromarray(np.ascontiguousarray(np.moveaxis(arr, 0, -1))).save(buf, format="JPEG", quality=90)
+                _atomic_write(out, buf.getvalue())
+                years = sorted({u.year for u in used}, reverse=True)
+                print(f"  horizon imagery {size}x{size} @ {res:g} m from {len(used)} Planetary Computer items ({', '.join(map(str, years))})", flush=True)
+                return {"source": "pc", "items": len(used), "years": years}
+            if mode == "pc":
+                print("  horizon no Planetary Computer NAIP over the horizon square; no imagery", flush=True)
+                return None
+        except Exception as exc:
+            if mode == "pc":
+                raise BakeFault(f"horizon imagery: CORRIDOR_NAIP_SOURCE=pc and the Planetary Computer failed: {exc}") from exc
+            print(f"  horizon Planetary Computer failed ({exc}); asking the USGS ImageServer", flush=True)
+    xmin, ymin, xmax, ymax = bbox
+    r = _get_with_retry(
+        SERVICE,
+        params={"bbox": f"{xmin},{ymin},{xmax},{ymax}", "bboxSR": frame.epsg, "imageSR": frame.epsg, "size": f"{size},{size}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "f": "image"},
+        timeout=300,
+    )
+    r.raise_for_status()
+    if r.headers.get("content-type", "").startswith("image"):
+        out.write_bytes(r.content)
+        print(f"  horizon imagery {size}x{size} @ {res:g} m from the USGS ImageServer", flush=True)
+        return {"source": "usgs"}
+    return None

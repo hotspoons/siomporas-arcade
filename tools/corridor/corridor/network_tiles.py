@@ -458,12 +458,7 @@ def _near_points_from_laz(bbox, chains: list[dict], laz: Path) -> dict:
 def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float = 1.0) -> dict:
     """NAIP at `res` m over the bbox, only the service tiles that touch the corridor, written
     window by window into one JPEG-compressed GeoTIFF."""
-    from io import BytesIO
-
-    from PIL import Image
-
     from . import naip as naip_mod
-    from .naip import TILE_PX
 
     if rastercache.reuse(out, frame.crs, tuple(bbox), "naip"):
         return {"file": out.name, "cached": True, "res_m": res}
@@ -477,35 +472,25 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
     xmin, ymin, xmax, ymax = bbox
     width = int(round((xmax - xmin) / res))
     height = int(round((ymax - ymin) / res))
-    # The service tiles the corridor actually touches, with where each lands in the output. Build
-    # the whole plan first so the downloads can run concurrently; a single GeoTIFF still has one
-    # writer, so the windows are written serially afterwards — from the cache, which is instant.
-    plan = []  # (r0, c0, tw, th, cache_path, params)
-    for r0 in range(0, height, TILE_PX):
-        for c0 in range(0, width, TILE_PX):
-            tw, th = min(TILE_PX, width - c0), min(TILE_PX, height - r0)
-            bx0, by1 = xmin + c0 * res, ymax - r0 * res
-            if not box(bx0, by1 - th * res, bx0 + tw * res, by1).intersects(corridor):
-                continue
-            hit = cache / "naip" / f"{frame.epsg}_{bx0:.1f}_{by1:.1f}_{tw}x{th}_{res:g}.jpg"
-            plan.append((r0, c0, tw, th, hit, {
-                "bbox": f"{bx0},{by1 - th * res},{bx0 + tw * res},{by1}", "bboxSR": frame.epsg, "imageSR": frame.epsg,
-                "size": f"{tw},{th}", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
-            }))
-    naip_mod.fetch_tiles_parallel([(h, p) for _, _, _, _, h, p in plan])
+    # The pieces the corridor actually touches, with where each lands in the output. Build the
+    # whole plan first so the downloads can run concurrently (from the Planetary Computer or the
+    # ImageServer — `naip.fetch_tiles` chooses); a single GeoTIFF still has one writer, so the
+    # windows are written serially afterwards — from the cache, which is instant.
+    plan = naip_mod.plan_tiles(frame, bbox, res, cache, keep=lambda b: box(*b).intersects(corridor))
+    prov = naip_mod.fetch_tiles(frame, [t for _, _, t in plan])
     fetched = 0
     blank_tiles: list = []
     with rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=3, dtype="uint8", crs=frame.crs, transform=from_origin(xmin, ymax, res, res), compress="jpeg", photometric="ycbcr", tiled=True, blockxsize=512, blockysize=512, jpeg_quality=88) as dst:
-        for r0, c0, tw, th, hit, _params in plan:
-            tile = np.asarray(Image.open(BytesIO(hit.read_bytes())).convert("RGB"))
-            dst.write(np.moveaxis(tile, -1, 0), window=rasterio.windows.Window(c0, r0, tw, th))
+        for r0, c0, t in plan:
+            tile = naip_mod.read_tile(t)
+            dst.write(np.moveaxis(tile, -1, 0), window=rasterio.windows.Window(c0, r0, t.w, t.h))
             fetched += 1
             # A corridor tile that comes back all-black is a SERVICE HOLE, not "no corridor here" —
             # the plan already dropped the tiles with no corridor. The 2026-10-07 dc-metro shards
             # 1/2/7 wrote as 19 KB of pure black and nothing said so; the pyramid then painted that
             # black into the ground. Report every hole by name so a missing area is never silent.
             if (tile <= naip_mod.NAIP_BLANK_MAX).all():
-                blank_tiles.append((xmin + c0 * res, ymax - r0 * res))
+                blank_tiles.append((t.x0, t.y1))
             print(f"  naip    tile {fetched}/{len(plan)}", flush=True)
     if blank_tiles:
         where = ", ".join(f"({x:.0f},{y:.0f})" for x, y in blank_tiles[:6])
@@ -516,7 +501,7 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
         )
     elif not plan:
         print(f"  naip    no service tiles touch the corridor for {out.name}", flush=True)
-    return {"file": out.name, "res_m": res, "size": [width, height], "tiles_fetched": fetched, "blank_tiles": len(blank_tiles)}
+    return {"file": out.name, "res_m": res, "size": [width, height], "tiles_fetched": fetched, "blank_tiles": len(blank_tiles), **prov}
 
 
 def _tile_grid(site_dir: Path):

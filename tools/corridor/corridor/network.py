@@ -603,9 +603,12 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             from . import network_tiles
 
             # the file keeps its name (several readers key off it); the resolution is NAIP_RES_M
-            manifest["naip"] = network_tiles.naip_tiled(frame, bbox, region, out / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
+            fresh = network_tiles.naip_tiled(frame, bbox, region, out / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
         else:
-            manifest["naip"] = naip.fetch_naip(frame, bbox, out / "naip.tif", cache)
+            fresh = naip.fetch_naip(frame, bbox, out / "naip.tif", cache)
+        # a cached raster returns {"cached": true}; keep the first run's sources and items under it
+        prev = manifest.get("naip")
+        manifest["naip"] = {**prev, **fresh} if fresh.get("cached") and isinstance(prev, dict) else fresh
     #
     # THE CANOPY OF A WORLD COMES FROM THE GLOBAL MODEL, NOT FROM THE POINT CLOUD.
     #
@@ -905,10 +908,12 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
 
     if "dem" not in skip:
         dem.fetch_dem(frame, bbox, sdir / "dem_1m.tif", cache)
+    naip_meta = None
     if "naip" not in skip:
         from . import network_tiles
 
-        network_tiles.naip_tiled(frame, bbox, region, sdir / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
+        # kept in the shard's manifest: which source and which NAIP items/years fed this block
+        naip_meta = network_tiles.naip_tiled(frame, bbox, region, sdir / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
     if "horizon" not in skip:
         horizon.fetch_horizon(frame, sdir / "horizon_30m.tif", cache, radius_m=30000.0)
     if "geology" not in skip:
@@ -974,7 +979,7 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
     (sdir / "branches.json").write_text(branches_doc(branches, frame))
     manifest = {"slug": slug, "kind": "network", "tiled": True, "shard": index, "world": bool(site.get("world")),
                 "frame": {"epsg": frame.epsg, "origin": frame.origin},
-                "bbox_utm": list(bbox), "lidar": manifest_lidar,
+                "bbox_utm": list(bbox), "lidar": manifest_lidar, "naip": naip_meta,
                 "branches": {"count": len(branches), "structures": sum(len(b["structures"]) for b in branches)},
                 "seconds": round(time.time() - t0, 1)}
     (sdir / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))

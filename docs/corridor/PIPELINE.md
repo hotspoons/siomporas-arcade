@@ -123,16 +123,32 @@ every bridge deck, tree and building, which is exactly why the point cloud is fe
 
 ### 1.5 Imagery (`naip.py`)
 
-USGS `USGSNAIPPlus/ImageServer/exportImage` at `RES = 0.3` m, `bandIds=0,1,2` (the service carries
-NIR as a fourth band), 4000 px tiles stitched, each tile's JPEG cached by bbox → `naip.tif`
-(JPEG-in-GeoTIFF, YCbCr). Acquisition date is **not** recorded by the fetch; the service returns
-its current mosaic. Ported from trailworks `fetch_naip_rgb`.
+Two sources, chosen by `CORRIDOR_NAIP_SOURCE` (`auto`, the default; `pc`; `usgs`), same files
+either way — 4000 px tiles at the caller's lattice (`RES = 0.3` m → `naip.tif`, `NAIP_RES_M = 0.6`
+→ `naip_1m.tif`), stitched into a JPEG-in-GeoTIFF (YCbCr), each tile cached under `cache/naip/`:
+
+- **Planetary Computer** (`naip_pc.py`, primary since 2026-10-10): STAC search of the `naip`
+  collection, the USDA's quarter-quad COGs read over `/vsicurl/` with a free SAS token (refreshed
+  near `msft:expiry`). Per pixel the newest year wins, the finer item within a year, and older items
+  fill only what is still black (state lines, collars, a missing quarter-quad); an item that adds
+  nothing is never opened. Each item is read at its coarsest overview no coarser than the lattice
+  (0.3 m Maryland 2023 → its 0.6 m overview), then warped. The manifest's `naip` names the items,
+  years and source resolutions (`items`, `years`, `source_res_m`, `tiles_by_source`).
+- **USGS** `USGSNAIPPlus/ImageServer/exportImage`, `bandIds=0,1,2` (the service carries NIR as a
+  fourth band): the fallback. It returns its current mosaic and no acquisition date. Ported from
+  trailworks `fetch_naip_rgb`.
+
+`auto` falls to the ImageServer when the Planetary Computer cannot answer (a breaker after about
+two minutes of 5xx), and asks it for a second opinion where the catalogue is empty (no Hawaii or
+Alaska there). "Not covered" — and Sentinel-2 at 10 m — is only an empty search whose control over
+Crofton is full; an outage of both sources is a `BakeFault`.
 
 ### 1.6 Far terrain (`horizon.py`)
 
 `3DEPElevation/ImageServer/exportImage` at 30 m over `±CORRIDOR_HORIZON_M` (default 30 000 m → a
 2000² Float32 GeoTIFF, `horizon_30m.tif`) plus NAIP at 60 m over the same square
-(`horizon_naip_60m.jpg`) so the far ridges are forest-green and field-tan, not a beige ramp. Same
+(`horizon_naip_60m.jpg`, from the same two sources: a hundred-odd quarter-quads at their 19 m
+overviews, or one ImageServer request) so the far ridges are forest-green and field-tan, not a beige ramp. Same
 vertical datum as the corridor DEM (NAVD88 m), so the LOD seam is a resampling problem.
 
 ### 1.7 Geology (`geology.py`)
@@ -288,7 +304,8 @@ single-image path runs unchanged; over it (Crofton–Crownsville: 18.8 × 18.2 k
 corridor) the **tiled path** does:
 
 - DEM via `dem.fetch_dem` over the whole bbox (deflate; the bbox is mostly fields, they compress);
-- NAIP at **1 m** (`naip_tiled`): only the 4 km service tiles that touch the corridor, written
+- NAIP at **`NAIP_RES_M`** (`naip_tiled`, 0.6 m; the file keeps the name `naip_1m.tif`): only the
+  4000 px tiles that touch the corridor, from either source (§1.5), written
   window by window into one JPEG GeoTIFF — 0.3 m over 18 km would be 5 GB;
 - lidar tile-wise (`lidar_tiled`): TNM LAZ delivery tiles of the newest project, each read,
   reprojected, clipped to the corridor and scattered into **1 km output tiles** (min ground, max
@@ -443,7 +460,7 @@ conversions and every sign convention in one place.
 | what | source | how it gets in |
 |---|---|---|
 | **Terrain, canopy, far terrain** | USGS 3DEP 1 m DEM; 3DEP lidar (EPT or TNM LAZ); 3DEP seamless 1/3″ | `dem.py`, `lidar.py`, `horizon.py` → `web/*.png` |
-| **Imagery** | USGS NAIPPlus (0.3 m corridor, 60 m horizon) | `naip.py`, `horizon.py` → `naip_1m.jpg`, `horizon_naip_60m.jpg` |
+| **Imagery** | NAIP: Planetary Computer COGs, USGS NAIPPlus as fallback (0.3 m corridor, 0.6 m network, 60 m horizon); Sentinel-2 outside the US | `naip.py`, `horizon.py` → `naip_1m.jpg`, `horizon_naip_60m.jpg` |
 | **Road geometry, lanes, paint, crossings, buildings, land use, water** | OpenStreetMap via Overpass (ODbL) | `osm.py`, `buildings.py` → `spine_utm.json`, `osm.geojson`, manifest |
 | **Rock palette** | Macrostrat map units (CC-BY) | `geology.py` → `geology.json` → manifest `geology` |
 | **Pavement textures** | flux.2-dev (`high-brine` on gh200-1) via `tools/surfaces/gen.py`: one prompt per class (`SETS`), 1024² top-down, made tileable by roll-and-blend over 96 px, normal from an albedo height field (Sobel, wrap-around), roughness = inverted blurred albedo; 3 variants per class + an 8 m macro map; also `grass_mown`, `grass_rough`, `shoulder_gravel` | `apps/corridor/public/surfaces/<class>/` + `surfaces.json` (gitignored, regenerable). `props.ts::loadSurfaceSets` builds one hex-tiled (`hextile.ts`, Mikkelsen 2022) `MeshStandardMaterial` per class; the join key is the class name `surface.py` emits |
@@ -560,5 +577,5 @@ named is on disk, every listed tile has its `dem.png` and its `zmin`/`zscale`; a
 ids are present, unique and agree with `spine_utm.json`. It exists because every data bug found on
 2026-09-21 rendered perfectly and was wrong.
 
-Licences: USGS 3DEP and NAIP public domain; OSM ODbL (attribute; share-alike on derived *data*);
+Licences: USGS 3DEP and NAIP (USDA FSA, via the Planetary Computer or USGS) public domain; OSM ODbL (attribute; share-alike on derived *data*);
 Macrostrat CC-BY; ez-tree MIT; TRELLIS.2 per its licence banner in the recon service.

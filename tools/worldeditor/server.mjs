@@ -45,8 +45,8 @@ import * as mcp from './mcp.mjs'
 import * as programs from './programs.mjs'
 import * as training from './training.mjs'
 import { Overpass, PUBLIC_MIRRORS, mirrorsFor } from './overpass.mjs'
-import { Coverage, bakeArea, bboxOfGeom, parseUpstream } from './coverage.mjs'
-import { Geofabrik } from './geofabrik.mjs'
+import { bakeArea, bboxOfGeom, hasOutline, openCoverage, parseRegions, parseUpstream } from './coverage.mjs'
+import { Geofabrik, INDEX_URL } from './geofabrik.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
 import { Geocoder } from './geocode.mjs'
@@ -153,7 +153,10 @@ if (seedFrom) {
 // When it holds the planet (docs/corridor/OVERPASS-PLANET.md) it needs no box and should be first.
 const overpassUpstreams = () => settings.get('overpass.url').split(',').map((s) => s.trim()).filter(Boolean)
 const configured = overpassUpstreams()
+const described = parseRegions(settings.get('overpass.regions'))
 for (const u of configured) {
+  // an instance named in `overpass.regions` is described by its extracts' outlines (coverage.mjs)
+  if (described.has(parseUpstream(u).name)) continue
   if (!u.includes('#') && !/overpass-api\.de|kumi\.systems|private\.coffee/.test(u)) {
     console.warn(`overpass: ${u.split('#')[0]} has no coverage box. If it is regional, add #south/west/north/east or it will answer HTTP 200 with nothing outside its extent and that answer looks exactly like "no roads here".`)
   }
@@ -162,20 +165,21 @@ for (const u of configured) {
  * WHAT EACH INSTANCE ACTUALLY HOLDS, by its extract's own polygon (coverage.mjs). Read at start-up
  * from the volume and the Geofabrik copy on it (or the vendored seed) — never from the network, so a
  * pod with no route out still routes its own instances from the first request — and refreshed in
- * the background once the live index has been read.
+ * the background once the live index has been read, then every few hours (Geofabrik itself is
+ * asked only when the copy is a week old, or after a failure an hour has passed). A region the
+ * index cannot outline is a problem in /api/osm/coverage and in the log, never a quiet "holds
+ * nothing" (geofabrik.mjs, the 2026-10-10 index).
  */
-const geofabrik = new Geofabrik(DATA)
-const coverage = new Coverage(DATA, {
+// WORLDEDITOR_GEOFABRIK_URL: a mirror of index-v1.json, for a deployment that cannot reach Germany
+const geofabrik = new Geofabrik(DATA, { url: env.WORLDEDITOR_GEOFABRIK_URL || INDEX_URL })
+const { coverage, refresh: refreshCoverage } = await openCoverage(DATA, {
   urls: overpassUpstreams,
   regions: () => settings.get('overpass.regions'),
-  lookup: (id) => geofabrik.region(id, { offline: true }),
+  geofabrik,
 })
-await coverage.load()
-for (const p of coverage.problems) console.warn(`overpass coverage: ${p}`)
-void geofabrik.index().then(() => {
-  coverage.lookup = (id) => geofabrik.region(id)
-  return coverage.load()
-}).catch((e) => console.warn(`geofabrik index: ${e.message ?? e} — routing from the copy on the volume or the seed`))
+const refreshCoverageLoudly = () => refreshCoverage().catch((e) => console.warn(`GEOFABRIK INDEX: ${e.message ?? e} — routing from the copy on the volume or the seed`))
+void refreshCoverageLoudly()
+setInterval(refreshCoverageLoudly, Number(env.WORLDEDITOR_GEOFABRIK_CHECK_MS ?? 3 * 3600e3)).unref()
 /** an upstream's geometries for the map's client: null claims everywhere (a public mirror) */
 const coverageOf = (url) => {
   const u = coverage.upstreams().find((x) => x.url === url)
@@ -761,9 +765,13 @@ async function api(req, res, seg, q) {
         fences,
       })
     }
+    // the index's own state goes with it: "routing knows nothing because Geofabrik did not answer"
+    // must be on the page that shows the routing, not only in a pod log
+    const index = geofabrik.status()
     return json(res, 200, {
       file: coverage.file,
-      problems: coverage.problems,
+      problems: [...index.problems, ...coverage.problems],
+      geofabrik: index,
       upstreams: coverage.upstreams().map((u) => ({
         name: u.name,
         url: u.url,
@@ -838,6 +846,8 @@ async function api(req, res, seg, q) {
     const f = await geofabrik.region(String(body.region ?? ''))
     if (!f) return json(res, 404, { error: `no Geofabrik region "${body.region}" — osm_regions lists them` })
     if (!f.properties?.urls?.pbf) return json(res, 400, { error: `${body.region} has no .pbf to import` })
+    // the import would succeed and the region could never be routed to: say so before, not after
+    if (!hasOutline(f.geometry)) return json(res, 409, { error: `${body.region} has no outline in the Geofabrik index this editor holds (${geofabrik.source}); an instance holding it could not be routed to. Try again when the index has one.` })
     return json(res, 202, { run: await runs.osmImport({ upstream: up.name, region: f }) })
   }
 

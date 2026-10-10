@@ -39,6 +39,24 @@ that does not hold the area is asked again; `refreshOsm` on a bake (`run_bake`, 
 cache entirely. An answer whose `remark` is a runtime error — a 200 with nothing in it, which an
 instance taking an import produces for about 1 query in 100 — is retried and never cached.
 
+**Where the outlines come from.** The editor's copy of Geofabrik's `index-v1.json`
+(`<data>/overpass/geofabrik-index.json`, `tools/worldeditor/geofabrik.mjs`). A NEW volume starts
+from `tools/worldeditor/geofabrik-seed.json` — the real outlines of `europe`, `north-america`,
+`us/district-of-columbia`, `us/maryland` and `us/virginia` — so the deployment's own instances are
+routed from the first request with no network; the live index is fetched in the background at
+start-up, re-checked every 3 hours (`WORLDEDITOR_GEOFABRIK_CHECK_MS`) and fetched again when the
+copy is a week old (an hour after a failure). **An outline is checked region by region.** Geofabrik's
+index of 2026-10-10 listed `us/maryland`, `us/virginia` and nine others with
+`"coordinates": []`; the editor took that as Maryland's outline, the Maryland instance then held
+nothing, and the split's test bake of a Crofton world went to the public mirrors (which answered
+504) with no problem reported. Now a region the live index leaves empty keeps the outline of the
+volume's previous copy or the seed (said in the log and in `/api/osm/coverage` →
+`geofabrik.outlinesFromElsewhere`); a configured region nobody can outline is a coverage problem and
+its instance holds nothing (never "everywhere"); a coverage file written before the check heals on
+the next start; and a failed fetch is a line in the log (`GEOFABRIK INDEX NOT FETCHED`) and in
+`/api/osm/coverage` → `problems` and `geofabrik.error`. `WORLDEDITOR_GEOFABRIK_URL` points the
+editor at a mirror of the index.
+
 **See it:** world editor → menu → **OSM data** (or Settings → Services → OSM data…): each instance's
 coverage on a map with its health (`/api/status`) and freshness (`/api/timestamp`, the replication
 time of its last diff), every world filled with the colour of the instance it reads, and red where

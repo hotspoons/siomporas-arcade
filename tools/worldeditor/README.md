@@ -250,6 +250,8 @@ Environment only, so the chart and a laptop run the same code.
 | `WORLDEDITOR_DATA` | the volume (`--data`). Default `tools/corridor/data` |
 | `WORLDEDITOR_APP` | the built app to serve (`--app`). Default `apps/corridor/dist` |
 | `WORLDEDITOR_OVERPASS_URL` | comma list, ours first; the public mirrors are appended. A REGIONAL instance must declare what it holds: `https://host/api/interpreter#south/west/north/east` (slashes, because the list itself is comma-separated) |
+| `WORLDEDITOR_OVERPASS_REGIONS` | what each instance holds, by Geofabrik region id: `overpass=us/maryland,overpass-na=north-america`; routing uses those extracts' outlines ([tools/overpass](../overpass/README.md#where-the-osm-comes-from)) |
+| `WORLDEDITOR_GEOFABRIK_URL` `_CHECK_MS` | where the Geofabrik index (the outlines) is read from (`https://download.geofabrik.de/index-v1.json`), and how often the editor checks whether its copy needs fetching again (3 h; it fetches when the copy is a week old, or an hour after a failure) |
 | `WORLDEDITOR_OVERPASS_TIMEOUT` `_DEADLINE` `_DOWN_FOR` | per attempt (120 s), for the whole call (240 s), and how long a failed upstream is skipped (60 s) |
 | `WORLDEDITOR_ASSETSVC` | the assetsvc base URL, e.g. `http://assetsvc.default.svc` |
 | `WORLDEDITOR_RUNNER` | force `local`; otherwise Kubernetes when a service-account token is mounted |

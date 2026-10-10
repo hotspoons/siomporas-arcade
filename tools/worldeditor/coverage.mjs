@@ -95,12 +95,23 @@ function at(a, b, axis, v) {
 
 export const boxArea = (b) => Math.max(0, b.east - b.west) * Math.max(0, b.north - b.south)
 
-/** Degree-area of `geom` inside `box`. Exact for a valid (multi)polygon: parts do not overlap and holes subtract. */
+/**
+ * Degree-area of `geom` inside `box`. Exact for a valid (multi)polygon: parts do not overlap and holes subtract.
+ *
+ * IN THE BOX'S OWN COORDINATES. Clipped in absolute degrees, the shoelace sums products of
+ * coordinates near (−77, 39) to measure a box of 4.5e-4 square degrees, and the rounding is about
+ * 1e-9 of it: a 900 m world in Arlington came out "1.4e-9 outside" North America — over
+ * INSIDE_TOL, so not held, so the public mirrors (2026-10-10). Shifted to the box's corner, the
+ * numbers are the size of the box and the dust is ~1e-16 of it.
+ */
 export function areaInBox(geom, box) {
+  const x0 = box.west
+  const y0 = box.south
+  const local = { west: 0, south: 0, east: box.east - x0, north: box.north - y0 }
   let a = 0
   for (const poly of polygonsOf(geom)) {
     poly.forEach((ring, i) => {
-      const clipped = ringArea(clipRing(ring, box))
+      const clipped = ringArea(clipRing(ring.map(([x, y]) => [x - x0, y - y0]), local))
       a += i === 0 ? clipped : -clipped
     })
   }
@@ -111,6 +122,19 @@ export function geomArea(geom) {
   let a = 0
   for (const poly of polygonsOf(geom)) poly.forEach((ring, i) => { a += i === 0 ? ringArea(ring) : -ringArea(ring) })
   return Math.max(0, a)
+}
+
+/**
+ * A geometry that encloses something. `{"type":"MultiPolygon","coordinates":[]}` does not — and is
+ * exactly what Geofabrik's index of 2026-10-10 gave for us/maryland (geofabrik.mjs). A region
+ * recorded with it routes nothing, so it is never recorded.
+ */
+export function hasOutline(geom) {
+  try {
+    return geomArea(geom) > 0
+  } catch {
+    return false
+  }
 }
 
 /** Even-odd point in polygon, holes included. */
@@ -342,8 +366,16 @@ export class Coverage {
     this.problems = []
   }
 
-  /** Read the file and fold the deployment's regions into it. Safe to call again after a settings change. */
-  async load() {
+  /**
+   * Read the file and fold the deployment's regions into it. Safe to call again after a settings
+   * change or an index refresh; calls are run one after another, never interleaved.
+   */
+  load() {
+    this.loading = (this.loading ?? Promise.resolve()).catch(() => {}).then(() => this.#load())
+    return this.loading
+  }
+
+  async #load() {
     try {
       const doc = JSON.parse(await readFile(this.file, 'utf8'))
       if (Array.isArray(doc?.upstreams)) this.doc = doc
@@ -359,16 +391,30 @@ export class Coverage {
       // the deployment's regions are exactly the setting's: drop the ones it no longer names
       rec.regions = rec.regions.filter((r) => r.source !== 'deploy' || ids.includes(r.id))
       for (const id of ids) {
-        if (rec.regions.some((r) => r.id === id && r.source === 'deploy' && r.geometry)) continue
+        // an outline already on the volume stands; an EMPTY one (written before outlines were
+        // checked) is looked up again, which is how a volume that took a bad index heals
+        if (rec.regions.some((r) => r.id === id && r.source === 'deploy' && hasOutline(r.geometry))) continue
         const f = await this.lookup(id).catch(() => null)
-        if (!f?.geometry) {
+        if (!hasOutline(f?.geometry)) {
           // NOT "covers everywhere", which is what an upstream with no regions would mean. A region
           // we cannot outline is a region we cannot route to; say so and leave it out.
-          this.problems.push(`${up.name}: region "${id}" is not in the Geofabrik index this editor can read — it is not routed to until it is`)
+          rec.regions = rec.regions.filter((r) => r.id !== id || r.source !== 'deploy')
+          this.problems.push(f
+            ? `${up.name}: region "${id}" has no outline in the Geofabrik index this editor can read — it is not routed to until it has`
+            : `${up.name}: region "${id}" is not in the Geofabrik index this editor can read — it is not routed to until it is`)
           continue
         }
         rec.regions = rec.regions.filter((r) => r.id !== id)
         rec.regions.push(regionRecord(f, 'deploy'))
+      }
+      // an imported region whose outline was lost the same way: look it up again, or say so
+      for (const r of rec.regions) {
+        if (r.source === 'fence' || hasOutline(r.geometry)) continue
+        const f = await this.lookup(r.id).catch(() => null)
+        if (hasOutline(f?.geometry)) r.geometry = f.geometry
+        // kept, not dropped: dropping the last one would turn the instance into one that claims
+        // everywhere. An empty outline routes nothing, here and in osm.py alike.
+        else this.problems.push(`${up.name}: region "${r.id}" has no outline — it is not routed to until it has`)
       }
       // a fence only stands in for an upstream with no regions at all
       rec.regions = rec.regions.filter((r) => r.source !== 'fence')
@@ -415,6 +461,7 @@ export class Coverage {
 
   /** Add an imported region to an upstream's coverage. Idempotent by region id. */
   async addRegion(name, feature, meta = {}) {
+    if (!hasOutline(feature?.geometry)) throw new Error(`${feature?.properties?.id ?? 'region'} has no outline in the Geofabrik index; it cannot be routed to`)
     const rec = this.#record(name, this.configured().find((u) => u.name === name)?.url ?? null)
     rec.regions = rec.regions.filter((r) => r.id !== feature.properties.id && r.source !== 'fence')
     rec.regions.push({ ...regionRecord(feature, 'import'), ...meta })
@@ -425,7 +472,8 @@ export class Coverage {
 
   async save() {
     await mkdir(path.dirname(this.file), { recursive: true })
-    const tmp = `${this.file}.${process.pid}.tmp`
+    // unique per write, as store.mjs's writeAtomic: two saves in one tick must not share a tmp file
+    const tmp = `${this.file}.tmp-${process.pid}-${++tmpSeq}`
     await writeFile(tmp, JSON.stringify(this.doc))
     await rename(tmp, this.file)
   }
@@ -458,6 +506,35 @@ export function regionRecord(f, source) {
     updates: p.urls?.updates ?? null,
     added: new Date().toISOString(),
   }
+}
+
+let tmpSeq = 0
+
+/**
+ * The coverage the editor routes by, opened the way the server opens it — the tests open it the
+ * same way, so what they prove is what a fresh deployment does.
+ *
+ * Start-up never waits on the network: the coverage is loaded from the volume's copy of the
+ * Geofabrik index, or the vendored seed on a fresh volume, so the deployment's own instances are
+ * routed from the first request. `refresh()` then reads the live index (Geofabrik only fetches it
+ * when the copy is a week old, or the seed, or `force`) and loads the coverage again; the server
+ * runs it once at start-up and on a timer. A failure is logged and is in `geofabrik.status()`.
+ *
+ * @param geofabrik a Geofabrik (geofabrik.mjs)
+ */
+export async function openCoverage(dataDir, { urls, regions, geofabrik, log = console }) {
+  const report = (c) => {
+    for (const p of c.problems) log.warn?.(`overpass coverage: ${p}`)
+    return c
+  }
+  const coverage = new Coverage(dataDir, { urls, regions, lookup: (id) => geofabrik.region(id, { offline: true }) })
+  report(await coverage.load())
+  const refresh = async ({ force = false } = {}) => {
+    await geofabrik.index({ refresh: force })
+    coverage.lookup = (id) => geofabrik.region(id)
+    return report(await coverage.load())
+  }
+  return { coverage, refresh }
 }
 
 const fmtBox = (b) => `${b.south}/${b.west}/${b.north}/${b.east}`

@@ -174,6 +174,20 @@ export interface CoverageUpstream {
   regions: CoverageRegion[]
 }
 
+/** Where the editor's Geofabrik index came from, and what is wrong with it (geofabrik.mjs `status()`). */
+export interface GeofabrikStatus {
+  url: string
+  file: string
+  source: 'geofabrik' | 'volume' | 'seed' | null
+  fetchedAt: string | null
+  lastAttempt: string | null
+  error: { at: string; message: string } | null
+  regions: number
+  missingOutlines: string[]
+  outlinesFromElsewhere: { id: string; from: string }[]
+  problems: string[]
+}
+
 export interface CoverageWorld {
   slug: string
   name: string
@@ -597,7 +611,7 @@ export const api = {
       xhr.send(file)
     }),
 
-  osmCoverage: () => call<{ upstreams: CoverageUpstream[]; worlds: CoverageWorld[]; problems: string[]; file: string }>('/api/osm/coverage'),
+  osmCoverage: () => call<{ upstreams: CoverageUpstream[]; worlds: CoverageWorld[]; problems: string[]; file: string; geofabrik?: GeofabrikStatus }>('/api/osm/coverage'),
   osmUpstreams: () => call<{ upstreams: UpstreamHealth[] }>('/api/osm/upstreams'),
   geofabrik: () => call<{ source: string; regions: { id: string; name: string; parent: string | null; pbf: string | null; updates: string | null }[] }>('/api/osm/geofabrik'),
   geofabrikRegion: (id: string) =>

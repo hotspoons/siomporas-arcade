@@ -86,6 +86,24 @@ test('clipping is exact: a box wholly inside keeps its area, a box half over the
   assert.equal(boxArea(box(0, 0, 2, 3)), 6)
 })
 
+test('a small world deep inside a continent is held: no clipping dust over INSIDE_TOL', () => {
+  // Clipped in absolute degrees, a 900 m world in Arlington was "1.4e-9 outside" North America and
+  // went to the public mirrors; on a grid over the eastern US about one small world in six did.
+  const miss = []
+  for (let lat = 33; lat <= 45; lat += 0.37) {
+    for (let lon = -95; lon <= -78; lon += 0.41) {
+      for (const radius_m of [200, 900, 3000]) {
+        const b = bakeArea({ lat, lon, radius_m })
+        const f = outsideFraction([NA], b).outside
+        if (f !== 0) miss.push(`${lat.toFixed(2)},${lon.toFixed(2)} r${radius_m}: ${f}`)
+      }
+    }
+  }
+  assert.deepEqual(miss, [])
+  assert.equal(outsideFraction([NA], bakeArea({ lat: 38.88, lon: -77.1, radius_m: 900 })).outside, 0)
+  assert.equal(outsideFraction([VA], bakeArea({ lat: 38.88, lon: -77.1, radius_m: 900 })).outside, 0)
+})
+
 /* ---- routing ---- */
 
 test('dc-metro-take-2 now routes to overpass-na', () => {

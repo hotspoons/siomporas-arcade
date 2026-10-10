@@ -57,7 +57,8 @@ const mounts = document.querySelector('#se-rail')
 
 const canvas = $<HTMLCanvasElement>('#gl')
 // the engine's renderer (@apex/engine/render/depth), on the logarithmic buffer the editor has always had
-const { renderer } = createRenderer({ canvas, antialias: true, depthMode: 'log', label: null })
+// reversed float depth where the GPU has EXT_clip_control, log depth where it does not — the game's default
+const { renderer } = createRenderer({ canvas, antialias: true, depthMode: 'auto', label: null })
 renderer.setPixelRatio(Math.min(2, devicePixelRatio))
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x8fa6c2)

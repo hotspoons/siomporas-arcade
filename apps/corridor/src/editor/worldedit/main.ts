@@ -29,6 +29,7 @@ import { ShellPanel } from '../agent/shellpanel'
 import { AgentPanel } from '../agent/agentpanel'
 import { AgentBridge } from '../../agent/bridge'
 import { buildReach, buildSettings } from './settingspanel'
+import { openOsmData } from './osmdata'
 import { McpPanel } from '../agent/mcppanel'
 import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
 import { ROOT, SITE_DOCS } from '../../agent/projection'
@@ -854,6 +855,18 @@ function buildDrawer() {
     hint: 'git and LFS, the agent, appearance, and what this is pointed at',
     onClick: () => openSettings(),
   })
+  // Rich, 2026-10-10: "a dialogue spawned from the settings menu, where we can see OSM coverage
+  // and select and download more source OSM data" (osmdata.ts)
+  drawer.item(nav, {
+    id: 'osm',
+    label: 'OSM data',
+    icon: 'globe-alt',
+    hint: 'which Overpass holds which ground, which one each world reads, and adding a region',
+    onClick: () => {
+      drawer.set(false)
+      openOsmData(logs)
+    },
+  })
 }
 
 /**
@@ -891,7 +904,9 @@ function openSettings(tab?: 'git' | 'agent' | 'look' | 'services') {
           build: (h) => {
             const reach = el('div', 'settings-reach')
             const form = el('div', 'settings-form')
-            h.append(reach, form)
+            const osm = el('div', 'panel-actions')
+            osm.append(button({ label: 'OSM data…', icon: 'globe-alt', title: 'coverage of each Overpass instance, and adding a region', onClick: () => openOsmData(logs) }))
+            h.append(reach, osm, form)
             void buildReach(reach)
             buildSettings(form)
           },

@@ -28,11 +28,14 @@ import json
 import time
 from pathlib import Path
 
+import re
+
 import numpy as np
 import requests
-from shapely.geometry import LineString, MultiLineString, Point, Polygon, mapping
-from shapely.ops import linemerge, substring
+from shapely.geometry import LineString, MultiLineString, Point, Polygon, box, mapping, shape
+from shapely.ops import linemerge, substring, unary_union
 
+from . import BakeFault
 from .geo import Frame
 
 # Public Overpass instances, tried in turn: the main one 504s under load on queries that take
@@ -55,15 +58,162 @@ session = requests.Session()
 session.headers["User-Agent"] = UA
 
 
+# WHAT EACH OF OURS HOLDS, from the world editor (tools/worldeditor/coverage.mjs): a file on the
+# volume naming each instance's Geofabrik regions, polygons and all. Unset on a laptop pointed at
+# one instance, and then nothing here changes.
+#
+# THE SILENT EMPTY, ONE MORE TIME. A regional instance asked about ground outside its extract
+# answers HTTP 200 with nothing — not an error. dc-metro-take-2 was sent to the Maryland instance
+# because a box said it held Washington and Arlington; its context.json came back with 108,816
+# roads in Maryland and none across the river, and the bake reported success (2026-10-10). So
+# every query whose area can be read is checked against the polygon of the instance it is about
+# to go to, and a query that NONE of ours holds is a BakeFault — never a quiet empty, never a quiet
+# half. See tools/overpass/README.md, "Where the OSM comes from".
+_COVERAGE_FILE = os.environ.get("CORRIDOR_OVERPASS_COVERAGE", "")
+_REFRESH = os.environ.get("CORRIDOR_OSM_REFRESH", "") == "1"
+_coverage_cache: dict | None = None
+
+
+def _coverage() -> dict:
+    """url -> (shapely geometry or None for 'claims everywhere', [region ids]). Empty without the file."""
+    global _coverage_cache
+    if _coverage_cache is not None:
+        return _coverage_cache
+    if not _COVERAGE_FILE:
+        _coverage_cache = {}
+        return _coverage_cache
+    try:
+        doc = json.loads(Path(_COVERAGE_FILE).read_text())
+    except (OSError, ValueError) as exc:
+        # NOT "no coverage, carry on": the editor said there is a coverage file, and baking without
+        # it is baking blind against regional instances, which is the whole failure
+        raise BakeFault(f"overpass coverage file {_COVERAGE_FILE} cannot be read ({exc}); refusing to query regional instances blind") from exc
+    out = {}
+    for up in doc.get("upstreams", []):
+        regions = up.get("regions") or []
+        url = up.get("url")
+        if not url:
+            continue
+        if not regions:
+            out[url] = (None if not up.get("holdsNothingKnown") else Polygon(), [])
+            continue
+        geom = unary_union([shape(r["geometry"]) for r in regions if r.get("geometry")])
+        out[url] = (geom, [r.get("id") for r in regions])
+    _coverage_cache = out
+    return out
+
+
+_NUM = r"(-?\d+(?:\.\d+)?)"
+_BBOX_RE = re.compile(rf"\(\s*{_NUM}\s*,\s*{_NUM}\s*,\s*{_NUM}\s*,\s*{_NUM}\s*\)")
+_POLY_RE = re.compile(r'poly:\s*"([^"]+)"')
+_AROUND_RE = re.compile(rf"around:\s*{_NUM}\s*,\s*{_NUM}\s*,\s*{_NUM}")
+
+
+def query_area(query: str):
+    """The ground a query asks about, as a lon/lat shapely geometry — or None when it names no place.
+
+    Read from the query text, because that is the one thing every caller already hands over and the
+    thing that is actually sent: every `(s,w,n,e)` bbox, every `poly:"lat lon …"`, every
+    `around:r,lat,lon` (as the square about it). Their union. An id lookup (`node(id:…)`) names no
+    place and is not checked — its ids came out of a query that was.
+    """
+    parts = []
+    for m in _BBOX_RE.finditer(query):
+        s_, w_, n_, e_ = (float(v) for v in m.groups())
+        if -90 <= s_ <= n_ <= 90 and -180 <= w_ <= e_ <= 180:
+            parts.append(box(w_, s_, e_, n_))
+    for m in _POLY_RE.finditer(query):
+        v = [float(x) for x in m.group(1).split()]
+        pts = [(v[i + 1], v[i]) for i in range(0, len(v) - 1, 2)]
+        if len(pts) >= 3:
+            parts.append(Polygon(pts).buffer(0))
+    for m in _AROUND_RE.finditer(query):
+        r, lat, lon = (float(x) for x in m.groups())
+        dlat = r / 111132.0
+        dlon = r / (111412.84 * max(0.05, np.cos(np.radians(lat))))
+        parts.append(box(lon - dlon, lat - dlat, lon + dlon, lat + dlat))
+    if not parts:
+        return None
+    return unary_union(parts)
+
+
+def _holds(url: str, area) -> tuple[bool, float]:
+    """Does this upstream hold ALL of `area`? (True, 0) when it claims everywhere or there is no area."""
+    rec = _coverage().get(url)
+    if rec is None or area is None:
+        return True, 0.0
+    geom, _ids = rec
+    if geom is None:
+        return True, 0.0
+    if geom.is_empty:
+        return False, 1.0
+    if geom.covers(area):
+        return True, 0.0
+    a = area.area
+    return False, (area.difference(geom).area / a) if a > 0 else 1.0
+
+
+def route(query: str) -> list[str]:
+    """Which of OURS may answer this query, in order — those whose coverage holds all of its area.
+
+    BakeFault when ours were configured and none holds it: the world editor routed this world to
+    them because they hold the world's own box, and this query reaches past it. Falling through to
+    a public mirror here would be quiet and slow (a 40 km network query, minutes per attempt), and
+    the regional answer would be the silent empty — so it stops, and says which ground is missing.
+    """
+    if not _OURS or not _coverage():
+        return list(_OURS)
+    area = query_area(query)
+    ok, worst = [], []
+    for u in _OURS:
+        held, outside = _holds(u, area)
+        (ok if held else worst).append(u if held else (outside, u))
+    if ok:
+        return ok
+    outside, best = min(worst)
+    _geom, ids = _coverage().get(best, (None, []))
+    b = area.bounds if area is not None else None
+    raise BakeFault(
+        f"overpass: none of our instances holds this query's area — the closest, {best.split('/')[2]}, "
+        f"holds {', '.join(ids) or 'nothing we know of'} and leaves {100 * outside:.1f}% of it outside "
+        f"(query box W {b[0]:.4f} S {b[1]:.4f} E {b[2]:.4f} N {b[3]:.4f}). A regional instance answers "
+        f"ground it does not hold with HTTP 200 and nothing, so this bake would have been missing roads "
+        f"without a word. Add the region to an instance (world editor: Settings → OSM data), or bring "
+        f"the world inside one."
+    )
+
+
+def _cache_hit(hit: Path, query: str):
+    """A cached answer, unless it is known to have come from an instance that does not hold the area."""
+    if _REFRESH or not hit.exists():
+        return None
+    side = hit.with_name(hit.name + ".upstream")
+    if _coverage() and side.exists():
+        try:
+            prov = json.loads(side.read_text())
+        except ValueError:
+            prov = {}
+        url = prov.get("url")
+        if url:
+            held, outside = _holds(url, query_area(query))
+            if not held:
+                print(f"  overpass cache {hit.name} came from {prov.get('host', url)}, which leaves {100 * outside:.1f}% of it outside its extract; asking again")
+                return None
+    return json.loads(hit.read_text())
+
+
 def overpass(query: str, cache_dir: Path) -> dict:
     cache_dir.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha1(query.encode()).hexdigest()[:16]
     hit = cache_dir / f"{key}.json"
-    if hit.exists():
-        return json.loads(hit.read_text())
+    cached = _cache_hit(hit, query)
+    if cached is not None:
+        return cached
+    # ours that hold the area, then the public mirrors (which hold everywhere) for an error fallback
+    mirrors = route(query) + OVERPASS[len(_OURS):]
     last = None
     for attempt in range(8):
-        url = OVERPASS[attempt % len(OVERPASS)]
+        url = mirrors[attempt % len(mirrors)]
         try:
             resp = session.post(url, data={"data": query}, timeout=240)
         except requests.RequestException as exc:
@@ -72,10 +222,27 @@ def overpass(query: str, cache_dir: Path) -> dict:
             continue
         if resp.status_code == 200:
             data = resp.json()
+            # A RUNTIME ERROR ARRIVES AS A 200. Overpass has already sent its header when a query
+            # times out, runs out of memory, or — measured on an instance taking an import, about 1
+            # query in 100 — finds "Data file size does not match block size"; the body is valid
+            # JSON with `elements` empty or cut short and the reason in `remark`. Cached, that is a
+            # permanent hole. So it is a failure: not written, and asked again.
+            remark = str(data.get("remark") or "")
+            if "runtime error" in remark:
+                print(f"  overpass {url.split('/')[2]}: {remark[:160]}; asking again")
+                last = RuntimeError(remark)
+                time.sleep(5)
+                continue
             hit.write_text(json.dumps(data))
+            # who answered, beside the answer and never inside it: the file stays byte-compatible
+            # with the world editor's cache (same key, same sidecar shape, overpass.mjs)
+            try:
+                hit.with_name(hit.name + ".upstream").write_text(json.dumps({"url": url, "host": url.split("/")[2], "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "by": "bake"}))
+            except OSError:
+                pass
             return data
         last = resp
-        wait = 5 if attempt < len(OVERPASS) else 20
+        wait = 5 if attempt < len(mirrors) else 20
         print(f"  overpass {url.split('/')[2]} HTTP {resp.status_code}; next mirror in {wait}s")
         time.sleep(wait)
     if isinstance(last, requests.Response):

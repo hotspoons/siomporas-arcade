@@ -1,0 +1,91 @@
+# THE JOB AN OSM-IMPORT CREATES, for review. GENERATED from tools/worldeditor/runs.mjs
+# (osmImportJob) by tools/overpass/osm-import-job.mjs; a test fails if the two differ.
+#
+# Example values: adding us/virginia to the `overpass` instance, which runs on gh200-1-node-2.
+# The editor fills in the instance, the region, the node (read from the instance's pod) and a
+# unique name; nothing else varies.
+#
+# What it does (the script is the chart's ConfigMap, tools/overpass/chart/files/import.sh):
+#   1. downloads the region's .pbf and .poly from Geofabrik onto the instance's volume, under
+#      /db/regions/<id>/ and nowhere else;
+#   2. checks it (osmium reads it; it carries a replication sequence to follow; there is room);
+#   3. converts it to an osmChange and stages it;
+#   4. waits while the instance's `regions` sidecar applies it THROUGH THE DISPATCHER, streaming
+#      the sidecar's log, then asks the instance for a sample of the region's own ways (all must
+#      come back) and exits 0. The database itself is never written by this pod.
+#
+# RBAC: none beyond the world editor's existing Role — it creates Jobs, and lists pods (to find the
+# instance's node). Mounting a PVC and a ConfigMap in a pod spec needs no grant to the creator.
+# Prerequisite: the instance's release has regions.enabled=true (tools/overpass/chart/values.yaml),
+# which creates the `<instance>-regions` ConfigMap and the sidecar. Without it the Job exits 3 and
+# says so.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: osm-import-overpass-us-virginia-example
+  labels:
+    app.kubernetes.io/name: worldeditor-run
+    worldeditor/run: osm-import-overpass-us-virginia-20261010120000-abcd
+    worldeditor/kind: osm-import
+    worldeditor/upstream: overpass
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 172800
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worldeditor-run
+        worldeditor/run: osm-import-overpass-us-virginia-20261010120000-abcd
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - gh200-1-node-2
+      containers:
+        - name: import
+          image: wiktorn/overpass-api@sha256:9bb5f4a9b54cd225bf828c04c67e7f4010650ff4d70b72157a9473a9ba02d93c
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - /opt/regions/import.sh
+          env:
+            - name: UPSTREAM
+              value: overpass
+            - name: REGION_ID
+              value: us/virginia
+            - name: REGION_NAME
+              value: Virginia
+            - name: PBF_URL
+              value: https://download.geofabrik.de/north-america/us/virginia-latest.osm.pbf
+            - name: UPDATES_URL
+              value: https://download.geofabrik.de/north-america/us/virginia-updates
+            - name: INTERPRETER
+              value: http://overpass/api/interpreter
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              cpu: "8"
+              memory: 8Gi
+          volumeMounts:
+            - name: db
+              mountPath: /db
+            - name: scripts
+              mountPath: /opt/regions
+              readOnly: true
+      volumes:
+        - name: db
+          persistentVolumeClaim:
+            claimName: overpass-db
+        - name: scripts
+          configMap:
+            name: overpass-regions
+            defaultMode: 493

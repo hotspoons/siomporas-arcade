@@ -233,7 +233,45 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     T('run_list', 'Every bake and publish, newest first, with state and duration.', {}, [], () => get('/api/runs')),
     T('run_get', 'One run.', { id: str('') }, ['id'], (a) => get(`/api/runs/${a.id}`)),
     T('run_log', 'A run’s log.', { id: str('') }, ['id'], (a) => get(`/api/runs/${a.id}/log`)),
-    T('run_bake', 'Bake a world: OSM, terrain, imagery, lidar, and a tile pyramid. LOD is the bake — there is no monolithic one. HOURS, and it occupies the runner. Check run_list before starting another. A world more than 10 km across is baked SHARDED (plan → ≤ 10 km blocks in parallel → finalize) by default; `sharded` forces it on or off for this bake.', { slug: str(''), sharded: bool('true forces a sharded bake, false a single Job; omit for the default (sharded above 10 km across)') }, ['slug'], (a) => post('/api/runs/bake', a.sharded === undefined ? { slug: a.slug } : { slug: a.slug, sharded: !!a.sharded })),
+    T(
+      'run_bake',
+      'Bake a world: OSM, terrain, imagery, lidar, and a tile pyramid. LOD is the bake — there is no monolithic one. HOURS, and it occupies the runner. Check run_list before starting another. A world more than 10 km across is baked SHARDED (plan → ≤ 10 km blocks in parallel → finalize) by default; `sharded` forces it on or off for this bake. The log\'s first lines say which Overpass instance the world was routed to (osm_coverage explains why). refreshOsm re-asks Overpass instead of reusing cached answers — use it when a world was baked from the wrong instance, since the cache is keyed by query and not by who answered.',
+      { slug: str(''), sharded: bool('true forces a sharded bake, false a single Job; omit for the default (sharded above 10 km across)'), refreshOsm: bool('re-fetch every OSM query instead of reading the cache. default false') },
+      ['slug'],
+      (a) => post('/api/runs/bake', { slug: a.slug, ...(a.sharded === undefined ? {} : { sharded: !!a.sharded }), ...(a.refreshOsm ? { refreshOsm: true } : {}) }),
+    ),
+    /* ---- where the OSM comes from -------------------------------------------------------------
+     * Each Overpass instance holds one or more Geofabrik regions, and a world is routed to the
+     * instance whose regions hold ALL of it. A regional instance asked about ground it does not hold
+     * answers HTTP 200 with nothing, so this is what decides whether a world gets its roads.
+     */
+    T(
+      'osm_coverage',
+      'Which Overpass instance holds which Geofabrik regions, and, for every world, which instance it routes to and how much of it lies outside each one. A world no single instance holds goes to the public mirrors (slow) — add a region to an instance with osm_import. Read-only.',
+      {},
+      [],
+      () => get('/api/osm/coverage?geometry=0'),
+    ),
+    T(
+      'osm_regions',
+      'The Geofabrik extract catalogue: every region id osm_import accepts (e.g. "us/virginia", "europe/italy"), with its parent and its .pbf URL. Filter with `q` — matched against id and name.',
+      { q: str('optional text to filter by, e.g. "virginia"') },
+      [],
+      async (a) => {
+        const r = await get('/api/osm/geofabrik')
+        const q = String(a.q ?? '').toLowerCase().trim()
+        const regions = (r.regions ?? []).filter((x) => !q || x.id.toLowerCase().includes(q) || String(x.name).toLowerCase().includes(q))
+        return { source: r.source, count: regions.length, regions: regions.slice(0, 200) }
+      },
+    ),
+    T(
+      'osm_import',
+      'Add a Geofabrik region\'s OSM data to an Overpass instance that is already serving, as a run (follow it with run_get / run_log). The instance keeps answering throughout. Downloads the region\'s .pbf onto the instance\'s volume and applies it through the instance itself; on success the instance\'s coverage gains the region and worlds there route to it. Takes minutes for a US state and hours for a country; one import per instance at a time. Needs the instance\'s `regions` sidecar (tools/overpass chart, regions.enabled) — without it the run fails and says so.',
+      { upstream: str('the instance, by its name in osm_coverage, e.g. "overpass"'), region: str('a Geofabrik region id from osm_regions, e.g. "us/virginia"') },
+      ['upstream', 'region'],
+      (a) => post('/api/osm/imports', { upstream: a.upstream, region: a.region }),
+    ),
+
     T('run_publish', 'Publish a baked world to the bucket the viewer reads.', { slug: str('') }, ['slug'], (a) => post('/api/runs/publish', { slug: a.slug })),
     T('run_cancel', 'Stop a running bake or publish.', { id: str('') }, ['id'], (a) => post(`/api/runs/${a.id}/cancel`, {})),
 

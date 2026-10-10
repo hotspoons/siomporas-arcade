@@ -1,0 +1,18 @@
+{{- if .Values.regions.enabled }}
+# The scripts that add a region to this instance and keep it current (tools/overpass/README.md,
+# "Adding a region"). Read by the `regions` sidecar, by the instance's own updater for its delete
+# filter, and by the world editor's osm-import Job, which mounts this ConfigMap by name
+# (`<release>-regions`) — so what runs is what is reviewed here, not a string in the editor.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.fullnameOverride }}-regions
+  labels: { app: {{ .Values.fullnameOverride }} }
+data:
+  import.sh: |-
+{{ .Files.Get "files/import.sh" | indent 4 }}
+  regions-agent.sh: |-
+{{ .Files.Get "files/regions-agent.sh" | indent 4 }}
+  defer_deletes.py: |-
+{{ .Files.Get "files/defer_deletes.py" | indent 4 }}
+{{- end }}

@@ -114,6 +114,12 @@ export class K8s {
     return this.#request('DELETE', `/apis/batch/v1/namespaces/${this.namespace}/jobs/${name}?propagationPolicy=Background`)
   }
 
+  /** Pods by an arbitrary label selector — how an osm-import finds the node its Overpass runs on. */
+  async podsByLabel(selector) {
+    const r = await this.#request('GET', `/api/v1/namespaces/${this.namespace}/pods?labelSelector=${encodeURIComponent(selector)}`)
+    return r.items ?? []
+  }
+
   async podsFor(jobName) {
     const r = await this.#request('GET', `/api/v1/namespaces/${this.namespace}/pods?labelSelector=${encodeURIComponent(`job-name=${jobName}`)}`)
     return r.items ?? []

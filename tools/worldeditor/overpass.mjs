@@ -29,6 +29,7 @@
 // rotated four lanes' work on 2026-09-21.
 
 import { readFile } from 'node:fs/promises'
+import { outsideFraction } from './coverage.mjs'
 
 /** `osm.py`'s own list, so the fallback path is the one the bake already trusts. */
 export const PUBLIC_MIRRORS = [
@@ -66,8 +67,15 @@ export class Overpass {
    * @param deadlineMs for the whole call, across every upstream. Without one, ten attempts at the
    *                   per-attempt timeout is half an hour of a page saying "reading OSM".
    */
-  constructor(store, urls, { timeoutMs = 120000, deadlineMs = 240000, downForMs = 45000, coverSlack = 0.05 } = {}) {
+  constructor(store, urls, { timeoutMs = 120000, deadlineMs = 240000, downForMs = 45000, coverSlack = 0.05, coverageOf = null } = {}) {
     this.store = store
+    /**
+     * `(url) => Geometry[] | null | undefined` — the upstream's TRUE coverage (coverage.mjs), the
+     * extract's own polygons. `null` claims everywhere; `undefined` means "not described there",
+     * and the `#s/w/n/e` fence on the URL (if any) is used instead. See coverage.mjs for the
+     * Arlington box that a fence said `overpass` held and it did not.
+     */
+    this.coverageOf = coverageOf
     this.setUpstreams(urls)
     this.coverSlack = coverSlack
     this.timeoutMs = timeoutMs
@@ -242,8 +250,17 @@ export class Overpass {
    * distance, it is small, and `shortfall` comes back so the caller can say so.
    */
   #covers(url, bbox) {
+    if (!bbox) return { ok: true, shortfall: 0 }
+    const geoms = this.coverageOf ? this.coverageOf(url) : undefined
+    if (geoms !== undefined) {
+      if (geoms === null) return { ok: true, shortfall: 0 }
+      if (!geoms.length) return { ok: false, shortfall: 1 }
+      // sampled coarsely: this runs per map tile, and the slack below is already 5%
+      const f = outsideFraction(geoms, bbox, { samples: 24 })
+      return { ok: f.outside <= this.coverSlack, shortfall: f.outside }
+    }
     const c = this.coverage.get(url)
-    if (!c || !bbox) return { ok: true, shortfall: 0 }
+    if (!c) return { ok: true, shortfall: 0 }
     const area = Math.max(1e-9, (bbox.north - bbox.south) * (bbox.east - bbox.west))
     const ins =
       Math.max(0, Math.min(bbox.north, c.north) - Math.max(bbox.south, c.south)) *
@@ -294,6 +311,10 @@ export class Overpass {
           const text = await r.text()
           if (!r.ok) throw new Error(`${url}: HTTP ${r.status} ${text.slice(0, 160).replace(/\s+/g, ' ')}`)
           const json = JSON.parse(text)
+          // a runtime error is a 200 with the reason in `remark` and the elements empty or cut
+          // short — a timeout, out of memory, or (on an instance taking an import) a data file
+          // caught mid-extension. Never an answer, never cached; see osm.py for the measurement.
+          if (/runtime error/.test(String(json.remark ?? ''))) throw new Error(`${url}: ${String(json.remark).slice(0, 160)}`)
           this.down.delete(url)
           // THE BACKSTOP FOR AN UNDECLARED REGIONAL UPSTREAM. An empty answer is a legitimate
           // result over the sea and a LIE from an instance that does not hold the area, and the
@@ -428,6 +449,10 @@ export class Overpass {
  * coverage it had actually read, which answered `{}`.
  */
 /**
+ * THE OLD RULE, kept so the new one can be held against it (coverage.mjs `route` is what a bake
+ * uses now, and the OSM data dialog shows where the two disagree). By fences, this sent
+ * dc-metro-take-2 to `overpass`, whose Maryland extract holds 64.7% of the world's square.
+ *
  * Which upstreams can answer for this box, in the order to try them, with the fences stripped.
  *
  * FOR HANDING TO SOMETHING THAT DOES NOT UNDERSTAND FENCES. The bake does not: `osm.py` splits
@@ -477,6 +502,8 @@ export function mirrorsFor(raw, bbox, { slack = 0.02 } = {}) {
 }
 
 function parseUpstream(raw) {
+  // `name=url` (coverage.mjs): the name is for routing and the dialog; the wire wants the URL
+  raw = String(raw).trim().replace(/^[A-Za-z0-9_.-]+=(?=https?:\/\/)/, '')
   const i = raw.indexOf('#')
   if (i < 0) return { url: raw, bbox: null }
   const url = raw.slice(0, i)

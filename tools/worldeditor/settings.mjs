@@ -43,7 +43,16 @@ export const SCHEMA = [
   {
     key: 'overpass.url', group: 'services', kind: 'string', env: 'WORLDEDITOR_OVERPASS_URL', def: '',
     label: 'Overpass',
-    note: 'Comma-separated, first is preferred; the public mirrors follow. A REGIONAL extract must carry its box as #south/west/north/east — out of area it answers HTTP 200 with nothing, which reads exactly like "no roads here".',
+    note: 'Comma-separated; the public mirrors follow. Say what each REGIONAL instance holds under "Overpass regions" — out of its extract it answers HTTP 200 with nothing, which reads exactly like "no roads here". A #south/west/north/east box on a URL is still read, for an instance with no regions.',
+  },
+  {
+    // Rich, 2026-10-10, after dc-metro-take-2 baked without Washington or Virginia: the box on
+    // `overpass` said it held them and its Maryland extract did not. Coverage is the extract's own
+    // polygon now; this names the Geofabrik region(s) each instance was built from, and the editor
+    // reads their outlines from the Geofabrik index (coverage.mjs). Imports add to it on the volume.
+    key: 'overpass.regions', group: 'services', kind: 'string', env: 'WORLDEDITOR_OVERPASS_REGIONS', def: '',
+    label: 'Overpass regions',
+    note: 'What each instance holds, by Geofabrik region id: overpass=us/maryland, overpass-na=north-america. Several on one instance: overpass=us/maryland+us/virginia. Regions added by an import are kept on the volume whatever this says.',
   },
   {
     key: 'nominatim.url', group: 'services', kind: 'url', env: 'WORLDEDITOR_NOMINATIM', def: 'https://nominatim.openstreetmap.org',
@@ -55,6 +64,12 @@ export const SCHEMA = [
     key: 'bake.image', group: 'bake', kind: 'string', env: 'WORLDEDITOR_BAKE_IMAGE', def: 'ghcr.io/hotspoons/corridor:latest',
     label: 'Bake image',
     note: 'The container a bake runs in, as a Kubernetes Job.',
+  },
+
+  {
+    key: 'osm.importImage', group: 'bake', kind: 'string', env: 'WORLDEDITOR_OSM_IMPORT_IMAGE', def: 'wiktorn/overpass-api:latest',
+    label: 'OSM import image',
+    note: 'The container an osm-import Job runs in: the Overpass instances\' own image, which carries curl, osmium and pyosmium. Pin the digest the instances run.',
   },
 
   /* ---- splat training ----

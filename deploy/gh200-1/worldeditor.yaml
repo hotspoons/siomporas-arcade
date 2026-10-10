@@ -11,23 +11,23 @@ image:
 ingress:
   enabled: true
 
-# Ours first, then the public mirrors. Each carries the box it actually holds — a regional
-# instance answers a query about somewhere else with HTTP 200 and zero ways, which is
-# indistinguishable from "no roads here", so the coverage box is what stops that being believed.
+# Ours, then the public mirrors (appended by the service). NO BOXES ON THE URLS ANY MORE.
 #
-# overpass-na (Geofabrik north-america: the US, Canada, Mexico, Greenland) was deployed on
-# 2026-09-27 and never added here, so everything in North America outside the Maryland box went to
-# the public mirrors — minutes per tile, or a 406 (Rich's Maine view, 2026-09-30: one fragment of
-# US 1 after several minutes). From our own it is 447 Bar Harbor roads in 129 ms. The NA box is
-# drawn a little inside the extract so an edge query falls to the mirrors rather than being told
-# "nothing here" by a server that does not hold it.
+# Until 2026-10-10 each URL carried a `#south/west/north/east` fence and the editor routed by the
+# tightest fence that covered a world. `overpass`'s fence (#37.9/-79.5/39.8/-75.0) took in
+# Washington, Arlington and Fairfax; its extract is Maryland. dc-metro-take-2 was routed to it, and
+# for an Arlington box it answered HTTP 200 with 0 ways where overpass-na answers 4,346 — the world
+# baked with 108,816 roads in Maryland and none across the river, and reported success.
 #
-# NORTH AMERICA BEFORE MARYLAND (2026-10-10). A box cannot hold a state: the Maryland box takes in
-# Arlington, Alexandria and Fairfax, and the Maryland extract answers them with HTTP 200 and zero
-# ways (Arlington 0, College Park 5,185) — dc-metro-take-2 baked its whole Virginia half without a
-# road. NA holds all of Maryland, so it goes first and `overpass` is left last; routing by each
-# extract's real polygon (lane agent/osm-coverage) replaces this ordering.
-overpassUrl: "http://overpass-eu/api/interpreter#34/-25/72/45,http://overpass-na/api/interpreter#14.5/-179.9/83.5/-12,http://overpass/api/interpreter#37.9/-79.5/39.8/-75.0"
+# What each instance holds is now `overpassRegions`: the Geofabrik region(s) it was built from (and
+# any added by an osm-import, which the editor keeps on its volume). Routing uses the extracts' real
+# outlines, and the bake refuses a query its instance does not hold (BakeFault). See
+# tools/overpass/README.md, "Where the OSM comes from".
+overpassUrl: "http://overpass-eu/api/interpreter,http://overpass/api/interpreter,http://overpass-na/api/interpreter"
+overpassRegions: "overpass-eu=europe,overpass=us/maryland,overpass-na=north-america"
+# the image the three instances run (kubectl get pod -l app=overpass-na -o jsonpath=...imageID),
+# so an osm-import Job pulls nothing new onto the node
+osmImportImage: "wiktorn/overpass-api@sha256:9bb5f4a9b54cd225bf828c04c67e7f4010650ff4d70b72157a9473a9ba02d93c"
 
 # Count free GPUs to size a splat run's fan-out. A CLUSTER-scoped read of nodes and of pods in
 # every namespace — wider than anything else this chart asks for, which is why it is opt-in.

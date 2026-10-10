@@ -68,6 +68,8 @@ ENOUGH_COVERAGE = 0.98   # stop adding sources once this share of the streets' c
 MIN_EPT_COVERAGE = 0.5   # below this the EPT candidates together are worse than the TNM tiles
 MAX_SOURCES = 3
 BATCH_POINTS = 5_000_000
+# a batch's ceiling in ALL its points, when batches are cut by their streets' points (stream_ept)
+BATCH_CAP = 8 * BATCH_POINTS
 
 
 def density_target() -> float:
@@ -383,7 +385,8 @@ class AreaShare:
         return float(min(1.0, inside / cells))
 
 
-def nodes_over(src: EptSource, bbox_ept, get_json, target: float, area_ept: BaseGeometry | None = None, area_m2: float | None = None) -> tuple[list[str], int, float]:
+def nodes_over(src: EptSource, bbox_ept, get_json, target: float, area_ept: BaseGeometry | None = None, area_m2: float | None = None,
+               road_band_ept: BaseGeometry | None = None, road_band_m2: float | None = None) -> tuple[list[str], int, float]:
     """Nodes over the area to read, down to the depth that reaches the density target there.
 
     THE AREA IS THE STREETS, NOT THEIR BBOX (2026-10-10). dc-metro-take-2 shard 5's streets are
@@ -400,10 +403,25 @@ def nodes_over(src: EptSource, bbox_ept, get_json, target: float, area_ept: Base
     TRUE area, measured in the site frame, times the source's coverage of that same outline. (The
     old denominator was in the EPT's own units, which for USGS's Web Mercator is 1.6 x the true m²
     at the latitude of Washington.) Without `area_ept` the bbox is the area, as before.
+
+    THE DEPTH IS THE STREETS', THE NODES ARE THE WORLD'S (2026-10-10, full-world lidar). A world
+    bake reads the point cloud over the whole region so the canopy does not stop at a band along
+    the roads; `road_band_ept` / `road_band_m2` are then the streets' outline, and the depth is chosen over
+    THEM exactly as above while the nodes are walked over `area_ept`, the region. One survey at one
+    density everywhere, so there is no seam between road and field -- and the streets get the very
+    same nodes, at the very same depth, as a bake that read only the streets, so every road-local
+    product (profiles, decks, structures) is made of the same points. Without a road band the area is
+    its own road band.
     """
     ept = src.ept
     x0, y0, x1, y1 = bbox_ept
     grid = AreaShare(area_ept, bbox_ept) if area_ept is not None and not area_ept.is_empty else None
+    if road_band_ept is not None and not road_band_ept.is_empty:
+        dens_grid = AreaShare(road_band_ept, bbox_ept)
+        base_m2 = road_band_m2
+    else:
+        dens_grid = grid
+        base_m2 = area_m2
     hier: dict[str, int] = dict(get_json("ept-hierarchy/0-0-0-0.json"))
     found: list[tuple[str, int, float]] = []
     stack = ["0-0-0-0"]
@@ -422,8 +440,8 @@ def nodes_over(src: EptSource, bbox_ept, get_json, target: float, area_ept: Base
             hier.update(get_json(f"ept-hierarchy/{key}.json"))
             count = hier.get(key, 0)
         if count > 0:
-            if grid is not None:
-                share = grid.share(nb)
+            if dens_grid is not None:
+                share = dens_grid.share(nb)
             else:
                 share = max(0.0, min(x1, nx1) - max(x0, nx0)) * max(0.0, min(y1, ny1) - max(y0, ny0)) / ((nx1 - nx0) * (ny1 - ny0))
             found.append((key, count, share))
@@ -434,7 +452,7 @@ def nodes_over(src: EptSource, bbox_ept, get_json, target: float, area_ept: Base
                     child = f"{d + 1}-{2 * x + dx}-{2 * y + dy}-{2 * z + dz}"
                     if child in hier:
                         stack.append(child)
-    base = area_m2 if area_m2 is not None else (x1 - x0) * (y1 - y0)
+    base = base_m2 if base_m2 is not None else (x1 - x0) * (y1 - y0)
     depth, density = choose_depth(found, base * max(src.share, 0.05), target)
     return [k for k, _, _ in found if int(k.split("-", 1)[0]) <= depth], depth, density
 
@@ -479,8 +497,18 @@ class Occupancy:
     def merge(self, grid: np.ndarray) -> None:
         self.hit |= grid
 
-    def share(self) -> float:
-        return float((self.hit & self.want).sum() / max(1, self.want.sum()))
+    def share(self, want: np.ndarray | None = None) -> float:
+        w = self.want if want is None else want
+        return float((self.hit & w).sum() / max(1, w.sum()))
+
+    def mask(self, geom: BaseGeometry | None) -> np.ndarray:
+        """The cells of `geom` on this grid (all of them for None): another area to measure over."""
+        if geom is None:
+            return np.ones((self.h, self.w), bool)
+        from rasterio.features import rasterize
+        from rasterio.transform import from_origin
+
+        return rasterize([(geom, 1)], out_shape=(self.h, self.w), transform=from_origin(self.x0, self.y1, self.cell, self.cell), fill=0, all_touched=True, dtype=np.uint8).astype(bool)
 
 
 class NodeReader:
@@ -509,11 +537,14 @@ class NodeReader:
     one sentence instead of three library-specific exceptions.
     """
 
-    def __init__(self, src: EptSource, cache: Path, crs_from, crs_to, zf: float, bbox, clip: BaseGeometry | None):
+    def __init__(self, src: EptSource, cache: Path, crs_from, crs_to, zf: float, bbox, clip: BaseGeometry | None, road_band: BaseGeometry | None = None):
         self.src, self.cache, self.zf, self.bbox = src, cache, zf, tuple(bbox)
         self.crs_from, self.crs_to = crs_from, crs_to
         # bytes, not a geometry: the only form of the clip the threads ever see
         self.clip_wkb = None if clip is None else shapely.to_wkb(clip)
+        # the streets inside the clip, when the clip is a whole world: every point is flagged
+        # in or out of them (see `__call__` and stream_ept)
+        self.road_band_wkb = None if road_band is None else shapely.to_wkb(road_band)
         self._local = threading.local()
 
     def kit(self) -> "_Kit":
@@ -526,9 +557,13 @@ class NodeReader:
             if self.clip_wkb is not None:
                 clip = shapely.from_wkb(self.clip_wkb)
                 shapely.prepare(clip)
+            road_band = None
+            if self.road_band_wkb is not None:
+                road_band = shapely.from_wkb(self.road_band_wkb)
+                shapely.prepare(road_band)
             sess = requests.Session()
             sess.headers.update(shared.headers)
-            k = self._local.kit = _Kit(clip, Transformer.from_crs(self.crs_from, self.crs_to, always_xy=True), sess)
+            k = self._local.kit = _Kit(clip, Transformer.from_crs(self.crs_from, self.crs_to, always_xy=True), sess, road_band)
         return k
 
     def fetch(self, key: str, session: requests.Session) -> Path:
@@ -560,20 +595,21 @@ class NodeReader:
         x, y = np.asarray(x), np.asarray(y)
         xmin, ymin, xmax, ymax = self.bbox
         m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
-        if k.clip is not None and m.any():
-            idx = np.flatnonzero(m)
-            m[idx[~shapely.contains_xy(k.clip, x[idx], y[idx])]] = False
+        foc = clip_flags(m, x, y, k.clip, k.road_band)
         if not m.any():
             return None
         z = np.asarray(las.z)[m]
         zf = self.zf
-        return {
+        out = {
             "x": x[m], "y": y[m], "z": z * zf if zf != 1.0 else z,
             "cls": np.asarray(las.classification)[m].astype(np.uint8),
             "rn": np.asarray(las.return_number)[m].astype(np.uint8),
             "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
             "i": np.asarray(las.intensity)[m].astype(np.uint16),
         }
+        if foc is not None:
+            out["road_band"] = foc[m]
+        return out
 
 
 @dataclass
@@ -583,6 +619,32 @@ class _Kit:
     clip: BaseGeometry | None
     tr: Transformer
     session: requests.Session
+    road_band: BaseGeometry | None = None
+
+
+def clip_flags(m: np.ndarray, x, y, clip, road_band) -> np.ndarray | None:
+    """Narrow `m` (already the bbox test) to the clip, IN PLACE, and return which points are in
+    the road_band (None without one). Both geometries must be this thread's own, prepared.
+
+    The clip is a superset of the road band (network.world_lidar_area), so a point in the road band is in
+    the clip without a second test, and only the others are tested against the clip -- the
+    streets-only read did one polygon test per point, and this does one and a fraction.
+    """
+    if road_band is None:
+        if clip is not None and m.any():
+            idx = np.flatnonzero(m)
+            m[idx[~shapely.contains_xy(clip, x[idx], y[idx])]] = False
+        return None
+    foc = np.zeros(m.shape, bool)
+    if m.any():
+        idx = np.flatnonzero(m)
+        f = shapely.contains_xy(road_band, x[idx], y[idx])
+        foc[idx[f]] = True
+        if clip is not None:
+            rest = idx[~f]
+            if rest.size:
+                m[rest[~shapely.contains_xy(clip, x[rest], y[rest])]] = False
+    return foc
 
 
 def _join(parts: list[dict]) -> dict:
@@ -624,16 +686,53 @@ def candidates(frame: Frame, bbox, clip, cache: Path) -> tuple[list[EptSource], 
     return blind + [s for s, _ in plan], (None if blind else union_share(plan, area))
 
 
-def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], meta: dict, jobs: int = 16) -> Iterator[tuple[str, dict]]:
+def bounded_map(ex: ThreadPoolExecutor, fn, items: list, ahead: int) -> Iterator:
+    """`ex.map(fn, items)` in order, but never more than `ahead` results finished and waiting.
+
+    `Executor.map` submits EVERY item at once, so when the readers outrun the consumer (the tile
+    accumulation is single-threaded) every decoded node piles up in memory until it is yielded.
+    Over a world region that is 2-3x the nodes of the streets alone, and on a fast link the queue
+    is the cloud. Here at most `ahead` are in flight or done-and-unread; the order is the same.
+    """
+    from collections import deque
+
+    it = iter(items)
+    q: deque = deque()
+    for x in it:
+        q.append(ex.submit(fn, x))
+        if len(q) >= ahead:
+            break
+    while q:
+        f = q.popleft()
+        nxt = next(it, _END)
+        if nxt is not _END:
+            q.append(ex.submit(fn, nxt))
+        yield f.result()
+
+
+_END = object()
+
+
+def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], meta: dict, jobs: int = 16, road_band: BaseGeometry | None = None) -> Iterator[tuple[str, dict]]:
     """Point batches from the best source, then from the next ones only where it left gaps.
 
     `meta` is filled in as it goes (the caller reads it after the last batch): which sources were
     used, at what depth and density, and the share of the streets' cells that got points.
+
+    `clip` is the area the points are READ over; `road_band`, when given, is the streets inside it
+    (a world bake reads the whole region, see `nodes_over`). Every decision -- the depth, whether
+    the next source is needed -- is made over the road band, so the streets get exactly the points a
+    streets-only read gives them; `meta["coverage_area"]` says how much of the whole area got any.
     """
     from .lidar import _get_json
 
     target = density_target()
-    occ = Occupancy(bbox, clip)
+    occ = Occupancy(bbox, road_band if road_band is not None else clip)
+    whole = occ.mask(clip) if road_band is not None else None
+    # With a road band, the cells the STREETS' points filled are kept apart from the ones the rest of
+    # the world's filled: a later survey's point in the streets is dropped exactly when a
+    # streets-only read would have dropped it, whatever the fields beside that cell hold.
+    occ_out = Occupancy(bbox, None) if road_band is not None else None
     used: list[dict] = []
     for src in sources:
         if len(used) >= MAX_SOURCES or occ.share() >= ENOUGH_COVERAGE:
@@ -642,12 +741,13 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
             src.ept = _get_json(src.base + "ept.json", cache / "ept" / src.slug / "ept.json")
         crs = ept_crs(src.ept)
         area_ept, area_m2 = area_in(frame, bbox, clip, crs)
-        keys, depth, density = nodes_over(src, bbox_in(frame, bbox, crs), lambda rel: _get_json(src.base + rel, cache / "ept" / src.slug / rel.replace("ept-hierarchy/", "h/")), target, area_ept, area_m2)
+        road_band_ept, road_band_m2 = area_in(frame, bbox, road_band, crs) if road_band is not None else (None, None)
+        keys, depth, density = nodes_over(src, bbox_in(frame, bbox, crs), lambda rel: _get_json(src.base + rel, cache / "ept" / src.slug / rel.replace("ept-hierarchy/", "h/")), target, area_ept, area_m2, road_band_ept, road_band_m2)
         if not keys:
             continue
         first = not used
         before = occ.share()
-        read = NodeReader(src, cache, crs, frame.crs, z_factor(src.ept), bbox, clip)
+        read = NodeReader(src, cache, crs, frame.crs, z_factor(src.ept), bbox, clip, road_band)
         print(f"  lidar   {src.label()}: {len(keys)} nodes to depth {depth} (~{density:.1f} pts/m² where it covers){'' if first else f', filling {1 - before:.0%} of the streets it left empty'}", flush=True)
         t0 = time.time()
         got = 0
@@ -655,26 +755,45 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
         # its own later nodes find the cells its earlier nodes filled and drop themselves, halving
         # the density in every gap cell. EPT nodes are spatially interleaved, so that is all of them.
         mine = occ.pending()
+        mine_out = occ_out.pending() if occ_out is not None else None
         batch: list[dict] = []
         n = 0
+        total = 0
         done = 0
         with ThreadPoolExecutor(jobs) as ex:
-            for part in ex.map(read, keys):
+            for part in bounded_map(ex, read, keys, 4 * jobs):
                 done += 1
                 if part is not None:
                     if not first:
-                        keep = occ.empty(part["x"], part["y"])
+                        if occ_out is None:
+                            keep = occ.empty(part["x"], part["y"])
+                        else:
+                            f = part["road_band"]
+                            keep = np.where(f, occ.empty(part["x"], part["y"]), occ_out.empty(part["x"], part["y"]))
                         part = {k: v[keep] for k, v in part.items()} if keep.any() else None
                     if part is not None:
                         batch.append(part)
-                        n += len(part["x"])
-                if n >= BATCH_POINTS or (done == len(keys) and batch):
+                        # A BATCH IS CUT BY ITS STREETS' POINTS when there is a road band, so the
+                        # streets' share of every batch is exactly the batch a streets-only read
+                        # made -- and lidar_tiled's per-batch test for a misused class 17 decides
+                        # the same way on the same points. The fields only ride along, up to a cap
+                        # that keeps a batch over open country from growing without bound.
+                        n += int(part["road_band"].sum()) if occ_out is not None else len(part["x"])
+                        total += len(part["x"])
+                if n >= BATCH_POINTS or total >= BATCH_CAP or (done == len(keys) and batch):
                     pts = _join(batch)
-                    occ.mark(pts["x"], pts["y"], into=mine)
+                    if occ_out is None:
+                        occ.mark(pts["x"], pts["y"], into=mine)
+                    else:
+                        f = pts["road_band"]
+                        occ.mark(pts["x"][f], pts["y"][f], into=mine)
+                        occ_out.mark(pts["x"][~f], pts["y"][~f], into=mine_out)
                     got += len(pts["x"])
                     yield f"{src.name} nodes {done}/{len(keys)}", pts
-                    batch, n = [], 0
+                    batch, n, total = [], 0, 0
         occ.merge(mine)
+        if occ_out is not None:
+            occ_out.merge(mine_out)
         if not got:
             # a USGS cube can contain the bbox with no points in it (Clarksburg, KGeorge over
             # Crofton): tried, and not what this bake is made of
@@ -689,3 +808,6 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
         "density_target": target,
         "coverage": round(occ.share(), 3),
     })
+    if whole is not None:
+        meta["coverage_area"] = round(float(((occ.hit | occ_out.hit) & whole).sum() / max(1, whole.sum())), 3)
+        print(f"  lidar   the whole area read: {meta['coverage_area']:.0%} of its cells have points (the streets {meta['coverage']:.0%})", flush=True)

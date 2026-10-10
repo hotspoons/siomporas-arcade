@@ -66,31 +66,13 @@ export function frameOf(manifest: Manifest): FrameStamp {
   return { kind: f.kind ?? 'utm', epsg: f.epsg, anchor: f.anchor }
 }
 
-/**
- * Non-null when a file was authored in a different frame from the one the bake now serves.
- *
- * `coordinates` is how many things in the file HAVE coordinates. A frame warning is about
- * coordinates, and a file with none — the empty default the loader hands back for a document
- * that was never written — cannot be in the wrong frame. Without this, every fresh bake opened
- * with a red banner saying its (nonexistent) areas were drawn before 2026-09-22 and would sit off
- * the road (Rich, 2026-09-30: "this was a brand new bake with the latest code, looks like some
- * nonsense"). The check is HERE, once, rather than a condition each caller remembers or forgets:
- * zones remembered, areas and placements forgot.
+/*
+ * WHETHER A FILE IS IN THE BAKE'S FRAME is measured, not dated: `checkFrame` in framecheck.ts asks
+ * the roads whether a document's shapes sit on them as written or only after the old UTM→ENU turn.
+ * The rule that used to live here — "no stamp, so maybe before 2026-09-22, so say so" — put a red
+ * banner over five Beltway zones written over MCP on 2026-10-08 in exactly the frame the bake
+ * serves (Rich, 2026-10-10: "This screenshot about zones.json is bullshit").
  */
-export function frameMismatch(stamp: FrameStamp | undefined, manifest: Manifest, coordinates = 1): string | null {
-  if (coordinates <= 0) return null
-  const now = (manifest as unknown as { frame?: FrameStamp }).frame ?? {}
-  if (!stamp || (!stamp.kind && !stamp.anchor)) {
-    // written before stamping existed: it cannot be shown to match, so say so rather than assume
-    return `authored before frames were stamped; the bake is "${now.kind ?? 'utm'}". If these were drawn before 2026-09-22 they are in the old UTM-relative metres and will sit off the road.`
-  }
-  if (stamp.kind && now.kind && stamp.kind !== now.kind) return `authored in "${stamp.kind}" but the bake is now "${now.kind}"`
-  const a = stamp.anchor, b = now.anchor
-  if (a && b && (Math.abs(a.lon - b.lon) > 1e-6 || Math.abs(a.lat - b.lat) > 1e-6)) {
-    return `authored about a different anchor (${a.lat.toFixed(5)}, ${a.lon.toFixed(5)} vs ${b.lat.toFixed(5)}, ${b.lon.toFixed(5)})`
-  }
-  return null
-}
 
 export interface Adjustments {
   version: 1

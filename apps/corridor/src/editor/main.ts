@@ -109,6 +109,12 @@ import { PointMode } from './author/pointmode'
 import { FlyCam } from './view/flycam'
 import { Zones } from '../game/world/zones'
 import { fixtureFootprint } from '../game/stunt/stunts'
+// every mode's things in every mode, the active one bolder (Rich, 2026-10-10) — see view/emphasis.ts
+import { applyEmphasis } from './view/emphasis'
+import { Labels, type LabelItem } from './view/labels'
+import { ClickCycle, rankHits, type PickHit } from './view/pickorder'
+import { outlineMesh } from './view/drape'
+import { DocWatch } from './store/docwatch'
 // an old link's `:races` and `:grow` are the Points and Place tabs now
 const hashMode = location.hash.split(':')[1]
 let mode: Mode = (hashMode === 'races' ? 'points' : hashMode === 'grow' ? 'place' : (hashMode as Mode)) || 'areas'
@@ -242,6 +248,9 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
   // the surface the game actually drives on. Beside the pavement the two differ by metres, so
   // draping an area or standing a diner on the raw DEM would author against a surface nobody sees.
   const ground = (x: number, y: number) => site!.groundAt(x, -y) ?? site!.heightAt(x, y)
+  groundH = ground
+  watch.clear()
+  cycle.reset()
   await Promise.all([areas.load(slug, ground, site), place.load(slug, site, ground)])
   await structs.load(slug, site, place.catalog) // after place: it shares the catalog place loaded
   await traffic.load(slug, ground, site)
@@ -285,10 +294,21 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
   ;(window as unknown as { corridor: { stunts: unknown } }).corridor.stunts = stunts
   ;(window as unknown as { corridor: { races: unknown } }).corridor.races = races
   ;(window as unknown as { corridor: { points: unknown } }).corridor.points = points
+  ;(window as unknown as { corridor: { layers: unknown } }).corridor.layers = {
+    /** what a click at a ground point would choose, in order — the active mode's first */
+    hitsAt: (pt: { x: number; y: number }) => rankHits(hitsAt(pt), mode),
+    /** the names drawn on the map right now */
+    labels: () => labels.texts(),
+    /** what the hover ring is on */
+    hovered: () => hovered,
+    /** look at the documents on disk now, rather than at the next tick */
+    poll: () => pollDocs(),
+  }
   applyLayers()
   toTop()
   refresh()
   status('')
+  void watch.prime(docPaths())
   return slug
 }
 
@@ -306,14 +326,17 @@ function applyLayers() {
   areas.group.visible = on('areas')
   place.group.visible = on('placements')
   structs.group.visible = on('authored')
-  // traffic zones are only ever shown in their own mode: painted over every road, they hide the
-  // ground you are editing in every other one
-  traffic.group.visible = mode === 'traffic'
-  // stunts stay VISIBLE in every mode: they are part of the world, not an authoring overlay
+  /*
+   * EVERY MODE'S THINGS, IN EVERY MODE. Rich, 2026-10-10: "traffic zones will show up when you are
+   * in the structures tab … we need all the items visible from this editor all the time." These
+   * three were shown only in their own mode — the zones because, painted over every road, they hid
+   * the ground in the others. That is answered by weight now, not by absence: the passive modes are
+   * drawn at under half strength with no handles (view/emphasis.ts, applied in `refresh`).
+   */
+  traffic.group.visible = true
   stunts.group.visible = true
-  // gates are authoring marks, so they are shown only in their own mode
-  races.group.visible = inCourses()
-  points.group.visible = mode === 'points'
+  races.group.visible = true
+  points.group.visible = true
 }
 
 /** Straight down, high enough that the whole baked corridor is in frame — both extents, not just
@@ -514,7 +537,7 @@ addEventListener('pointerup', (e) => {
     if (grabbing) {
       grabbing = false
       structs.drop()
-    } else if (isClick(e as PointerEvent)) structs.click(groundAt(e as PointerEvent))
+    } else if (isClick(e as PointerEvent)) routeClick(groundAt(e as PointerEvent)) // a click from here can land on any mode's thing too
     down = null
     return
   }
@@ -774,6 +797,8 @@ async function saveBoth(): Promise<string> {
   if (races.dirty) out.push(await races.save())
   if (points.dirty) out.push(await points.save())
   if (out.length) sitePredatesEdits = true
+  // our own writes are not "changed on disk"
+  if (out.length) await watch.prime(docPaths())
   return out.join(' · ')
 }
 
@@ -787,70 +812,224 @@ async function saveBoth(): Promise<string> {
  *
  * Rich, 2026-09-29: *"clicking stunts from the areas tab would focus the stunt and activate the
  * stunts tab… would love to be able to click anything from the editor and have it highlighted in
- * the place editor on the right."*
+ * the place editor on the right."* And 2026-10-10: *"The active tab's items should … be first on
+ * selection when clicking."*
  *
- * THE ACTIVE TOOL STILL COMES FIRST, in two ways that matter. A tool in the middle of something —
- * drawing a polygon, holding an armed piece, waiting for you to pick the road an end joins to —
- * owns every click until it is finished; and a tool that finds one of its OWN things under the
- * pointer keeps the click too, so clicking around inside the mode you are in behaves exactly as it
- * did. Only when the active tool has nothing there does the editor look at what else is, and follow
- * it — which is the case where you are looking at a loop, click it, and would like the loop's panel.
- *
- * SMALLEST WINS among the others, the same rule every mode already uses inside itself: a stunt
- * fixture standing inside a big traffic zone is the thing you meant.
+ * A TOOL IN THE MIDDLE OF SOMETHING owns every click until it is finished — drawing a polygon,
+ * holding an armed piece, picking an interval's ends, waiting for you to pick the road an end joins
+ * to. Otherwise every mode is asked what it has under the pointer and the order is
+ * view/pickorder.ts's: the active mode's thing first, then the smallest of the rest, and a second
+ * click on the same spot walks to the next one there — which is how a loop standing inside a canopy
+ * area is still reachable from the Areas tab, the case the old smallest-wins rule existed for.
+ * Choosing another mode's thing switches to that mode with it selected and its row in view.
  */
 function routeClick(pt: { x: number; y: number } | null) {
-  const give = (m: Mode) => {
-    if (m === 'areas') areas.click(pt)
-    else if (m === 'traffic') traffic.click(pt)
-    else if (m === 'stunts') stunts.click(pt)
-    else if (m === 'points') (inCourses() ? races : points).click(pt)
-    else place.click(pt)
-  }
-  const busy = mode === 'areas' ? areas.busy
+  if (!pt || modeBusy()) return give(mode, pt)
+  const h = cycle.choose(pt, rankHits(hitsAt(pt), mode))
+  // nothing of any mode here: the active tool's own click, which clears its selection
+  if (!h) return give(mode, pt)
+  selectHit(h)
+}
+
+/** The active tool's own handling of a click — drawing, placing, clearing. */
+function give(m: Mode, pt: { x: number; y: number } | null) {
+  if (m === 'areas') areas.click(pt)
+  else if (m === 'traffic') traffic.click(pt)
+  else if (m === 'stunts') stunts.click(pt)
+  else if (m === 'structures') structs.click(pt)
+  else if (m === 'points') (inCourses() ? races : points).click(pt)
+  else if (m === 'place') place.click(pt)
+}
+
+/** Is the active tool in the middle of something, so the click is its own? */
+function modeBusy(): boolean {
+  return mode === 'areas' ? areas.busy
     : mode === 'traffic' ? traffic.busy
       : mode === 'stunts' ? stunts.busy
-        : mode === 'points' ? (inCourses() ? false : points.busy)
-          : place.busy
-  if (!pt || busy) return give(mode)
+        : mode === 'structures' ? structs.busy
+          : mode === 'points' ? (inCourses() ? false : points.busy)
+            : mode === 'place' ? place.busy
+              : false
+}
 
-  /*
-   * THE SMALLEST THING WINS, across every mode — not the active tool's own answer.
-   *
-   * Preferring the active tool sounded safer and was useless: a canopy area covers the whole
-   * corridor, so in the areas tab the area always answered first and a loop standing in the middle
-   * of it could never be clicked. The rule each mode already uses inside itself is the right one
-   * between them too — a stunt fixture is 6,400 m², a canopy is a hundred times that, and the
-   * specific thing is the thing you were pointing at.
-   *
-   * The active mode wins a TIE, so clicking two things of the same size does not wander.
-   */
-  const order: Mode[] = ['points', 'stunts', 'place', 'traffic', 'areas']
-  const hits = ([
-    { m: 'points' as Mode, hit: points.pick(pt) ?? races.pick(pt) },
-    { m: 'stunts' as Mode, hit: stunts.pick(pt) },
-    { m: 'place' as Mode, hit: place.pick(pt) },
-    { m: 'traffic' as Mode, hit: traffic.pick(pt) },
-    { m: 'areas' as Mode, hit: areas.pick(pt) },
-  ]).filter((x) => x.hit)
-  hits.sort((a, b) => (a.hit!.size - b.hit!.size) || (a.m === mode ? -1 : b.m === mode ? 1 : order.indexOf(a.m) - order.indexOf(b.m)))
-  const found = hits[0]
-  if (!found || found.m === mode) return give(mode)
-
-  setMode(found.m)
-  if (found.m === 'stunts') stunts.select(found.hit!.id)
-  else if (found.m === 'traffic') traffic.select(found.hit!.id)
-  else if (found.m === 'areas') areas.select(found.hit!.id)
-  else if (found.m === 'points') {
-    // a point, or a race gate through the Courses tab
-    if (points.doc.points.some((p) => p.id === found.hit!.id)) { points.panelTab = 'points'; points.select(found.hit!.id) }
-    else { points.panelTab = 'courses'; races.select(found.hit!.id) }
+/** Everything of every mode under a ground point — one candidate per mode, its smallest. A layer
+ *  switched off in Settings is not on the map, so it is not under the pointer either. */
+function hitsAt(pt: { x: number; y: number }): PickHit[] {
+  const out: PickHit[] = []
+  const add = (m: PickHit['mode'], g: THREE.Object3D, h: { id: string; size: number } | null) => {
+    if (h && g.visible) out.push({ mode: m, id: h.id, size: h.size })
   }
-  else place.select(found.hit!.id)
+  add('points', points.group, points.pick(pt))
+  add('points', races.group, races.pick(pt))
+  add('stunts', stunts.group, stunts.pick(pt))
+  add('place', place.group, place.pick(pt))
+  add('structures', structs.group, structs.pick(pt))
+  add('traffic', traffic.group, traffic.pick(pt))
+  add('areas', areas.group, areas.pick(pt))
+  return out
+}
+
+/** Select a thing in its own mode, switching to that mode first. */
+function selectHit(h: PickHit) {
+  if (h.mode !== mode) setMode(h.mode)
+  if (h.mode === 'stunts') stunts.select(h.id)
+  else if (h.mode === 'traffic') traffic.select(h.id)
+  else if (h.mode === 'areas') areas.select(h.id)
+  else if (h.mode === 'structures') structs.select(h.id)
+  else if (h.mode === 'points') {
+    // a point, or a race gate through the Courses tab
+    if (points.doc.points.some((p) => p.id === h.id)) { points.panelTab = 'points'; points.select(h.id) }
+    else { points.panelTab = 'courses'; races.select(h.id) }
+  } else place.select(h.id)
   // the panel that just opened shows the thing: its placed tab, the row highlighted and in view
   refresh()
-  status(`${found.m}: ${found.hit!.id}`)
+  status(`${h.mode}: ${h.id}`)
 }
+
+// ---------------------------------------------------------------------------------------------
+// every mode's layer, in every mode
+
+const cycle = new ClickCycle()
+const labels = new Labels()
+scene.add(labels.group)
+/** the surface every overlay drapes on, kept from the last load for the hover ring and the labels */
+let groundH: (x: number, y: number) => number = () => 0
+
+/**
+ * The active mode at full strength, the others quieter; the active mode's names on the map.
+ *
+ * Run at the end of every `refresh`, and every mode's change goes through `refresh` (it is each
+ * mode's `onChange`), so a passive mode that rebuilt its meshes — a reload off disk, a drop that
+ * switched modes — is quietened on the same pass. Cheap: tens to hundreds of overlay objects.
+ */
+function emphasiseLayers() {
+  const e = (m: Mode) => (mode === m ? 'active' : 'passive')
+  applyEmphasis(areas.group, e('areas'))
+  applyEmphasis(place.group, e('place'))
+  applyEmphasis(structs.group, e('structures'))
+  applyEmphasis(traffic.group, e('traffic'))
+  applyEmphasis(stunts.group, e('stunts'))
+  applyEmphasis(points.group, e('points'))
+  applyEmphasis(races.group, e('points'))
+  place.setPassive(mode !== 'place')
+  stunts.setPassive(mode !== 'stunts')
+  const src = mode === 'areas' ? areas.labels()
+    : mode === 'traffic' ? traffic.labels()
+      : mode === 'structures' ? structs.labels()
+        : mode === 'stunts' ? stunts.labels()
+          : mode === 'points' ? [...points.labels(), ...races.labels()]
+            : []
+  labels.set(src.map((l): LabelItem => ({ key: `${mode}:${l.id}`, text: l.text, at: l.at })), groundH)
+  // the hover ring was drawn from the thing as it was: a selection, a mode switch or a reload may
+  // have moved it, or put something else first under the pointer — look again
+  if (hovered) { setHover(null); hoverTimer ??= setTimeout(hoverNow, 0) }
+}
+
+/*
+ * HOVER: what a click here would take, outlined before you click. Across modes too — a zone under
+ * the pointer in the Structures tab lights up, which is the only way to know a click will jump
+ * there. Coalesced to one ground raycast per 60 ms; it is a raycast into the terrain.
+ */
+let hovered: string | null = null
+let hoverLine: THREE.Object3D | null = null
+let hoverEvent: { clientX: number; clientY: number } | null = null
+let hoverTimer: ReturnType<typeof setTimeout> | null = null
+function setHover(h: PickHit | null) {
+  const k = h ? `${h.mode}:${h.id}` : null
+  if (k === hovered) return
+  hovered = k
+  if (hoverLine) {
+    scene.remove(hoverLine)
+    ;(hoverLine as THREE.Mesh).geometry?.dispose()
+    hoverLine = null
+  }
+  canvas.style.cursor = h ? 'pointer' : ''
+  if (!h) return
+  const ring = h.mode === 'areas' ? areas.outline(h.id)
+    : h.mode === 'traffic' ? traffic.outline(h.id)
+      : h.mode === 'stunts' ? stunts.outline(h.id)
+        : h.mode === 'structures' ? structs.outline(h.id)
+          : h.mode === 'place' ? place.outline(h.id)
+            : points.outline(h.id) ?? races.outline(h.id)
+  if (!ring || ring.length < 2) return
+  const line = outlineMesh(ring, groundH, 0xffffff, 0.9, 3.5)
+  line.renderOrder = 13
+  hoverLine = markOverlay(line)
+  scene.add(hoverLine)
+}
+function hoverNow() {
+  hoverTimer = null
+  const e = hoverEvent
+  if (!e || !site || grabbing || modeBusy()) return setHover(null)
+  const pt = groundAt(e as PointerEvent)
+  setHover(pt ? rankHits(hitsAt(pt), mode)[0] ?? null : null)
+}
+canvas.addEventListener('pointermove', (e) => {
+  // a drag (orbit, a handle) is not a hover
+  if (e.buttons) return
+  hoverEvent = { clientX: e.clientX, clientY: e.clientY }
+  hoverTimer ??= setTimeout(hoverNow, 60)
+})
+canvas.addEventListener('pointerleave', () => { hoverEvent = null; setHover(null) })
+
+/*
+ * DOCUMENTS CHANGED ON DISK — an agent's traffic_zone_add, point_add or course_save while this is
+ * open. See store/docwatch.ts. Every eight seconds while the editor is the thing on screen.
+ */
+const watch = new DocWatch(new URLSearchParams(location.search).get('data') ?? '')
+const docPaths = () => docs().map((d) => d.path)
+function docs(): { path: string; file: string; mode: { dirty: boolean }; reload: () => Promise<unknown>; reselect: () => void }[] {
+  const s = site
+  if (!s) return []
+  const slug = s.manifest.slug
+  const keep = <T,>(get: () => T, put: (v: T) => void) => { const v = get(); return () => put(v) }
+  const at = (f: string) => `/sites/${slug}/${f}`
+  return [
+    { path: at('adjustments.json'), file: 'adjustments.json', mode: areas, reload: () => areas.load(slug, groundH, s), reselect: keep(() => areas.selected, (v) => { if (v && areas.doc.areas.some((a) => a.id === v)) areas.select(v) }) },
+    { path: at('placements.json'), file: 'placements.json', mode: place, reload: () => place.load(slug, s, groundH), reselect: keep(() => place.selected, (v) => { if (v && place.doc.items.some((p) => p.id === v)) place.select(v) }) },
+    { path: at('structures.json'), file: 'structures.json', mode: structs, reload: () => structs.load(slug, s, place.catalog), reselect: keep(() => structs.selected, (v) => { if (v && structs.doc.items.some((i) => i.id === v)) structs.select(v) }) },
+    { path: at('zones.json'), file: 'zones.json', mode: traffic, reload: () => traffic.load(slug, groundH, s), reselect: keep(() => traffic.selected, (v) => { if (v && traffic.doc.zones.some((z) => z.id === v)) traffic.select(v) }) },
+    { path: at('stunts.json'), file: 'stunts.json', mode: stunts, reload: () => stunts.load(slug, groundH, s), reselect: keep(() => stunts.selected, (v) => { if (v && stunts.doc.fixtures.some((f) => f.id === v)) stunts.select(v) }) },
+    { path: at('courses.json'), file: 'courses.json', mode: races, reload: () => races.load(slug, groundH, s), reselect: () => {} },
+    { path: at('points.json'), file: 'points.json', mode: points, reload: () => points.load(slug, groundH, s), reselect: keep(() => points.selected, (v) => { if (v && points.doc.points.some((p) => p.id === v)) points.select(v) }) },
+  ]
+}
+/** ONE LOOK AT A TIME: a look asked for while another is in flight waits for it and then looks
+ *  again, rather than returning nothing — a probe's (or a test's) "look now" must mean now. */
+let polling: Promise<string[]> = Promise.resolve([])
+function pollDocs(): Promise<string[]> {
+  polling = polling.catch(() => []).then(() => pollOnce())
+  return polling
+}
+let pollBusy = false
+async function pollOnce(): Promise<string[]> {
+  if (!site) return []
+  pollBusy = true
+  try {
+    const list = docs()
+    const changed = new Set(await watch.changed(list.map((d) => d.path)))
+    const reloaded: string[] = []
+    for (const d of list) {
+      if (!changed.has(d.path)) continue
+      // unsaved edits win; saying so is the whole of what can be done without losing somebody's work
+      if (d.mode.dirty) { toast(`${d.file} changed on disk — you have unsaved edits to it, and saving will write over that change`, 'warn', 8000); continue }
+      const reselect = d.reselect
+      await d.reload()
+      reselect()
+      reloaded.push(d.file)
+    }
+    if (reloaded.length) {
+      refresh()
+      status(`reloaded ${reloaded.join(', ')} — changed on disk`)
+    }
+    return reloaded
+  } finally {
+    pollBusy = false
+  }
+}
+setInterval(() => {
+  if (!pollBusy && active && !preview.open && document.visibilityState === 'visible') void pollDocs()
+}, 8000)
 
 async function openPreview() {
   if (!site) return
@@ -928,6 +1107,7 @@ function refresh(structural = true) {
   }
   const what = mode === 'areas' ? 'areas' : mode === 'structures' ? 'structures' : mode === 'traffic' ? 'traffic' : mode === 'stunts' ? 'stunts' : mode === 'points' ? (inCourses() ? 'races' : 'points') : 'place'
   ui.setDirty(CAN_SAVE && unsaved(), `Save ${what}`)
+  emphasiseLayers()
 }
 
 /**
@@ -969,6 +1149,7 @@ async function doSave() {
         : await place.save())
     }
     sitePredatesEdits = true
+    await watch.prime(docPaths())
   } catch (err) {
     toast(`save failed: ${(err as Error).message}`, 'danger')
     refresh()

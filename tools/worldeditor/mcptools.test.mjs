@@ -133,6 +133,20 @@ test('point_add writes a point through the site document: by road and offset, by
   await assert.rejects(tool('point_add').run({ slug: 'crofton', id: 'x', kind: 'spot' }), /say where/)
 })
 
+test('point_add and traffic_zone_add stamp the frame the bake serves, so the editor never has to guess', async () => {
+  // Rich, 2026-10-10, on a banner over five unstamped Beltway zones MCP had written in the right
+  // frame: "This screenshot about zones.json is bullshit."
+  const { tool, docs } = toolsFor(volume())
+  await tool('traffic_zone_add').run({ slug: 'crofton', density: 0.8, polygon: [[0, -10], [200, -10], [200, 10], [0, 10]] })
+  assert.deepEqual(docs.get('crofton/zones.json').frame, { kind: 'enu', epsg: 32618, anchor: { ...ANCHOR, h: 0 } })
+  await tool('point_add').run({ slug: 'crofton', id: 'start', kind: 'start', at: [10, 0] })
+  assert.deepEqual(docs.get('crofton/points.json').frame, { kind: 'enu', epsg: 32618, anchor: { ...ANCHOR, h: 0 } })
+  // no bake, no stamp — and still written
+  const r = await tool('traffic_zone_add').run({ slug: 'nobake', density: 0.5, polygon: [[0, 0], [1, 0], [1, 1]] })
+  assert.equal(r.zones, 1)
+  assert.equal(docs.get('nobake/zones.json').frame, undefined)
+})
+
 test('asset_view answers with image content, the chosen view unless another is named', async () => {
   const png = Buffer.from('89504e470d0a1a0a', 'hex')
   const { tool, calls } = toolsFor(volume(), {

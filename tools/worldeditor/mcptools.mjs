@@ -493,6 +493,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
         if (i >= 0) doc.points[i] = point
         else doc.points.push(point)
         if (a.home) doc.home = a.id
+        await stamp(root, a.slug, doc)
         const wrote = await siteDoc.write(a.slug, 'points.json', doc)
         return { point, replaced: i >= 0, points: doc.points.length, home: doc.home ?? null, wrote }
       },
@@ -557,6 +558,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
         if (a.obey_rate !== undefined) traffic.obeyRate = clamp01(a.obey_rate)
         if (a.speed_factor !== undefined) traffic.speedFactor = a.speed_factor
         doc.zones.push({ id, name: a.name ?? id, kind: 'traffic', polygon: polygon.map(([x, y]) => [round(x), round(y)]), traffic })
+        await stamp(root, a.slug, doc)
         const wrote = await siteDoc.write(a.slug, 'zones.json', doc)
         return { id, zones: doc.zones.length, wrote }
       },
@@ -749,6 +751,26 @@ async function frameOf(root, slug) {
     if (m.frame) return m.frame
   }
   throw new Error(`${slug} has no baked manifest with a frame — bake it first`)
+}
+
+/**
+ * Stamp a site document with the frame its coordinates are in — the bake's, which is what every
+ * tool here speaks (site_project, site_roads, site_road_polygon). The same block the place editor
+ * writes on save (apps/corridor/src/editor/store/schema.ts `frameOf`).
+ *
+ * WITHOUT IT THE EDITOR HAD TO GUESS. dc-metro-take-2's five Beltway zones were written by
+ * traffic_zone_add on 2026-10-08 in exactly the bake's ENU frame, carried no stamp, and the editor
+ * put a red "authored in a different frame … will sit off the road" banner over them (Rich,
+ * 2026-10-10: "This screenshot about zones.json is bullshit"). The editor measures now
+ * (editor/store/framecheck.ts); a stamp means it does not have to.
+ *
+ * A world with no baked manifest gets no stamp rather than a refusal: the zone is still worth
+ * writing, and the editor will measure it when there is a bake to measure against.
+ */
+async function stamp(root, slug, doc) {
+  const f = await frameOf(root, slug).catch(() => null)
+  if (!f) return
+  doc.frame = { kind: f.kind ?? 'utm', epsg: f.epsg, anchor: f.anchor }
 }
 
 /** the centroid of whatever geometry a feature has, lon/lat */

@@ -6,6 +6,10 @@
 // because a triangle that spans a cutting reads as a lid over it. Subdividing first and lifting
 // every vertex afterwards is the cheap way to make a plane follow terrain.
 import * as THREE from 'three'
+import { Line2 } from 'three/addons/lines/Line2.js'
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
+import { HANDLE } from './emphasis'
 
 export type HeightAt = (x: number, y: number) => number
 
@@ -25,12 +29,28 @@ export function densify(poly: [number, number][], step = OUTLINE_STEP): [number,
   return out
 }
 
-/** A closed line lying on the ground `lift` metres up. */
-export function outlineMesh(poly: [number, number][], h: HeightAt, color: number, lift = 0.5): THREE.LineLoop {
-  const pts = densify(poly).map(([x, y]) => new THREE.Vector3(x, h(x, y) + lift, -y))
-  const g = new THREE.BufferGeometry().setFromPoints(pts)
-  const m = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 })
-  const line = new THREE.LineLoop(g, m)
+/** An outline's width in screen pixels: the active mode's, and a selected thing's. The passive
+ *  modes draw at half of whatever this was (view/emphasis.ts). */
+export const OUTLINE_PX = 2.5
+export const OUTLINE_SELECTED_PX = 4
+
+/**
+ * A closed line lying on the ground `lift` metres up.
+ *
+ * A FAT LINE, NOT A LineLoop. WebGL draws `gl.LINES` one pixel wide whatever `linewidth` says, so
+ * "the active tab's items bolder" (Rich, 2026-10-10) could only ever have been a colour change.
+ * `Line2` is screen-space quads: a width in pixels that the emphasis pass can halve for a passive
+ * mode, and that stays the same width at every zoom. It sets its own resolution from the viewport
+ * on every draw, so nothing has to tell it about a resize.
+ */
+export function outlineMesh(poly: [number, number][], h: HeightAt, color: number, lift = 0.5, width = OUTLINE_PX): Line2 {
+  const ring = densify(poly)
+  const pos: number[] = []
+  for (const [x, y] of [...ring, ring[0]]) pos.push(x, h(x, y) + lift, -y)
+  const g = new LineGeometry()
+  g.setPositions(pos)
+  const m = new LineMaterial({ color, linewidth: width, depthTest: false, transparent: true, opacity: 0.95, worldUnits: false })
+  const line = new Line2(g, m)
   line.renderOrder = 10
   return line
 }
@@ -91,5 +111,7 @@ export function fillMesh(poly: [number, number][], h: HeightAt, color: number, o
 export function handleMesh(color: number, radius = 2.2): THREE.Mesh {
   const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }))
   m.renderOrder = 12
+  // hidden while its mode is passive: a handle that cannot be grabbed must not look like one
+  m.name = HANDLE
   return m
 }

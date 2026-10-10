@@ -18,11 +18,15 @@
 // number is underneath for code and for the ECS, and it is shown, but nobody has to type it.
 
 import * as THREE from 'three'
-import { fillMesh, handleMesh, outlineMesh, type HeightAt } from '../view/drape'
+import { fillMesh, handleMesh, outlineMesh, OUTLINE_PX, OUTLINE_SELECTED_PX, type HeightAt } from '../view/drape'
+import type { Line2 } from 'three/addons/lines/Line2.js'
 import { areaOf, inside } from '../../world/polygon'
-import { frameMismatch, frameOf, nextId } from '../store/schema'
+import { frameOf, nextId } from '../store/schema'
+import { frameNotice, guardFrame } from '../store/frameguard'
+import type { FrameVerdict } from '../store/framecheck'
 import type { Site } from '../../world/scene'
 import { dragChip, el, paneTabs, roadStrip, slider } from './ui'
+import { labelAt } from '../view/labels'
 import {
   describeTraffic, TRAFFIC_LEVELS, trafficColour, validateZones,
   type TrafficZone, type Zone, type ZoneDoc,
@@ -41,12 +45,13 @@ export class ZoneMode {
   doc: ZoneDoc = { version: 1, zones: [] }
   dirty = false
   selected: string | null = null
-  frameWarning: string | null = null
+  /** what the roads say about this file's frame — see store/framecheck.ts */
+  frame: FrameVerdict | null = null
 
   private slug = ''
   private h: HeightAt = () => 0
   private site: Site | null = null
-  private meshes = new Map<string, { fill: THREE.Mesh; outline: THREE.LineLoop }>()
+  private meshes = new Map<string, { fill: THREE.Mesh; outline: Line2 }>()
   private handles = new THREE.Group()
   private draw: [number, number][] | null = null
   private drawGroup = new THREE.Group()
@@ -64,9 +69,8 @@ export class ZoneMode {
     this.h = h
     this.site = site
     this.doc = await loadZones(slug)
-    // only a file with coordinates in it can be in the wrong frame; `frameMismatch` knows (the
-    // rule used to live here alone, and areas and placements did not have it)
-    this.frameWarning = site ? frameMismatch(this.doc.frame, site.manifest, this.doc.zones.length) : null
+    // measured against the roads, not guessed from a missing stamp (store/framecheck.ts)
+    this.frame = site ? guardFrame(this.doc, site, { polygons: this.doc.zones.map((z) => ({ id: z.id, ring: z.polygon })), points: [] }, 'zones') : null
     this.dirty = false
     this.selected = null
     this.draw = null
@@ -105,7 +109,7 @@ export class ZoneMode {
     const on = z.id === this.selected
     const fill = fillMesh(z.polygon, this.h, c, on ? 0.45 : 0.3)
     // the OUTLINE carries the selection, not the fill, because the fill's colour is the data
-    const outline = outlineMesh(z.polygon, this.h, on ? SELECTED_OUTLINE : c)
+    const outline = outlineMesh(z.polygon, this.h, on ? SELECTED_OUTLINE : c, 0.5, on ? OUTLINE_SELECTED_PX : OUTLINE_PX)
     fill.userData.zoneId = z.id
     this.group.add(fill, outline)
     this.meshes.set(z.id, { fill, outline })
@@ -132,7 +136,8 @@ export class ZoneMode {
       const on = z.id === this.selected
       ;(got.fill.material as THREE.MeshBasicMaterial).color.setHex(c)
       ;(got.fill.material as THREE.MeshBasicMaterial).opacity = on ? 0.45 : 0.3
-      ;(got.outline.material as THREE.LineBasicMaterial).color.setHex(on ? SELECTED_OUTLINE : c)
+      got.outline.material.color.setHex(on ? SELECTED_OUTLINE : c)
+      got.outline.material.linewidth = on ? OUTLINE_SELECTED_PX : OUTLINE_PX
     }
   }
 
@@ -213,6 +218,31 @@ export class ZoneMode {
     this.dirty = true
     if (this.selected === id) this.select(null)
     else this.onChange()
+  }
+
+  /**
+   * Turn every zone by the bake's recorded UTM→ENU fit — the button on a frame notice, offered
+   * only when the roads showed the file was written in the old frame (store/framecheck.ts).
+   */
+  moveIntoFrame() {
+    if (this.frame?.state !== 'old' || !this.site) return
+    const move = this.frame.move
+    for (const z of this.doc.zones) z.polygon = z.polygon.map((p) => move(p).map((v) => Math.round(v * 10) / 10) as [number, number])
+    this.doc.frame = frameOf(this.site.manifest)
+    this.frame = { state: 'stamped' }
+    this.dirty = true
+    this.rebuild()
+    this.onChange()
+  }
+
+  /** A zone's outline, for the editor's hover ring. */
+  outline(id: string): [number, number][] | null {
+    return this.doc.zones.find((z) => z.id === id)?.polygon ?? null
+  }
+
+  /** Name and anchor of every zone, for the active mode's labels. */
+  labels(): { id: string; text: string; at: [number, number] }[] {
+    return this.doc.zones.filter((z) => z.polygon.length >= MIN_VERTS).map((z) => ({ id: z.id, text: z.name, at: labelAt(z.polygon) }))
   }
 
   // --- input, delegated from main ---------------------------------------------------------------
@@ -346,11 +376,8 @@ export class ZoneMode {
   }
 
   private placedTab(root: HTMLElement, go: (z: Zone) => void) {
-    if (this.frameWarning) {
-      const b = el('div', 'framewarn')
-      b.append(el('strong', '', 'zones.json was authored in a different frame'), el('span', '', this.frameWarning))
-      root.append(b)
-    }
+    const notice = frameNotice('zones.json', this.frame, () => this.moveIntoFrame())
+    if (notice) root.append(notice)
     const list = el('div', 'list')
     for (const z of this.doc.zones) {
       const row = el('div', `item${z.id === this.selected ? ' sel' : ''}`)

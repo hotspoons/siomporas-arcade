@@ -197,6 +197,35 @@ body.worldedit {
 .row.diag.warning .row-name { color: var(--warn); }
 .note.ok { color: var(--ok); }
 
+/* "In this world" beside the code (programpanel.ts `drawInstances`): a group per kind of thing a
+   program can name, each shut or open, one search over all of them. A row is a button that
+   inserts its code, and it drags — onto a line of the editor — so it carries a grab cursor. Every
+   `display` here that sits on something `[hidden]` has its `[hidden]` partner, or a search that
+   hides a row leaves it on screen. */
+.refs-group { display: grid; gap: 1px; margin-top: var(--s2); min-width: 0; }
+.refs-group[hidden] { display: none; }
+.refs-head {
+  display: flex; align-items: center; gap: var(--s1); width: 100%;
+  padding: var(--s1); background: none; border: 0; border-radius: var(--r1);
+  font: inherit; font-size: var(--text-xs); color: var(--ink-2); text-align: left; cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.04em; user-select: none;
+}
+.refs-head:hover { background: var(--bg-2); }
+.refs-head svg { flex: none; transition: transform 0.12s; }
+.refs-group.shut:not(.searching) .refs-head svg { transform: rotate(-90deg); }
+.refs-count { margin-left: auto; color: var(--ink-3); font-variant-numeric: tabular-nums; text-transform: none; }
+.refs-rows { display: grid; gap: 1px; min-width: 0; }
+.refs-group.shut:not(.searching) .refs-rows,
+.refs-group.shut:not(.searching) .refs-more { display: none; }
+.refs-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.refs-row[hidden] { display: none; }
+.refs-row > .row { flex: 1 1 auto; min-width: 0; padding: 3px var(--s2); cursor: grab; user-select: none; }
+.refs-row > .row:focus-visible, .refs-head:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.refs-row > .row:active { cursor: grabbing; }
+.refs-row .row-name { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, ui-monospace, monospace); font-size: var(--text-xs); }
+.refs-play.btn { flex: none; padding: 2px 4px; }
+.refs-more[hidden] { display: none; }
+
 /* The terminal, in the Shell mode. Same pane as the code editor, and the same grid: a bar, then
    the thing taking whatever is left. */
 #code .term, .agent-pane .term {

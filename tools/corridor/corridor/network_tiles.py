@@ -455,9 +455,11 @@ def _near_points_from_laz(bbox, chains: list[dict], laz: Path) -> dict:
     return pts
 
 
-def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float = 1.0) -> dict:
+def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float = 1.0, area=None) -> dict:
     """NAIP at `res` m over the bbox, only the service tiles that touch the corridor, written
-    window by window into one JPEG-compressed GeoTIFF."""
+    window by window into one JPEG-compressed GeoTIFF. `area` is the extent the NAIP year is
+    chosen over (the world's bbox for a shard, so every shard picks the same one); the bbox
+    itself when not given."""
     from . import naip as naip_mod
 
     if rastercache.reuse(out, frame.crs, tuple(bbox), "naip"):
@@ -476,8 +478,9 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
     # whole plan first so the downloads can run concurrently (from the Planetary Computer or the
     # ImageServer — `naip.fetch_tiles` chooses); a single GeoTIFF still has one writer, so the
     # windows are written serially afterwards — from the cache, which is instant.
-    plan = naip_mod.plan_tiles(frame, bbox, res, cache, keep=lambda b: box(*b).intersects(corridor))
-    prov = naip_mod.fetch_tiles(frame, [t for _, _, t in plan])
+    policy = naip_mod.year_policy(frame, area if area is not None else bbox)
+    plan = naip_mod.plan_tiles(frame, bbox, res, cache, keep=lambda b: box(*b).intersects(corridor), policy=policy)
+    prov = naip_mod.fetch_tiles(frame, [t for _, _, t in plan], policy=policy)
     fetched = 0
     blank_tiles: list = []
     with rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=3, dtype="uint8", crs=frame.crs, transform=from_origin(xmin, ymax, res, res), compress="jpeg", photometric="ycbcr", tiled=True, blockxsize=512, blockysize=512, jpeg_quality=88) as dst:

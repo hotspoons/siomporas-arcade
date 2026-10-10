@@ -179,8 +179,15 @@ after USGSNAIPPlus answered 504 for an hour and killed two dc-metro bakes). The 
 holds the USDA's own quarter-quad COGs (RGB+NIR, 0.3 m in Maryland's 2023 cycle, 0.6 m in
 Virginia's), found by a STAC search and read with HTTP range requests over GDAL's `/vsicurl/` with a
 free SAS token — no account, no credentials; it is refreshed when it nears `msft:expiry`. The AWS
-Open Data NAIP buckets were measured too and are requester-pays, so they are not used. Per pixel a
-LEAF-ON flight (`CORRIDOR_NAIP_LEAF_ON`, months, default `6-9`) beats a leaf-off one up to
+Open Data NAIP buckets were measured too and are requester-pays, so they are not used. ONE YEAR
+first (Rich, 2026-10-10): over the whole area being baked — the WORLD's bbox, so every shard picks
+the same — the newest year whose leaf-on items cover all but `CORRIDOR_NAIP_YEAR_MAX_BARE` (default
+2 %) of what any year covers is read alone, finer first; everything else only fills its holes.
+dc-metro-take-2 picks 2021 (MD June, VA September; 2023 covers 81.9 %, Virginia's 2023 is leaf-off),
+crofton-triangle 2023 at 0.3 m. `CORRIDOR_NAIP_YEAR=auto|<yyyy>|off`; `off`, or no year covering
+enough, is the per-pixel ranking that follows, and `naip.year` in the manifest says which and why
+(the year is part of the cached piece's name too). Within the per-pixel ranking a
+LEAF-ON flight (`CORRIDOR_NAIP_LEAF_ON`, months, default `5-9`) beats a leaf-off one up to
 `CORRIDOR_NAIP_LEAF_ON_YEARS` (default 2) years newer — Virginia flew 2023 in October and November,
 red maples beside Maryland's September, so Arlington takes VA 2021-09-10 instead — then the newest
 year wins, the finer item, the later date, and older items fill only the pixels the ones before

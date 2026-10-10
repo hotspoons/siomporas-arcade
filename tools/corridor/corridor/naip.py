@@ -194,6 +194,8 @@ class Tile:
     res: float
     epsg: int
     cache: Path
+    #: the YearPolicy's tag (`y2021`, `ynone`, `yoff`), part of the cached piece's name
+    year_tag: str = ""
 
     @property
     def bbox(self) -> tuple[float, float, float, float]:
@@ -209,7 +211,7 @@ class Tile:
 
     @property
     def pc(self) -> Path:
-        return self.cache / "naip" / f"pc_{self.stem}_{naip_pc.rule_tag()}.jpg"
+        return self.cache / "naip" / f"pc_{self.stem}_{naip_pc.rule_tag()}{self.year_tag}.jpg"
 
     @property
     def pc_meta(self) -> Path:
@@ -232,7 +234,7 @@ class Tile:
         return None
 
 
-def plan_tiles(frame: Frame, bbox, res: float, cache: Path, keep=None) -> list[tuple[int, int, Tile]]:
+def plan_tiles(frame: Frame, bbox, res: float, cache: Path, keep=None, policy=None) -> list[tuple[int, int, Tile]]:
     """`(row, col, tile)` for every TILE_PX piece of the bbox's lattice at `res` that `keep(box)` wants."""
     xmin, ymin, xmax, ymax = bbox
     width = int(round((xmax - xmin) / res))
@@ -241,7 +243,7 @@ def plan_tiles(frame: Frame, bbox, res: float, cache: Path, keep=None) -> list[t
     for r0 in range(0, height, TILE_PX):
         for c0 in range(0, width, TILE_PX):
             tw, th = min(TILE_PX, width - c0), min(TILE_PX, height - r0)
-            t = Tile(xmin + c0 * res, ymax - r0 * res, tw, th, res, frame.epsg, cache)
+            t = Tile(xmin + c0 * res, ymax - r0 * res, tw, th, res, frame.epsg, cache, policy.tag if policy else "")
             if keep is None or keep(t.bbox):
                 out.append((r0, c0, t))
     return out
@@ -255,8 +257,8 @@ def read_tile(t: Tile) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(path.read_bytes())).convert("RGB"))
 
 
-def _fetch_pc_tile(t: Tile, frame: Frame, items: list, tries: int) -> None:
-    arr, used = naip_pc.compose(frame, t.bbox, t.res, items, jobs=1, tries=tries)
+def _fetch_pc_tile(t: Tile, frame: Frame, items: list, tries: int, year: int | None = None) -> None:
+    arr, used = naip_pc.compose(frame, t.bbox, t.res, items, jobs=1, tries=tries, year=year)
     buf = io.BytesIO()
     Image.fromarray(np.ascontiguousarray(np.moveaxis(arr, 0, -1))).save(buf, format="JPEG", quality=90)
     # the sidecar first: the .jpg is what says "cached", so it must never exist without its items
@@ -264,7 +266,27 @@ def _fetch_pc_tile(t: Tile, frame: Frame, items: list, tries: int) -> None:
     _atomic_write(t.pc, buf.getvalue())
 
 
-def fetch_tiles(frame: Frame, tiles: list[Tile], label: str = "naip", jobs: int | None = None) -> dict:
+def year_policy(frame: Frame, area_bbox) -> "naip_pc.YearPolicy | None":
+    """The one year this bake reads (naip_pc.YearPolicy), decided over `area_bbox` — the WORLD's
+    extent for a shard, so every shard agrees. None when the catalogue is not the source (forced
+    `usgs`, or unreachable in `auto`: the ImageServer has no years to choose between)."""
+    mode = source_choice()
+    if mode == "usgs":
+        return None
+    try:
+        pol = naip_pc.year_policy(frame, tuple(area_bbox), tries=naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES)
+    except Exception as exc:
+        if mode == "pc":
+            raise BakeFault(f"naip: CORRIDOR_NAIP_SOURCE=pc and the year could not be chosen: {exc}") from exc
+        print(f"  naip    Planetary Computer unreachable for the year choice ({exc})", flush=True)
+        return None
+    cov = pol.coverage.get("by_state") or {}
+    print(f"  naip    year {pol.year if pol.year is not None else '(per pixel)'}: {pol.why}"
+          + (f"; by state {', '.join(f'{k} {100 * v:.1f}%' for k, v in cov.items())}" if cov else ""), flush=True)
+    return pol
+
+
+def fetch_tiles(frame: Frame, tiles: list[Tile], label: str = "naip", jobs: int | None = None, policy=None) -> dict:
     """Make sure every tile has a cached piece, from whichever source CORRIDOR_NAIP_SOURCE allows.
 
     `auto`: Planetary Computer first, with SHORT patience (about two minutes of 5xx); when it fails
@@ -297,7 +319,7 @@ def fetch_tiles(frame: Frame, tiles: list[Tile], label: str = "naip", jobs: int 
     def one(t: Tile) -> str:
         if mode != "usgs" and breaker["down"] is None:
             try:
-                _fetch_pc_tile(t, frame, items or [], naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES)
+                _fetch_pc_tile(t, frame, items or [], naip_pc.TRIES if mode == "pc" else naip_pc.SHORT_TRIES, policy.year if policy else None)
                 return "pc"
             except Exception as exc:
                 if mode == "pc":
@@ -315,10 +337,10 @@ def fetch_tiles(frame: Frame, tiles: list[Tile], label: str = "naip", jobs: int 
         return "usgs"
 
     _pool([lambda t=t: one(t) for t in missing], jobs, label)
-    return provenance(tiles, mode)
+    return provenance(tiles, mode, policy)
 
 
-def provenance(tiles: list[Tile], mode: str | None = None) -> dict:
+def provenance(tiles: list[Tile], mode: str | None = None, policy=None) -> dict:
     """Which source and which NAIP items fed these tiles: the manifest's record of the imagery."""
     mode = mode or source_choice()
     by_source: dict[str, int] = {}
@@ -335,7 +357,11 @@ def provenance(tiles: list[Tile], mode: str | None = None) -> dict:
     names = {"pc": "Planetary Computer NAIP (USDA quarter-quad COGs)", "usgs": "USGS NAIPPlus ImageServer (current mosaic)"}
     out: dict = {"source": " + ".join(names[k] for k in sorted(by_source)) or None, "tiles_by_source": by_source}
     if by_source.get("pc"):
-        out["rule"] = naip_pc.ranking_rule()
+        lead = (f"one year: {policy.year}'s leaf-on items first, finer first ({policy.why}); then " if policy and policy.year is not None
+                else (f"{policy.why}; " if policy else ""))
+        out["rule"] = lead + naip_pc.ranking_rule()
+        if policy is not None:
+            out["year"] = policy.record()
     if items:
         recs = sorted(items.values(), key=lambda r: (-r["year"], r["gsd_m"], r["id"]))
         out["items"] = recs
@@ -495,8 +521,9 @@ def fetch_naip(frame: Frame, bbox: tuple[float, float, float, float], out: Path,
     width = int(round((xmax - xmin) / RES))
     height = int(round((ymax - ymin) / RES))
     mosaic = np.zeros((3, height, width), dtype=np.uint8)
-    plan = plan_tiles(frame, bbox, RES, cache)
-    prov = fetch_tiles(frame, [t for _, _, t in plan])
+    policy = year_policy(frame, bbox)
+    plan = plan_tiles(frame, bbox, RES, cache, policy=policy)
+    prov = fetch_tiles(frame, [t for _, _, t in plan], policy=policy)
     for i, (r0, c0, t) in enumerate(plan, 1):
         mosaic[:, r0 : r0 + t.h, c0 : c0 + t.w] = np.moveaxis(read_tile(t), -1, 0)
         print(f"  naip    tile {i}/{len(plan)}", flush=True)
@@ -521,13 +548,14 @@ def fetch_horizon_image(frame: Frame, out: Path, bbox: tuple[float, float, float
         try:
             items = naip_pc.search(frame.bbox_wgs(*bbox), tries=tries)
             if items:
-                arr, used = naip_pc.compose(frame, bbox, res, items, jobs=max(8, _jobs()), tries=tries)
+                pol = naip_pc.year_policy(frame, bbox, tries=tries)
+                arr, used = naip_pc.compose(frame, bbox, res, items, jobs=max(8, _jobs()), tries=tries, year=pol.year)
                 buf = io.BytesIO()
                 Image.fromarray(np.ascontiguousarray(np.moveaxis(arr, 0, -1))).save(buf, format="JPEG", quality=90)
                 _atomic_write(out, buf.getvalue())
                 years = sorted({u.year for u in used}, reverse=True)
                 print(f"  horizon imagery {size}x{size} @ {res:g} m from {len(used)} Planetary Computer items ({', '.join(map(str, years))})", flush=True)
-                return {"source": "pc", "items": len(used), "years": years, "rule": naip_pc.ranking_rule()}
+                return {"source": "pc", "items": len(used), "years": years, "year": pol.record(), "rule": naip_pc.ranking_rule()}
             if mode == "pc":
                 print("  horizon no Planetary Computer NAIP over the horizon square; no imagery", flush=True)
                 return None

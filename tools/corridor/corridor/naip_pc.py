@@ -227,15 +227,19 @@ class Item:
 
 
 def leaf_on_months() -> tuple[int, int]:
-    """CORRIDOR_NAIP_LEAF_ON: the leaf-on months, inclusive, as `6-9` (June to September, the default)."""
-    v = os.environ.get("CORRIDOR_NAIP_LEAF_ON", "6-9").strip()
+    """CORRIDOR_NAIP_LEAF_ON: the leaf-on months, inclusive, as `5-9` (May to September, the default).
+
+    May, not June: Maryland flew a third of its 2023 quarter-quads on 2023-05-25, in full leaf,
+    and with June-September crofton-triangle lost its 2023 0.3 m year to 2021 0.6 m (2023 leaf-on
+    covered 82.7%). October stays out: Virginia's 2023-10-11 flight is already turning."""
+    v = os.environ.get("CORRIDOR_NAIP_LEAF_ON", "5-9").strip()
     try:
         lo, hi = (int(x) for x in v.split("-", 1))
         if 1 <= lo <= hi <= 12:
             return lo, hi
     except ValueError:
         pass
-    return 6, 9
+    return 5, 9
 
 
 def leaf_on_years() -> int:
@@ -347,6 +351,93 @@ def search(bbox_wgs, tries: int = TRIES) -> list[Item]:
     with _SEARCH_LOCK:
         _SEARCHED[key] = items
     return items
+
+
+# ------------------------------------------------------------------------------------ one year
+
+
+@dataclass
+class YearPolicy:
+    """ONE YEAR for the whole area being baked (Rich, 2026-10-10: "prefer one year everywhere").
+
+    Per-pixel newest-first stitched Maryland's September 2023 to Virginia's November 2023 across
+    Arlington, and the leaf-on preference still left a seam wherever one state's newest leaf-on
+    year met the other's. So the bake first picks the newest acquisition YEAR whose leaf-on items
+    cover the whole area (all but `CORRIDOR_NAIP_YEAR_MAX_BARE`, default 2 %, of what ANY year
+    covers — open water and other countries do not count against a year), and reads only that
+    year's leaf-on items, finer first; everything else only fills holes (redactions, collars,
+    edges) in the existing ranking. The area is the WORLD's bbox, so every shard of a world, and
+    every tile of a shard, picks the same year. `year` None is the per-pixel ranking: forced
+    (`CORRIDOR_NAIP_YEAR=off`), or no year covers enough (`why` says which)."""
+
+    year: int | None
+    why: str
+    coverage: dict = field(default_factory=dict)
+
+    @property
+    def tag(self) -> str:
+        return f"y{self.year}" if self.year is not None else ("yoff" if self.why.startswith("off") else "ynone")
+
+    def record(self) -> dict:
+        return {"year": self.year, "why": self.why, "coverage": self.coverage}
+
+
+def year_setting() -> str:
+    """CORRIDOR_NAIP_YEAR: `auto` (default), a four-digit year, or `off`."""
+    v = os.environ.get("CORRIDOR_NAIP_YEAR", "auto").strip().lower()
+    return v if v in ("auto", "off") or (v.isdigit() and len(v) == 4) else "auto"
+
+
+def year_max_bare() -> float:
+    try:
+        return min(1.0, max(0.0, float(os.environ.get("CORRIDOR_NAIP_YEAR_MAX_BARE", "0.02"))))
+    except ValueError:
+        return 0.02
+
+
+def year_coverage(items: list[Item], frame, area, year: int) -> dict:
+    """How much of `area` (frame CRS geometry) `year`'s LEAF-ON items cover: in all (`share`, of
+    what any item covers) and per state (`by_state`, of the same)."""
+    coverable = shapely.union_all([it.footprint_in(frame) for it in items]).intersection(area)
+    denom = max(coverable.area, 1e-9)
+    mine = [it for it in items if it.year == year and it.leaf_on()]
+    states: dict[str, float] = {}
+    for st in sorted({it.state for it in mine}):
+        g = shapely.union_all([it.footprint_in(frame) for it in mine if it.state == st]).intersection(coverable)
+        states[st] = round(g.area / denom, 4)
+    got = shapely.union_all([it.footprint_in(frame) for it in mine]).intersection(coverable) if mine else None
+    return {"share": round((got.area if got is not None else 0.0) / denom, 4), "by_state": states,
+            "months": sorted({it.date[:7] for it in mine})}
+
+
+def year_policy(frame, area_bbox, tries: int = TRIES) -> YearPolicy:
+    """The year to bake `area_bbox` (frame CRS: the world's or site's whole extent) from."""
+    setting = year_setting()
+    if setting == "off":
+        return YearPolicy(None, "off: CORRIDOR_NAIP_YEAR=off, the per-pixel ranking")
+    items = search(frame.bbox_wgs(*area_bbox), tries=tries)
+    area = box(*area_bbox)
+    if setting != "auto":
+        y = int(setting)
+        return YearPolicy(y, f"forced: CORRIDOR_NAIP_YEAR={y}", year_coverage(items, frame, area, y) if items else {})
+    tried = {}
+    for y in sorted({it.year for it in items if it.leaf_on()}, reverse=True):
+        cov = year_coverage(items, frame, area, y)
+        tried[y] = cov["share"]
+        if 1.0 - cov["share"] <= year_max_bare() + 1e-9:
+            newer = ", ".join(f"{yy} covers {100 * sh:.1f}%" for yy, sh in tried.items() if yy != y)
+            return YearPolicy(y, f"the newest year whose leaf-on items cover {100 * cov['share']:.1f}% of the area"
+                                 + (f" ({newer})" if newer else ""), cov)
+    best = ", ".join(f"{yy} {100 * sh:.1f}%" for yy, sh in tried.items()) or "no leaf-on items"
+    return YearPolicy(None, f"no leaf-on year covers {100 * (1 - year_max_bare()):.0f}% of the area ({best}): the per-pixel ranking")
+
+
+def rank_with_year(item: Item, year: int | None):
+    """The order under a YearPolicy: the chosen year's leaf-on items first (finer, then later), then
+    everything else in `Item.rank_key` order — which is the whole order when `year` is None."""
+    if year is not None and item.year == year and item.leaf_on():
+        return (0, item.gsd, tuple(-int(p) for p in item.date.split("-")))
+    return (1, *item.rank_key())
 
 
 def covered(bbox_wgs, tries: int = TRIES) -> bool:
@@ -465,7 +556,7 @@ def _gap_geometry(gap: np.ndarray, x0: float, y1: float, res: float, cells: int 
     return shapely.union_all(boxes) if boxes else None
 
 
-def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: int = TRIES, max_fill: int = 12):
+def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: int = TRIES, max_fill: int = 12, year: int | None = None):
     """The (3, h, w) RGB mosaic of `items` over a frame-CRS bbox at `res`, and the items that fed it.
 
     Pass 1 reads the PLAN: items in rank order that each add footprint the ones before them did not
@@ -473,7 +564,8 @@ def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: in
     they are read concurrently (`jobs`) — the horizon's 60 km square is a hundred quarter-quads — but
     composited in rank order, filling only pixels still empty, so the newest wins every pixel it has.
     Pass 2 fills what is still a hole (a collar, a missing quarter-quad) from the remaining items,
-    newest first, reading each only over the hole.
+    newest first, reading each only over the hole. With a `year` (YearPolicy) that year's leaf-on
+    items lead the order and everything else is only ever gap fill.
     """
     xmin, ymin, xmax, ymax = bbox
     w = int(round((xmax - xmin) / res))
@@ -481,7 +573,7 @@ def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: in
     piece = box(xmin, ymin, xmax, ymax)
     out = np.zeros((3, h, w), dtype=np.uint8)
     gap = np.ones((h, w), dtype=bool)
-    cands = [it for it in items if it.footprint_in(frame).intersects(piece)]
+    cands = sorted((it for it in items if it.footprint_in(frame).intersects(piece)), key=lambda it: rank_with_year(it, year))
     plan: list[Item] = []
     bare = piece
     for it in cands:

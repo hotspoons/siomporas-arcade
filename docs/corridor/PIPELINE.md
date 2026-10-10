@@ -129,7 +129,10 @@ either way — 4000 px tiles at the caller's lattice (`RES = 0.3` m → `naip.ti
 
 - **Planetary Computer** (`naip_pc.py`, primary since 2026-10-10): STAC search of the `naip`
   collection, the USDA's quarter-quad COGs read over `/vsicurl/` with a free SAS token (refreshed
-  near `msft:expiry`). Per pixel a leaf-on flight (`CORRIDOR_NAIP_LEAF_ON`, default months 6-9)
+  near `msft:expiry`). ONE YEAR first: over the world's whole bbox (every shard agrees), the newest
+  year whose leaf-on items cover ≥ 98 % (`CORRIDOR_NAIP_YEAR_MAX_BARE`) of what any year covers is
+  read alone, finer first, the rest only as gap fill (`CORRIDOR_NAIP_YEAR=auto|<yyyy>|off`;
+  recorded as `naip.year`). Without one, per pixel a leaf-on flight (`CORRIDOR_NAIP_LEAF_ON`, default months 5-9)
   beats a leaf-off one up to `CORRIDOR_NAIP_LEAF_ON_YEARS` (default 2) newer, then the newest year,
   the finer item, the later date; older items fill only what is still black (state lines, collars,
   a missing quarter-quad, white redaction rectangles); an item that adds nothing is never opened.

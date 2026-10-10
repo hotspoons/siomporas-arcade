@@ -913,7 +913,8 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
         from . import network_tiles
 
         # kept in the shard's manifest: which source and which NAIP items/years fed this block
-        naip_meta = network_tiles.naip_tiled(frame, bbox, region, sdir / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
+        # the YEAR is chosen over the whole world's bbox, not this block's, so every shard agrees
+        naip_meta = network_tiles.naip_tiled(frame, bbox, region, sdir / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M, area=tuple(gj["bbox_utm"]) if gj.get("bbox_utm") else None)
     if "horizon" not in skip:
         horizon.fetch_horizon(frame, sdir / "horizon_30m.tif", cache, radius_m=30000.0)
     if "geology" not in skip:

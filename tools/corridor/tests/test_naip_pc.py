@@ -330,6 +330,106 @@ class LeafOnTest(unittest.TestCase):
             self.assertIn("months 5-11", naip_pc.ranking_rule())
 
 
+PURPLE, ORANGE, GREY = (120, 40, 160), (230, 120, 20), (90, 90, 90)
+WEST, EAST, ALL = (354900, 4317900, 355300, 4318700), (355300, 4317900, 355700, 4318700), (354900, 4317900, 355700, 4318700)
+
+
+class OneYearTest(_Base):
+    """Rich, 2026-10-10: "prefer one year everywhere". The newest year whose LEAF-ON items cover the
+    whole area, that year only, then the rest only into holes."""
+
+    def cat(self, *specs):
+        feats = []
+        for fid, ubox, date, colour, kw in specs:
+            write_cog(self.dir / f"{fid}.tif", ubox, 0.6, colour, **kw)
+            feats.append(feature(fid, self.dir / f"{fid}.tif", ubox, int(date[:4]), 0.6, fid[:2], date=date))
+        return FakeCatalogue(feats)
+
+    def bake(self, cat, env=None):
+        from corridor import network_tiles
+
+        out = self.dir / "naip_1m.tif"
+        if out.exists():
+            out.unlink()
+        naip_pc._SEARCHED.clear()
+        with mock.patch.dict(os.environ, env or {}), mock.patch.object(naip_pc, "_http_json", cat), self.usgs_never():
+            meta = network_tiles.naip_tiled(FRAME, AREA, box(*AREA), out, self.cache, res=0.6)
+        with rasterio.open(out) as ds:
+            west = tuple(int(v) for v in ds.read(window=rasterio.windows.Window(100, 500, 1, 1))[:, 0, 0])
+            east = tuple(int(v) for v in ds.read(window=rasterio.windows.Window(800, 500, 1, 1))[:, 0, 0])
+            corner = tuple(int(v) for v in ds.read(window=rasterio.windows.Window(950, 50, 1, 1))[:, 0, 0])
+        return meta, west, east, corner
+
+    def near(self, got, want, tol=12):
+        return all(abs(g - w) <= tol for g, w in zip(got, want))
+
+    def two_states(self, md21_kw=None):
+        # MD flew 2023 in July (leaf-on), VA flew 2023 in November (leaf-off); both flew 2021 leaf-on
+        return self.cat(
+            ("md_2023", EAST, "2023-07-12", GREEN, {}),
+            ("va_2023", WEST, "2023-11-13", ORANGE, {}),
+            ("md_2021", EAST, "2021-06-17", BLUE, md21_kw or {}),
+            ("va_2021", WEST, "2021-09-10", PURPLE, {}),
+        )
+
+    def test_two_states_pick_the_older_year_that_covers_both(self):
+        meta, west, east, _ = self.bake(self.two_states())
+        self.assertEqual(meta["year"]["year"], 2021)
+        self.assertEqual(meta["year"]["coverage"]["by_state"], {"md": 0.5, "va": 0.5})
+        self.assertIn("2023 covers 50.0%", meta["year"]["why"])
+        self.assertTrue(self.near(west, PURPLE), west)
+        self.assertTrue(self.near(east, BLUE), east)  # not MD's newer 2023: one year everywhere
+        self.assertIn("one year: 2021", meta["rule"])
+
+    def test_one_state_keeps_the_newest(self):
+        cat = self.cat(("md_2023", ALL, "2023-07-12", GREEN, {}), ("md_2021", ALL, "2021-06-17", BLUE, {}))
+        meta, west, east, _ = self.bake(cat)
+        self.assertEqual(meta["year"]["year"], 2023)
+        self.assertTrue(self.near(west, GREEN) and self.near(east, GREEN))
+
+    def test_a_forced_year(self):
+        cat = self.cat(("md_2023", ALL, "2023-07-12", GREEN, {}), ("md_2021", ALL, "2021-06-17", BLUE, {}))
+        meta, west, east, _ = self.bake(cat, {"CORRIDOR_NAIP_YEAR": "2021"})
+        self.assertEqual(meta["year"]["year"], 2021)
+        self.assertIn("forced", meta["year"]["why"])
+        self.assertTrue(self.near(west, BLUE) and self.near(east, BLUE))
+
+    def test_off_is_the_per_pixel_ranking(self):
+        meta, west, east, _ = self.bake(self.two_states(), {"CORRIDOR_NAIP_YEAR": "off"})
+        self.assertIsNone(meta["year"]["year"])
+        self.assertTrue(self.near(east, GREEN), east)   # MD 2023, newest leaf-on
+        self.assertTrue(self.near(west, PURPLE), west)  # VA 2021 leaf-on beats VA 2023 November
+
+    def test_other_years_fill_only_the_holes(self):
+        # MD 2021 has a black collar in its north-east corner; only there does MD 2023 show
+        meta, west, east, corner = self.bake(self.two_states({"hole": (355500, 4318450, 355700, 4318700)}))
+        self.assertEqual(meta["year"]["year"], 2021)
+        self.assertTrue(self.near(east, BLUE), east)
+        self.assertTrue(self.near(corner, GREEN), corner)
+        self.assertIn("md_2023", [r["id"] for r in meta["items"]])  # as gap fill only (the corner)
+
+    def test_no_year_covers_falls_back_and_says_so(self):
+        cat = self.cat(("md_2023", EAST, "2023-07-12", GREEN, {}), ("va_2021", WEST, "2021-09-10", PURPLE, {}))
+        meta, west, east, _ = self.bake(cat)
+        self.assertIsNone(meta["year"]["year"])
+        self.assertIn("per-pixel", meta["year"]["why"])
+        self.assertTrue(self.near(west, PURPLE) and self.near(east, GREEN))
+
+    def test_water_outside_every_item_does_not_count_against_a_year(self):
+        # only the west half has NAIP at all (the east is the bay): 2023 covers all that any year does
+        cat = self.cat(("md_2023", WEST, "2023-07-12", GREEN, {}), ("md_2021", WEST, "2021-06-17", BLUE, {}))
+        meta, west, _e, _c = self.bake(cat)
+        self.assertEqual(meta["year"]["year"], 2023)
+
+    def test_the_year_is_in_the_cache_name(self):
+        tiles = {}
+        for tag in ("y2021", "y2023"):
+            pol = naip_pc.YearPolicy(int(tag[1:]), "test")
+            tiles[tag] = naip.plan_tiles(FRAME, AREA, 0.6, self.cache, policy=pol)[0][2].pc.name
+        self.assertNotEqual(tiles["y2021"], tiles["y2023"])
+        self.assertTrue(tiles["y2021"].endswith("y2021.jpg"))
+
+
 class RegistrationTest(_Base):
     def test_a_marker_lands_where_its_coordinates_say_through_the_overview(self):
         # A 0.3 m source in NAD83 read for a 0.6 m lattice in WGS84 UTM goes through the 2x overview

@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +45,7 @@ from typing import Iterator
 
 import laspy
 import numpy as np
+import requests
 import shapely
 from pyproj import CRS, Transformer
 from shapely.geometry import Polygon, box, shape
@@ -305,6 +307,16 @@ def bbox_in(frame: Frame, bbox, crs: CRS) -> tuple[float, float, float, float]:
     return float(np.min(tx)), float(np.min(ty)), float(np.max(tx)), float(np.max(ty))
 
 
+def area_in(frame: Frame, bbox, clip: BaseGeometry | None, crs: CRS) -> tuple[BaseGeometry, float]:
+    """The area a source is read over — the streets' outline, or the bbox without one — in the
+    EPT's CRS, and its true area in m² (measured in the site frame, before reprojection)."""
+    geom = clip if clip is not None else box(*bbox)
+    geom = geom.intersection(box(*bbox))
+    tr = Transformer.from_crs(frame.crs, crs, always_xy=True)
+    # densified first: a 10 km straight edge reprojected by its two ends is not the same curve
+    return shapely.transform(shapely.segmentize(geom, 250.0), lambda xy: np.column_stack(tr.transform(xy[:, 0], xy[:, 1]))), float(geom.area)
+
+
 def node_box(ept: dict, key: str) -> tuple[float, float, float, float]:
     b = ept["bounds"]
     d, x, y, _ = (int(v) for v in key.split("-"))
@@ -331,19 +343,78 @@ def choose_depth(counts: list[tuple[str, int, float]], area_m2: float, target: f
     return (max(per) if per else 0), cum / max(area_m2, 1.0)
 
 
-def nodes_over(src: EptSource, bbox_ept, get_json, target: float) -> tuple[list[str], int, float]:
-    """Nodes over the bbox down to the depth that reaches the density target over the part of
-    the bbox this source covers (src.share)."""
+class AreaShare:
+    """How much of an EPT node's box lies inside the area being read (the streets' outline, in the
+    EPT's CRS): a mask of the area on a grid, summed once, so a node's share is four lookups.
+
+    Exact areas would be a polygon intersection per node — 40,000 of them against a 7,700-vertex
+    outline for one dc-metro shard. The grid is ~4 M cells over the bbox; a node smaller than a few
+    cells gets a coarse share, which is what a density estimate needs.
+    """
+
+    def __init__(self, area_ept: BaseGeometry, bbox_ept, cells: int = 4_000_000):
+        from rasterio.features import rasterize
+        from rasterio.transform import from_origin
+
+        self.area = area_ept
+        shapely.prepare(self.area)
+        x0, y0, x1, y1 = bbox_ept
+        self.x0, self.y1 = x0, y1
+        self.c = max(1.0, float(np.sqrt(max((x1 - x0) * (y1 - y0), 1.0) / cells)))
+        w, h = max(1, int(np.ceil((x1 - x0) / self.c))), max(1, int(np.ceil((y1 - y0) / self.c)))
+        m = rasterize([(area_ept, 1)], out_shape=(h, w), transform=from_origin(x0, y1, self.c, self.c), fill=0, all_touched=False, dtype=np.uint8)
+        self.sat = np.zeros((h + 1, w + 1), np.int64)
+        self.sat[1:, 1:] = m.astype(np.int64).cumsum(0).cumsum(1)
+        self.h, self.w = h, w
+
+    def touches(self, nb) -> bool:
+        return bool(self.area.intersects(box(*nb)))
+
+    def share(self, nb) -> float:
+        nx0, ny0, nx1, ny1 = nb
+        c0 = int(np.clip(np.floor((nx0 - self.x0) / self.c), 0, self.w))
+        c1 = int(np.clip(np.ceil((nx1 - self.x0) / self.c), 0, self.w))
+        r0 = int(np.clip(np.floor((self.y1 - ny1) / self.c), 0, self.h))
+        r1 = int(np.clip(np.ceil((self.y1 - ny0) / self.c), 0, self.h))
+        cells = ((nx1 - nx0) / self.c) * ((ny1 - ny0) / self.c)
+        if r1 <= r0 or c1 <= c0 or cells <= 0:
+            return 0.0
+        inside = self.sat[r1, c1] - self.sat[r0, c1] - self.sat[r1, c0] + self.sat[r0, c0]
+        return float(min(1.0, inside / cells))
+
+
+def nodes_over(src: EptSource, bbox_ept, get_json, target: float, area_ept: BaseGeometry | None = None, area_m2: float | None = None) -> tuple[list[str], int, float]:
+    """Nodes over the area to read, down to the depth that reaches the density target there.
+
+    THE AREA IS THE STREETS, NOT THEIR BBOX (2026-10-10). dc-metro-take-2 shard 5's streets are
+    97.5 km² inside a 1,014 km² bbox. Walking the bbox fetched 222,212 nodes and decoded 10.5 B
+    points of which 1.86 B landed on the streets, and the density that chose the depth was points
+    over (bbox x `src.share`) — but `share` is the source's coverage of the STREETS, so where the
+    survey covered a quarter of the bbox and three quarters of the streets, the estimate came out
+    a third of the truth and the walk went two levels too deep: depth 12, 25.6 pts/m² on the
+    streets for a target of 8, where depth 10 already gave 10.7.
+
+    So with `area_ept` (the streets' outline in the EPT's CRS) a node whose box does not touch it
+    is not walked, its subtree's hierarchy is not fetched and it is not read; a node's points count
+    by the share of its box inside the outline; and the density is over `area_m2` — the outline's
+    TRUE area, measured in the site frame, times the source's coverage of that same outline. (The
+    old denominator was in the EPT's own units, which for USGS's Web Mercator is 1.6 x the true m²
+    at the latitude of Washington.) Without `area_ept` the bbox is the area, as before.
+    """
     ept = src.ept
     x0, y0, x1, y1 = bbox_ept
+    grid = AreaShare(area_ept, bbox_ept) if area_ept is not None and not area_ept.is_empty else None
     hier: dict[str, int] = dict(get_json("ept-hierarchy/0-0-0-0.json"))
     found: list[tuple[str, int, float]] = []
     stack = ["0-0-0-0"]
     while stack:
         key = stack.pop()
-        nx0, ny0, nx1, ny1 = node_box(ept, key)
+        nb = node_box(ept, key)
+        nx0, ny0, nx1, ny1 = nb
         if nx0 > x1 or nx1 < x0 or ny0 > y1 or ny1 < y0:
             continue
+        if grid is not None and not grid.touches(nb):
+            continue  # and neither does anything under it: no hierarchy file, no node read
         count = hier.get(key)
         if count is None:
             continue
@@ -351,7 +422,10 @@ def nodes_over(src: EptSource, bbox_ept, get_json, target: float) -> tuple[list[
             hier.update(get_json(f"ept-hierarchy/{key}.json"))
             count = hier.get(key, 0)
         if count > 0:
-            share = max(0.0, min(x1, nx1) - max(x0, nx0)) * max(0.0, min(y1, ny1) - max(y0, ny0)) / ((nx1 - nx0) * (ny1 - ny0))
+            if grid is not None:
+                share = grid.share(nb)
+            else:
+                share = max(0.0, min(x1, nx1) - max(x0, nx0)) * max(0.0, min(y1, ny1) - max(y0, ny0)) / ((nx1 - nx0) * (ny1 - ny0))
             found.append((key, count, share))
         d, x, y, z = (int(v) for v in key.split("-"))
         for dx in (0, 1):
@@ -360,7 +434,8 @@ def nodes_over(src: EptSource, bbox_ept, get_json, target: float) -> tuple[list[
                     child = f"{d + 1}-{2 * x + dx}-{2 * y + dy}-{2 * z + dz}"
                     if child in hier:
                         stack.append(child)
-    depth, density = choose_depth(found, (x1 - x0) * (y1 - y0) * max(src.share, 0.05), target)
+    base = area_m2 if area_m2 is not None else (x1 - x0) * (y1 - y0)
+    depth, density = choose_depth(found, base * max(src.share, 0.05), target)
     return [k for k, _, _ in found if int(k.split("-", 1)[0]) <= depth], depth, density
 
 
@@ -408,15 +483,62 @@ class Occupancy:
         return float((self.hit & self.want).sum() / max(1, self.want.sum()))
 
 
-def _read_node(src: EptSource, key: str, cache: Path, tr: Transformer, zf: float, bbox, clip) -> dict | None:
-    from .lidar import session
+class NodeReader:
+    """Reads one EPT node into the site frame, clipped to the streets — from ANY thread of the pool.
 
-    path = cache / "ept" / src.slug / "data" / f"{key}.laz"
-    if not path.exists():
+    WHY EVERY THREAD HAS ITS OWN CLIP. dc-metro-take-2 shard 5 (2026-10-10, 17:39 UTC) walked
+    222,212 Virginia nodes, started the sixteen readers, and two seconds later glibc aborted the
+    process: `malloc(): unaligned tcache chunk detected`, exit 133, no Python traceback. The readers
+    shared ONE shapely polygon, the streets' outline, and each called `shapely.contains_xy` on it.
+    That call prepares the geometry in place and then releases the GIL, and GEOS builds a prepared
+    polygon's point locator, and that locator's STR tree, LAZILY on first use and with no lock
+    (`PreparedPolygon::getPointLocator`, then `IndexedPointInAreaLocator::locate` -> the tree's
+    `build()`). Two threads in their first clip test together both build it; one frees what the
+    other is still filling. Reproduced off-cluster on the baker image's own Python, glibc and wheels
+    (shapely 2.2.0 / GEOS 3.14.1, and 2.1.2 / 3.13.1 aborts the same way): sixteen threads released
+    together onto shard 5's own streets polygon abort with `double free or corruption` in the first
+    round, every run, and gdb puts the `free()` inside
+    `TemplateSTRtreeImpl<IndexedPointInAreaLocator::SegmentView, IntervalTraits>::build()` under
+    `GEOSPreparedContains_r`. Earlier bakes ran this same code and finished because the window is
+    only the FIRST clip test of each source's pool: a race, not a data problem.
+
+    So nothing native crosses threads here: each worker thread builds its own clip (from WKB, which
+    is the same doubles bit for bit) and prepares it, its own pyproj Transformer, and its own HTTP
+    session, on its first node. pyproj's Transformer is already per-thread inside, and a Session is
+    pure Python; building them per thread costs a few milliseconds per source and makes the rule
+    one sentence instead of three library-specific exceptions.
+    """
+
+    def __init__(self, src: EptSource, cache: Path, crs_from, crs_to, zf: float, bbox, clip: BaseGeometry | None):
+        self.src, self.cache, self.zf, self.bbox = src, cache, zf, tuple(bbox)
+        self.crs_from, self.crs_to = crs_from, crs_to
+        # bytes, not a geometry: the only form of the clip the threads ever see
+        self.clip_wkb = None if clip is None else shapely.to_wkb(clip)
+        self._local = threading.local()
+
+    def kit(self) -> "_Kit":
+        """This thread's clip, transformer and session, built the first time it asks."""
+        k = getattr(self._local, "kit", None)
+        if k is None:
+            from .lidar import session as shared
+
+            clip = None
+            if self.clip_wkb is not None:
+                clip = shapely.from_wkb(self.clip_wkb)
+                shapely.prepare(clip)
+            sess = requests.Session()
+            sess.headers.update(shared.headers)
+            k = self._local.kit = _Kit(clip, Transformer.from_crs(self.crs_from, self.crs_to, always_xy=True), sess)
+        return k
+
+    def fetch(self, key: str, session: requests.Session) -> Path:
+        path = self.cache / "ept" / self.src.slug / "data" / f"{key}.laz"
+        if path.exists():
+            return path
         path.parent.mkdir(parents=True, exist_ok=True)
         for attempt in range(3):
             try:
-                r = session.get(src.base + f"ept-data/{key}.laz", timeout=300)
+                r = session.get(self.src.base + f"ept-data/{key}.laz", timeout=300)
                 r.raise_for_status()
                 break
             except Exception:
@@ -429,24 +551,38 @@ def _read_node(src: EptSource, key: str, cache: Path, tr: Transformer, zf: float
             tmp.replace(path)
         finally:
             tmp.unlink(missing_ok=True)
-    las = laspy.read(path)
-    x, y = tr.transform(np.asarray(las.x), np.asarray(las.y))
-    x, y = np.asarray(x), np.asarray(y)
-    xmin, ymin, xmax, ymax = bbox
-    m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
-    if clip is not None and m.any():
-        idx = np.flatnonzero(m)
-        m[idx[~shapely.contains_xy(clip, x[idx], y[idx])]] = False
-    if not m.any():
-        return None
-    z = np.asarray(las.z)[m]
-    return {
-        "x": x[m], "y": y[m], "z": z * zf if zf != 1.0 else z,
-        "cls": np.asarray(las.classification)[m].astype(np.uint8),
-        "rn": np.asarray(las.return_number)[m].astype(np.uint8),
-        "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
-        "i": np.asarray(las.intensity)[m].astype(np.uint16),
-    }
+        return path
+
+    def __call__(self, key: str) -> dict | None:
+        k = self.kit()
+        las = laspy.read(self.fetch(key, k.session))
+        x, y = k.tr.transform(np.asarray(las.x), np.asarray(las.y))
+        x, y = np.asarray(x), np.asarray(y)
+        xmin, ymin, xmax, ymax = self.bbox
+        m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
+        if k.clip is not None and m.any():
+            idx = np.flatnonzero(m)
+            m[idx[~shapely.contains_xy(k.clip, x[idx], y[idx])]] = False
+        if not m.any():
+            return None
+        z = np.asarray(las.z)[m]
+        zf = self.zf
+        return {
+            "x": x[m], "y": y[m], "z": z * zf if zf != 1.0 else z,
+            "cls": np.asarray(las.classification)[m].astype(np.uint8),
+            "rn": np.asarray(las.return_number)[m].astype(np.uint8),
+            "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
+            "i": np.asarray(las.intensity)[m].astype(np.uint16),
+        }
+
+
+@dataclass
+class _Kit:
+    """One pool thread's own native objects (see NodeReader)."""
+
+    clip: BaseGeometry | None
+    tr: Transformer
+    session: requests.Session
 
 
 def _join(parts: list[dict]) -> dict:
@@ -505,13 +641,13 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
         if src.ept is None:
             src.ept = _get_json(src.base + "ept.json", cache / "ept" / src.slug / "ept.json")
         crs = ept_crs(src.ept)
-        keys, depth, density = nodes_over(src, bbox_in(frame, bbox, crs), lambda rel: _get_json(src.base + rel, cache / "ept" / src.slug / rel.replace("ept-hierarchy/", "h/")), target)
+        area_ept, area_m2 = area_in(frame, bbox, clip, crs)
+        keys, depth, density = nodes_over(src, bbox_in(frame, bbox, crs), lambda rel: _get_json(src.base + rel, cache / "ept" / src.slug / rel.replace("ept-hierarchy/", "h/")), target, area_ept, area_m2)
         if not keys:
             continue
         first = not used
         before = occ.share()
-        tr = Transformer.from_crs(crs, frame.crs, always_xy=True)
-        zf = z_factor(src.ept)
+        read = NodeReader(src, cache, crs, frame.crs, z_factor(src.ept), bbox, clip)
         print(f"  lidar   {src.label()}: {len(keys)} nodes to depth {depth} (~{density:.1f} pts/m² where it covers){'' if first else f', filling {1 - before:.0%} of the streets it left empty'}", flush=True)
         t0 = time.time()
         got = 0
@@ -523,7 +659,7 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
         n = 0
         done = 0
         with ThreadPoolExecutor(jobs) as ex:
-            for part in ex.map(lambda k: _read_node(src, k, cache, tr, zf, bbox, clip), keys):
+            for part in ex.map(read, keys):
                 done += 1
                 if part is not None:
                     if not first:

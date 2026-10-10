@@ -146,6 +146,57 @@ def primary_blocks(primary: dict, blocks: list[dict]) -> list[int]:
     return sorted(int(i) for i in seen)
 
 
+def lidar_area(primary_line, assigned_lines: list, block: list[float], margin_m: float, half_width_m: float):
+    """The streets a shard reads lidar for: its assigned chains WHOLE, and the primary only where it
+    crosses the block plus `margin_m`.
+
+    WHY (2026-10-10). Every shard used to buffer the whole primary. On dc-metro-take-2 that is the
+    93 km Capital Beltway, so shard 5 — a 9.6 x 9.3 km block — read lidar over a 36.7 x 27.6 km
+    bbox: 222,212 EPT nodes, 10.5 B points decoded, ~85 GB fetched, and all 25 shards fetched the
+    Beltway again. A shard only ever keeps the primary's stations inside its own block
+    (`profile_owner`); the margin is context for the along-track windows (the 60 m median, the
+    +-16 m deck interpolation, the 60 m ground and canopy offsets), and it is the same margin
+    every other raster of the shard already has.
+
+    Assigned chains stay whole: a chain is assigned to one block by where most of it lies and only
+    that shard profiles it, so its tail past the margin still needs ground under it.
+    """
+    from shapely.geometry import box as _box
+    from shapely.ops import unary_union
+
+    x0, y0, x1, y1 = block
+    near = _box(x0 - margin_m, y0 - margin_m, x1 + margin_m, y1 + margin_m)
+    parts = [primary_line.buffer(half_width_m, cap_style="flat").intersection(near)]
+    parts += [ln.buffer(half_width_m, cap_style="flat") for ln in assigned_lines]
+    return unary_union([g for g in parts if not g.is_empty])
+
+
+def profile_owner(line, s: list[float], blocks: list[dict]) -> list[int]:
+    """The block owning each station of the primary's profile: the one its point lies in.
+
+    The stitch keeps a station's values from its owner. Any shard whose margin also reached the
+    station saw it near the EDGE of its lidar, where the along-track windows run out of data.
+    """
+    import numpy as np
+    import shapely
+
+    xy = shapely.get_coordinates(shapely.line_interpolate_point(line, np.asarray(s, dtype=float)))
+    return [block_at(blocks, float(x), float(y)) for x, y in xy]
+
+
+def owner_runs(owner: list[int], index: int) -> list[list[int]]:
+    """[[i0, i1], ...] station index ranges (inclusive) owned by `index`; compact for profile.json."""
+    runs: list[list[int]] = []
+    start = None
+    for i, b in enumerate(owner + [-1]):
+        if b == index and start is None:
+            start = i
+        elif b != index and start is not None:
+            runs.append([start, i - 1])
+            start = None
+    return runs
+
+
 def build_plan(slug: str, bbox: tuple[float, float, float, float], chains: list[dict], primary: dict,
                max_side_m: float = DEFAULT_MAX_SIDE_M, max_shards: int = DEFAULT_MAX_SHARDS) -> dict:
     """The whole plan: blocks, their tiles, their chains, and the blocks the primary crosses."""
@@ -206,6 +257,146 @@ def merge_tree(parts: list[Path], dest: Path, sub: str) -> int:
             if not tgt.exists():
                 shutil.copy2(f, tgt)
                 n += 1
+    return n
+
+
+def blocks_of(blocks: list[dict], x, y):
+    """`block_at` for arrays of points: the blocks are a regular grid (`partition`), so a point's
+    block is two searchsorted lookups; one outside the grid goes to the nearest edge block."""
+    import numpy as np
+
+    xs = sorted({b["bbox"][0] for b in blocks})
+    ys = sorted({b["bbox"][1] for b in blocks})
+    nx = len(xs)
+    i = np.clip(np.searchsorted(np.asarray(xs), np.asarray(x), side="right") - 1, 0, nx - 1)
+    j = np.clip(np.searchsorted(np.asarray(ys), np.asarray(y), side="right") - 1, 0, len(ys) - 1)
+    return j * nx + i
+
+
+_LIDAR_KINDS = ("dtm", "dsm", "chm", "deck_z", "deck_n", "building_n")
+
+
+def merge_lidar(parts: list[tuple[int, Path]], dest: Path, plan: dict, primary_line=None) -> dict:
+    """The shards' `lidar/` trees into one: tiles by place, owner first; the primary's near-road
+    points from every block.
+
+    TILES. Shards name 1 km tiles on the world grid (network_tiles.tile_index), so one name is one
+    square kilometre everywhere. A tile astride a seam is written by both neighbours, each with
+    only the streets IT read, so neither copy is the whole tile. The owner's (plan["tiles"], by
+    the tile's centre) is the base; a pixel it has no point in (dsm nodata) takes all six layers
+    from the next shard that has one there.
+
+    corridor.laz. `surface.measure` reads the merged cloud for the primary's lane intensity along
+    its whole length, and `rock` for ground intensity. A first-writer-wins copy kept one shard's
+    file — which held the whole primary only because every shard used to read all of it. Now each
+    shard contributes the near-road points of the PRIMARY (within BAND_M of it) that lie in its own
+    block: the whole primary, once, streamed chunk by chunk.
+    """
+    import shutil as _sh
+
+    import numpy as np
+    import rasterio
+
+    ldir = dest / "lidar"
+    tdir = ldir / "tiles"
+    tdir.mkdir(parents=True, exist_ok=True)
+    owner = {(int(t[0]), int(t[1])): int(i) for i, ts in plan.get("tiles", {}).items() for t in ts}
+    copies: dict[str, list[tuple[int, Path]]] = {}
+    for idx, part in parts:
+        td = part / "lidar" / "tiles"
+        if not td.exists():
+            continue
+        for f in td.glob("*.dsm.tif"):
+            copies.setdefault(f.name.split(".", 1)[0], []).append((idx, td))
+    stats = {"tiles": 0, "seam_tiles": 0, "filled_px": 0, "near_points": 0}
+    for name, have in sorted(copies.items()):
+        tx, ty = (int(v) for v in name.split("_"))
+        own = owner.get((tx, ty))
+        have.sort(key=lambda t: (t[0] != own, t[0]))
+        stats["tiles"] += 1
+        if len(have) == 1:
+            for kind in _LIDAR_KINDS:
+                src = have[0][1] / f"{name}.{kind}.tif"
+                if src.exists():
+                    _sh.copy2(src, tdir / src.name)
+            continue
+        stats["seam_tiles"] += 1
+        layers, prof = {}, {}
+        for kind in _LIDAR_KINDS:
+            with rasterio.open(have[0][1] / f"{name}.{kind}.tif") as r:
+                layers[kind], prof[kind] = r.read(1), r.profile
+        valid = layers["dsm"] != -9999
+        for _, td in have[1:]:
+            with rasterio.open(td / f"{name}.dsm.tif") as r:
+                other_valid = r.read(1) != -9999
+            take = ~valid & other_valid
+            if not take.any():
+                continue
+            for kind in _LIDAR_KINDS:
+                with rasterio.open(td / f"{name}.{kind}.tif") as r:
+                    layers[kind][take] = r.read(1)[take]
+            valid |= take
+            stats["filled_px"] += int(take.sum())
+        for kind in _LIDAR_KINDS:
+            with rasterio.open(tdir / f"{name}.{kind}.tif", "w", **prof[kind]) as w:
+                w.write(layers[kind], 1)
+    if primary_line is not None:
+        stats["near_points"] = _merge_primary_cloud(parts, ldir / "corridor.laz", plan, primary_line)
+    return stats
+
+
+def _merge_primary_cloud(parts: list[tuple[int, Path]], out: Path, plan: dict, primary_line, chunk: int = 5_000_000) -> int:
+    import laspy
+    import numpy as np
+    from rasterio.features import rasterize
+    from rasterio.transform import from_origin
+
+    from .network_tiles import BAND_M
+
+    blocks = plan["blocks"]
+    band_geom = primary_line.buffer(BAND_M)
+    writer = None
+    n = 0
+    tmp = out.with_name(out.stem + ".part.laz")  # laspy compresses by the extension
+    try:
+        for idx, part in parts:
+            laz = part / "lidar" / "corridor.laz"
+            if not laz.exists() or laz.stat().st_size == 0:
+                continue
+            with laspy.open(laz) as r:
+                h = r.header
+                x0, y0, x1, y1 = float(h.mins[0]), float(h.mins[1]), float(h.maxs[0]), float(h.maxs[1])
+                w_, h_ = max(1, int(np.ceil((x1 - x0) / 2.0)) + 1), max(1, int(np.ceil((y1 - y0) / 2.0)) + 1)
+                band = rasterize([(band_geom, 1)], out_shape=(h_, w_), transform=from_origin(x0, y1 + 2.0, 2.0, 2.0), fill=0, dtype=np.uint8).astype(bool)
+                if writer is None:
+                    hdr = laspy.LasHeader(point_format=6, version="1.4")
+                    hdr.offsets = [float(np.floor(plan["bbox"][0])), float(np.floor(plan["bbox"][1])), 0.0]
+                    hdr.scales = [0.01, 0.01, 0.01]
+                    crs = h.parse_crs()
+                    if crs is not None:
+                        hdr.add_crs(crs)
+                    writer = laspy.open(tmp, mode="w", header=hdr, do_compress=True)
+                for pts in r.chunk_iterator(chunk):
+                    x, y = np.asarray(pts.x), np.asarray(pts.y)
+                    rr = np.clip(((y1 + 2.0 - y) / 2.0).astype(np.int64), 0, h_ - 1)
+                    cc = np.clip(((x - x0) / 2.0).astype(np.int64), 0, w_ - 1)
+                    keep = band[rr, cc] & (blocks_of(blocks, x, y) == idx)
+                    if not keep.any():
+                        continue
+                    rec = laspy.ScaleAwarePointRecord.zeros(int(keep.sum()), header=writer.header)
+                    rec.x, rec.y, rec.z = x[keep], y[keep], np.asarray(pts.z)[keep]
+                    for dim in ("classification", "return_number", "number_of_returns", "intensity"):
+                        rec[dim] = np.asarray(pts[dim])[keep]
+                    writer.write_points(rec)
+                    n += int(keep.sum())
+        if writer is not None:
+            writer.close()
+            writer = None
+            tmp.replace(out)
+    finally:
+        if writer is not None:
+            writer.close()
+        tmp.unlink(missing_ok=True)
     return n
 
 
@@ -348,16 +539,24 @@ def merge_geology(parts: list[Path], dest: Path) -> None:
     (dest / "geology.json").write_text(json.dumps({"units": list(units.values()), "named_formations": named}, indent=1))
 
 
-def _combine(arrays: list, fill: bool = True):
-    """Elementwise "first finite value wins" across the shards' along-track arrays."""
+def _combine(arrays: list, fill: bool = True, prefer: list | None = None):
+    """Elementwise merge of the shards' along-track arrays: a station's OWNER first (`prefer[i]` is
+    shard i's ownership mask, or None), then "first finite value wins" for whatever is left."""
     import numpy as np
 
     want = max((len(np.asarray(a)) for a in arrays), default=0)
     out = np.full(want, np.nan, dtype=float)
-    for a in arrays:
-        a = np.asarray(a, dtype=float)
-        take = np.isnan(out[: len(a)]) & np.isfinite(a)
-        out[: len(a)][take] = a[take]
+    passes = ([True, False] if prefer is not None else [False])
+    for owned_only in passes:
+        for i, a in enumerate(arrays):
+            a = np.asarray(a, dtype=float)
+            take = np.isnan(out[: len(a)]) & np.isfinite(a)
+            if owned_only:
+                m = prefer[i]
+                if m is None:
+                    continue
+                take &= m[: len(a)]
+            out[: len(a)][take] = a[take]
     if fill:
         from .network_tiles import _fill_along
 
@@ -365,12 +564,62 @@ def _combine(arrays: list, fill: bool = True):
     return [None if not np.isfinite(v) else round(float(v), 2) for v in out]
 
 
+def _owned_mask(p: dict, n: int):
+    """A profile's `owned` runs as a boolean array over its stations; None for a profile written
+    before shards recorded ownership (every shard then read the whole primary)."""
+    import numpy as np
+
+    runs = p.get("owned")
+    if runs is None:
+        return None
+    m = np.zeros(n, bool)
+    for a, b in runs:
+        m[int(a) : int(b) + 1] = True
+    return m
+
+
+def _merge_structures(found: list[tuple[dict, object, float]]) -> list[dict]:
+    """The primary's structures across shards: each from a shard that owns at least one of its
+    stations, and the pieces of one object joined.
+
+    With the primary clipped to each block plus its margin, a structure across a seam is seen by
+    both neighbours, and one longer than the margin (the Woodrow Wilson Bridge is 1.8 km) is seen
+    by each only up to the edge of its lidar. Same kind, overlapping or touching (within a
+    station): one structure, from the first s_start to the last s_end.
+    """
+    kept = []
+    for st, owned, step in found:
+        if owned is not None:
+            i0, i1 = int(float(st.get("s_start", 0)) / step), int(float(st.get("s_end", 0)) / step)
+            if not owned[max(0, i0) : i1 + 1].any():
+                continue  # seen from this shard's margin only; its owner reports it
+        kept.append((st, step))
+    kept.sort(key=lambda t: (str(t[0].get("kind")), float(t[0].get("s_start", 0))))
+    out: list[dict] = []
+    for st, step in kept:
+        prev = out[-1] if out else None
+        if prev is not None and prev.get("kind") == st.get("kind") and float(st["s_start"]) <= float(prev["s_end"]) + step:
+            longer = st if float(st.get("length_m") or 0) > float(prev.get("length_m") or 0) else prev
+            merged = dict(longer)
+            merged["s_start"] = min(float(prev["s_start"]), float(st["s_start"]))
+            merged["s_end"] = max(float(prev["s_end"]), float(st["s_end"]))
+            merged["length_m"] = round(merged["s_end"] - merged["s_start"] + step, 1)
+            for k, fn in (("deck_z_min", min), ("deck_z_max", max), ("clearance_m", min)):
+                vals = [v for v in (prev.get(k), st.get(k)) if v is not None]
+                merged[k] = fn(vals) if vals else None
+            out[-1] = merged
+        else:
+            out.append(dict(st))
+    return sorted(out, key=lambda x: float(x.get("s_start", 0)))
+
+
 def stitch_profile(parts: list[Path], dest: Path) -> bool:
     """Merge the shards' primary `profile.json` files on their shared absolute-`s` lattice.
 
     Every shard profiles the SAME primary line at the SAME `step_m`, so the `s` axis is identical
-    and the merge is per-station: keep whichever shard had raster there. Empty outside every block
-    (a hole in the flights) is filled along-track exactly as the single-image path fills it.
+    and the merge is per-station: the shard that OWNS the station (`profile.json`'s `owned`, see
+    `profile_owner`) wins, then any shard with raster there. Empty outside every block (a hole in
+    the flights) is filled along-track exactly as the single-image path fills it.
     """
     profiles = []
     for p in parts:
@@ -380,28 +629,35 @@ def stitch_profile(parts: list[Path], dest: Path) -> bool:
     if not profiles:
         return False
     base = max(profiles, key=lambda x: len(x.get("s") or []))
+    n = len(base["s"])
+    masks = [_owned_mask(p, n) for p in profiles]
+    prefer = masks if any(m is not None for m in masks) else None
     out = {
         "step_m": base["step_m"],
         "s": base["s"],
-        "road_z": _combine([p.get("road_z") or [] for p in profiles]),
+        "road_z": _combine([p.get("road_z") or [] for p in profiles], prefer=prefer),
     }
     if any("ground_z" in p for p in profiles):
-        out["ground_z"] = _combine([p.get("ground_z") or [] for p in profiles])
+        out["ground_z"] = _combine([p.get("ground_z") or [] for p in profiles], prefer=prefer)
     for group in ("ground_rel", "canopy"):
         keys = sorted({k for p in profiles for k in (p.get(group) or {})})
-        merged = {k: _combine([(p.get(group) or {}).get(k) or [] for p in profiles]) for k in keys}
+        merged = {k: _combine([(p.get(group) or {}).get(k) or [] for p in profiles], prefer=prefer) for k in keys}
         if merged:
             out[group] = merged
-    # structures: a structure is a real object on the primary; dedupe by kind + start station.
-    seen: set[tuple] = set()
-    structs = []
-    for p in profiles:
-        for st in p.get("structures") or []:
+    step = float(base["step_m"])
+    found = [(st, masks[i], step) for i, p in enumerate(profiles) for st in (p.get("structures") or [])]
+    if prefer is None:
+        # profiles from before ownership: every shard read the whole primary, dedupe by start
+        seen: set[tuple] = set()
+        structs = []
+        for st, _, _ in found:
             key = (st.get("kind"), round(float(st.get("s_start", 0)), 1))
             if key not in seen:
                 seen.add(key)
                 structs.append(st)
-    out["structures"] = sorted(structs, key=lambda s: float(s.get("s_start", 0)))
+        out["structures"] = sorted(structs, key=lambda s: float(s.get("s_start", 0)))
+    else:
+        out["structures"] = _merge_structures(found)
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "profile.json").write_text(json.dumps(out))
     return True

@@ -271,3 +271,154 @@ class PlanRoundTripTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShardLidarAreaTest(unittest.TestCase):
+    """A shard reads lidar for its OWN block (shards.lidar_area): dc-metro-take-2 shard 5 used to
+    buffer the whole 93 km Beltway and read a 36.7 x 27.6 km bbox for a 9.6 x 9.3 km block."""
+
+    def setUp(self):
+        from shapely.geometry import LineString
+
+        # a primary 60 km long, west to east; the block is 10 km of it
+        self.primary = LineString([(0.0, 5000.0), (60000.0, 5000.0)])
+        self.block = [20000.0, 0.0, 30000.0, 10000.0]
+        # an assigned chain mostly in the block whose tail runs 3 km past the margin
+        self.chain = LineString([(25000.0, 2000.0), (25000.0, 8000.0), (33600.0, 8000.0)])
+
+    def test_the_far_primary_is_not_read_and_the_assigned_chain_is_whole(self):
+        from shapely.geometry import Point
+
+        area = shards.lidar_area(self.primary, [self.chain], self.block, 600.0, 200.0)
+        x0, y0, x1, y1 = area.bounds
+        self.assertGreaterEqual(x0, 20000.0 - 600.0 - 1e-6, "primary read west of the margin")
+        self.assertFalse(area.contains(Point(10000.0, 5000.0)), "the primary 10 km west is read")
+        self.assertFalse(area.contains(Point(45000.0, 5000.0)), "the primary 15 km east is read")
+        self.assertTrue(area.contains(Point(19500.0, 5000.0)), "the primary in the margin is context")
+        self.assertTrue(area.contains(Point(33500.0, 8000.0)), "the assigned chain's tail was cut")
+        self.assertAlmostEqual(x1, 33600.0, delta=1.0)
+
+    def test_stations_are_owned_by_the_block_they_lie_in(self):
+        blocks = shards.partition((0.0, 0.0, 60000.0, 10000.0), max_side_m=10000.0, max_shards=36)
+        s = [0.0, 15000.0, 25000.0, 35000.0]
+        owner = shards.profile_owner(self.primary, s, blocks)
+        self.assertEqual(owner, [shards.block_at(blocks, v, 5000.0) for v in s])
+        self.assertEqual(shards.owner_runs([1, 2, 2, 3, 2], 2), [[1, 2], [4, 4]])
+
+
+class OwnedStitchTest(unittest.TestCase):
+    """The stitch takes each station from its OWNER, and joins a structure two shards each saw part
+    of — with the primary clipped per block, both happen at every seam."""
+
+    def write(self, root: Path, i: int, road_z, owned, structures=()):
+        d = root / str(i)
+        d.mkdir(parents=True)
+        (d / "profile.json").write_text(json.dumps({"step_m": 2.0, "s": [0.0, 2.0, 4.0, 6.0, 8.0, 10.0], "road_z": road_z, "owned": owned, "structures": list(structures)}))
+        return d
+
+    def test_the_owner_wins_where_both_have_values(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # shard 0 owns stations 0-2 but also saw 3-4 at the edge of its lidar, wrongly
+            a = self.write(root, 0, [1.0, 1.0, 1.0, 9.0, 9.0, None], [[0, 2]])
+            b = self.write(root, 1, [None, None, 2.0, 2.0, 2.0, 2.0], [[3, 5]])
+            shards.stitch_profile([a, b], root / "out")
+            out = json.loads((root / "out" / "profile.json").read_text())
+        self.assertEqual(out["road_z"], [1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+
+    def test_a_structure_across_the_seam_is_joined_and_a_margin_only_one_dropped(self):
+        bridge_a = {"kind": "bridge", "s_start": 2.0, "s_end": 6.0, "length_m": 6.0, "deck_z_min": 10.0, "deck_z_max": 11.0}
+        bridge_b = {"kind": "bridge", "s_start": 6.0, "s_end": 10.0, "length_m": 6.0, "deck_z_min": 9.5, "deck_z_max": 12.0}
+        ghost = {"kind": "gantry", "s_start": 8.0, "s_end": 10.0, "length_m": 4.0, "deck_z_min": 5.0, "deck_z_max": None}
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            a = self.write(root, 0, [1.0] * 6, [[0, 2]], [bridge_a, ghost])
+            b = self.write(root, 1, [1.0] * 6, [[3, 5]], [bridge_b])
+            shards.stitch_profile([a, b], root / "out")
+            out = json.loads((root / "out" / "profile.json").read_text())
+        self.assertEqual(len(out["structures"]), 1, out["structures"])
+        st = out["structures"][0]
+        self.assertEqual((st["kind"], st["s_start"], st["s_end"]), ("bridge", 2.0, 10.0))
+        self.assertEqual((st["deck_z_min"], st["deck_z_max"]), (9.5, 12.0))
+
+
+class MergeLidarTest(unittest.TestCase):
+    """Seam tiles by place, owner first; the primary's near-road cloud from every block."""
+
+    def tile(self, d: Path, name: str, dsm, value: float):
+        import numpy as np
+        import rasterio
+        from rasterio.transform import from_origin
+
+        d.mkdir(parents=True, exist_ok=True)
+        prof = {"driver": "GTiff", "height": 4, "width": 4, "count": 1, "dtype": "float32", "crs": "EPSG:32618", "transform": from_origin(1000.0, 2000.0, 250.0, 250.0), "nodata": -9999}
+        for kind in shards._LIDAR_KINDS:
+            arr = np.where(np.asarray(dsm), value, -9999).astype(np.float32)
+            with rasterio.open(d / f"{name}.{kind}.tif", "w", **prof) as w:
+                w.write(arr, 1)
+
+    def test_the_owners_pixels_first_and_its_holes_from_the_neighbour(self):
+        import numpy as np
+        import rasterio
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            own = np.zeros((4, 4), bool)
+            own[:, :2] = True           # the owner read the west half of this tile's streets
+            other = np.ones((4, 4), bool)
+            self.tile(root / "s0" / "lidar" / "tiles", "1_1", other, 7.0)
+            self.tile(root / "s1" / "lidar" / "tiles", "1_1", own, 3.0)
+            plan = {"tiles": {"0": [], "1": [[1, 1]]}, "blocks": []}
+            st = shards.merge_lidar([(0, root / "s0"), (1, root / "s1")], root / "out", plan)
+            with rasterio.open(root / "out" / "lidar" / "tiles" / "1_1.dsm.tif") as r:
+                got = r.read(1)
+        self.assertEqual(st["seam_tiles"], 1)
+        self.assertTrue((got[:, :2] == 3.0).all(), "the owner's pixels were replaced")
+        self.assertTrue((got[:, 2:] == 7.0).all(), "the owner's holes were not filled")
+
+    def test_the_primary_cloud_is_each_blocks_own_points_on_the_primary(self):
+        import laspy
+        import numpy as np
+        from shapely.geometry import LineString
+
+        blocks = shards.partition((0.0, 0.0, 2000.0, 1000.0), max_side_m=1000.0, max_shards=4)
+        plan = {"bbox": [0.0, 0.0, 2000.0, 1000.0], "blocks": blocks, "tiles": {}}
+        primary = LineString([(0.0, 500.0), (2000.0, 500.0)])
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for i in range(2):
+                # each shard's cloud reaches 300 m into the other block (its margin), and has a
+                # branch's points 200 m off the primary
+                xs = np.concatenate([np.arange(0.0, 1300.0, 10.0) if i == 0 else np.arange(700.0, 2000.0, 10.0), [500.0 + 1000 * i]])
+                ys = np.concatenate([np.full(len(xs) - 1, 500.0), [700.0]])
+                d = root / f"s{i}" / "lidar"
+                d.mkdir(parents=True)
+                las = laspy.create(point_format=6, file_version="1.4")
+                las.header.offsets, las.header.scales = [0.0, 0.0, 0.0], [0.01, 0.01, 0.01]
+                las.x, las.y, las.z = xs, ys, np.full(len(xs), float(i))
+                las.write(d / "corridor.laz")
+            st = shards.merge_lidar([(0, root / "s0"), (1, root / "s1")], root / "out", plan, primary)
+            got = laspy.read(root / "out" / "lidar" / "corridor.laz")
+        x = np.asarray(got.x)
+        self.assertEqual(st["near_points"], 200, "each primary point once, no branch points")
+        self.assertEqual(len(np.unique(np.round(x, 2))), 200, "a margin point came from both shards")
+        self.assertTrue((np.asarray(got.z)[x < 1000] == 0).all() and (np.asarray(got.z)[x >= 1000] == 1).all(), "a point came from the block that does not own it")
+
+
+class WorldTileNamesTest(unittest.TestCase):
+    def test_a_shards_lidar_tiles_are_named_on_the_world_grid(self):
+        """2026-10-10: dc-metro shards anchored their 1 km grids at their own bbox corners, so
+        `3_4` was a different square kilometre in each and the merge kept one of them."""
+        from shapely.geometry import box
+
+        from corridor import network_tiles
+
+        world = (302080.0, 4284770.0, 350010.0, 4331400.0)
+        gx, gy, _ = shards.tile_grid(world)
+        a = network_tiles.tile_index((310000.0, 4296000.0, 312000.0, 4297000.0), box(310100, 4296100, 311900, 4296900), (gx, gy))
+        b = network_tiles.tile_index((304000.0, 4286000.0, 312000.0, 4297000.0), box(311100, 4296100, 311900, 4296900), (gx, gy))
+        self.assertEqual(a[0], (gx, gy))
+        self.assertIn((9, 12), a[1])        # x 311000-312000, y 4296000-4297000: column 9, row 12
+        self.assertEqual(b[1], [(9, 12)])  # the same place has the same name from another bbox
+        own = network_tiles.tile_index((304000.0, 4286000.0, 312000.0, 4297000.0), box(311100, 4296100, 311900, 4296900))
+        self.assertEqual(own[1], [(7, 10)], "without an origin the bbox's own corner anchors the grid, as before")

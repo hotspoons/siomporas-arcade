@@ -108,6 +108,51 @@ export default defineGame({
 
     // D. TIME LIMIT.
     // api.after(120, () => api.lose('out of time'))
+
+    /* ---- winnings, and the finish screen -------------------------------------------------------
+     * Rich, 2026-10-10: "when the mission is complete we should have a finish screen that defaults
+     * to showing the hero car or main character depending on game mode, along with a
+     * representation of winnings (cash for our simple game), and an option to restart or exit to
+     * menu."
+     *
+     * THE SCORE IS THE WINNINGS. `currency('$')` makes it money on the HUD and the finish screen;
+     * `score.add(amount, label)` pays into a line of the breakdown, and the same label again adds
+     * to the same line and counts it ("Hits ×12 — $1,340"). `api.award(n)` is `score.add(n)`.
+     *
+     * `api.finish({...})` ends the run with a result. Every field is optional:
+     *   outcome   'win' (default) · 'lose' · 'abandoned'
+     *   title     the headline; default "Mission complete" / "Mission failed"
+     *   text      a line under it (what `win(text)` / `lose(text)` say)
+     *   winnings  { currency, total, lines } — absent: the score as it stands; null: none
+     *   stats     [{ label, value }] beside the time, which is always there
+     *   show      'car' | 'character' | 'none' — absent: the car when driving, the character on foot
+     *   model     a catalog asset id to put on the turntable instead
+     *   screen    false: no finish screen for this ending (draw your own from on('finish'))
+     * The screen offers Restart (this program's setup from the top), Exit to menu, and Next stage
+     * when the level names one. `api.win(text)` and `api.lose(text)` get the same screen.
+     */
+    api.score.currency('$')
+    api.on('finish', (r) => console.log(`finished: ${r.outcome} · ${r.title} · ${r.winnings?.total ?? 0}`))
+
+    // E. PAID BY THE TRAFFIC, FOR A MINUTE. Every hit pays by what it did; the screen counts it up.
+    // api.traffic.onHit((h) => api.score.add(h.effect === 'launched' ? 200 : h.effect === 'loose' ? 100 : 20, 'Hits'))
+    // api.after(60, () => api.finish({
+    //   title: 'One minute of mayhem',
+    //   stats: [{ label: 'Distance', value: `${(api.facts().distance_m / 1000).toFixed(1)} km` }],
+    // }))
+
+    // F. A RACE WITH A PURSE: finish the race, get paid for the place and the time.
+    // api.each(() => {
+    //   const s = api.races.state()
+    //   if (s?.phase !== 'finished') return
+    //   api.score.add(1000, 'Purse')
+    //   if (s.time < 90) api.score.add(500, 'Under 90 s')
+    //   api.finish({ title: `${s.course} done`, stats: [{ label: 'Race time', value: `${s.time.toFixed(1)} s` }] })
+    // })
+
+    // G. YOUR OWN FINISH SCREEN: `defineGame({ finishScreen: false, … })` turns the app's off for
+    // this program, or per ending:
+    // api.finish({ outcome: 'lose', screen: false })
   },
 
   update(dt, api) {
@@ -139,7 +184,7 @@ export function rewardForABrisk(api: GameApi, target = 60): void {
       api.say(`${took.toFixed(1)}s — under ${target}s next time`)
       return
     }
-    api.award(100)
+    api.score.add(100, 'Brisk stage')
     api.say(`${took.toFixed(1)}s — the road is yours`)
     for (const id of api.traffic.ids()) api.traffic.set(id, 0, { over: 8 })
     for (const id of api.stunts.ids()) api.stunts.show(id, true)

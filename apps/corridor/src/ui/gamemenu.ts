@@ -62,6 +62,11 @@ export interface GameMenuHost {
   /** the settings changed: push the volumes at the audio, the bindings at the input */
   applyAudio(): void
   applyBindings(): void
+  /**
+   * The world's stages, for a level select — where the finish screen's "Exit to menu" leads when
+   * there is somewhere else to go. Absent, or one stage: no Levels row.
+   */
+  levels?: { list(): { id: string; name: string }[]; current(): string | null; open(id: string): void }
 }
 
 export class GameMenu {
@@ -108,7 +113,7 @@ export class GameMenu {
     const id = this.stack.current?.id
     if (!id || !this.open) return
     const screens: Record<string, () => MenuScreen> = {
-      pause: () => this.pause(), settings: () => this.settings(), display: () => this.display(),
+      pause: () => this.pause(), settings: () => this.settings(), levels: () => this.levels(), display: () => this.display(),
       layers: () => this.layers(), audio: () => this.audio(), controls: () => this.controls(),
     }
     const make = screens[id]
@@ -178,6 +183,8 @@ export class GameMenu {
         h.resume()
       },
     })
+    const stages = h.levels?.list() ?? []
+    if (stages.length > 1 && p.allows('game.levels')) items.push({ kind: 'action', label: 'Levels', hint: `${stages.length} in this world`, onSelect: () => this.stack.push(this.levels()) })
     items.push({ kind: 'action', label: 'Settings', hint: 'display · layers · audio · controls', onSelect: () => this.stack.push(this.settings()) })
     if (p.allows('game.tuning')) items.push({ kind: 'action', label: 'Tuning panel', hint: 'F6 — the live knobs', onSelect: () => h.tuning() })
     if (p.developer && p.allows('game.developer')) {
@@ -196,6 +203,19 @@ export class GameMenu {
       footer: h.input.padConnected ? 'A select · B back · Start resumes' : 'Enter selects · Esc resumes',
       onBack: () => h.resume(),
     }
+  }
+
+  /** the level select: every stage in this world, the one being played marked */
+  private levels(): MenuScreen {
+    const L = this.h.levels!
+    const cur = L.current()
+    const items: MenuItem[] = L.list().map((l) => ({
+      kind: 'action' as const,
+      label: l.name,
+      hint: l.id === cur ? 'playing now — from the top' : undefined,
+      onSelect: () => L.open(l.id),
+    }))
+    return { id: 'levels', title: 'Levels', items, footer: 'Enter plays it · Esc back' }
   }
 
   private settings(): MenuScreen {

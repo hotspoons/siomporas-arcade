@@ -74,6 +74,12 @@ test('program_api hands back the declarations of @apex/program, and names the ot
   assert.equal(r.import, '@apex/program')
   assert.match(r.text, /export interface GameApi/)
   assert.match(r.text, /objectives/)
+  // the finish screen's hooks (2026-10-10): the score as winnings, and an ending with a result
+  assert.match(r.text, /finish\(opts\?: FinishOpts\): void/)
+  assert.match(r.text, /readonly score: \{/)
+  assert.match(r.text, /export interface FinishResult/)
+  assert.match(r.text, /finishScreen\?: boolean/)
+  assert.match(tool('program_api').description, /finish\(/)
   assert.ok(r.modules.includes('program') && r.modules.includes('actors'))
   await assert.rejects(tool('program_api').run({ module: 'nope' }), /no module "nope"/)
 })

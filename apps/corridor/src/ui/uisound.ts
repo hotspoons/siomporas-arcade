@@ -59,4 +59,19 @@ export class UiSound {
   open(): void {
     this.blip(660, 60, 0.2)
   }
+
+  /**
+   * The finish screen's sting: a rising major arpeggio for a win, a falling minor one for anything
+   * else. Synthesised like the blips and on the same bus (master × interface, or nothing when
+   * muted): the sound bank has crashes, guns and tyres and nothing that sounds like an ending.
+   */
+  sting(win: boolean): void {
+    const notes = win ? [523.25, 659.25, 783.99, 1046.5] : [440, 349.23, 293.66]
+    notes.forEach((f, i) => this.later(i * (win ? 0.09 : 0.14), () => this.blip(f, i === notes.length - 1 ? 520 : 160, 0.2)))
+  }
+
+  private later(s: number, fn: () => void): void {
+    if (s <= 0) fn()
+    else setTimeout(fn, s * 1000)
+  }
 }

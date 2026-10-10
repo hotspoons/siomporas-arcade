@@ -80,8 +80,11 @@ export interface ProgramHost {
   /** a level-start post at a place. `kind` is start, pickup, dropoff, checkpoint, finish, goal. */
   mark?: (id: string, at: { x: number; y: number }, kind?: string) => void
   unmark?: (id: string) => void
-  /** the program ended: the viewer may open the next stage */
-  onFinish?: (outcome: 'win' | 'lose' | 'abandoned') => void
+  /**
+   * The program ended: the viewer may open the next stage, or put up the finish screen when
+   * `result.screen` says so. The result is absent only from a host written before it existed.
+   */
+  onFinish?: (outcome: 'win' | 'lose' | 'abandoned', result?: FinishResult) => void
   /** swap the player's controller */
   transport: (mode: Transport) => void
   /** apply or tween a named look from the world's presets library */
@@ -523,6 +526,89 @@ export interface Facts {
 
 export type Outcome = 'win' | 'lose' | 'abandoned'
 
+/* ---- the end of a run: what it paid, and the screen that says so ---------------------------- */
+
+/*
+ * Rich, 2026-10-10: *"when the mission is complete we should have a finish screen that defaults to
+ * showing the hero car or main character depending on game mode, along with a representation of
+ * winnings (cash for our simple game), and an option to restart or exit to menu. This should all
+ * have API hooks."*
+ *
+ * THE SCORE IS THE WINNINGS. There was already one number a run kept — `award(points)` and
+ * `facts().score` — and a second "money" number beside it would be two things to keep in step and
+ * a program that pays into one and wins on the other. So the score grows a unit (`score.currency`)
+ * and a breakdown (`score.add(amount, label)`), and the finish screen reads it as it stands.
+ */
+
+/** One row of what a run paid: "Hits ×12 — $1,340". */
+export interface WinningsLine {
+  label: string
+  amount: number
+  /** how many times it was paid; the screen shows ×n when this is more than one */
+  count?: number
+}
+
+/** What a run won, as the finish screen counts it up. */
+export interface Winnings {
+  /** '$', '€', '£'… written before the number; '' (or absent with no `score.currency`) is points */
+  currency?: string
+  /** absent: the lines added up, or the score when there are no lines */
+  total?: number
+  lines?: WinningsLine[]
+}
+
+/** Anything else worth a line on the finish screen: "Deliveries 5/5", "Top speed 142 mph". */
+export interface FinishStat {
+  label: string
+  value: string | number
+}
+
+/** What turns on the finish screen's turntable. */
+export type FinishShow = 'car' | 'character' | 'none'
+
+/** `api.finish(…)`: how a run ends, and what its finish screen says. Everything but nothing is optional. */
+export interface FinishOpts {
+  /** default 'win' */
+  outcome?: Outcome
+  /** the headline; default "Mission complete" / "Mission failed" / "Mission abandoned" */
+  title?: string
+  /** a line under it, and on screen as the run ends — what `win(text)` and `lose(text)` say */
+  text?: string
+  /** absent: the score as it stands (`score.add`, `award`); null: this run won nothing worth showing */
+  winnings?: Winnings | null
+  stats?: FinishStat[]
+  /** what is on the turntable; absent: the car while driving, the character on foot */
+  show?: FinishShow
+  /** a catalog asset to put on the turntable instead of the player's own car or character */
+  model?: string
+  /** false: no finish screen for this ending — the program draws its own (see GameDef.finishScreen) */
+  screen?: boolean
+}
+
+/** How a run ended, as `on('finish')` hears it and the finish screen draws it. */
+export interface FinishResult {
+  outcome: Outcome
+  title: string
+  text: string
+  winnings: { currency: string; total: number; lines: WinningsLine[] } | null
+  stats: FinishStat[]
+  /** null: the app decides — the car when driving, the character on foot */
+  show: FinishShow | null
+  model: string | null
+  /** will the app draw its finish screen for this ending */
+  screen: boolean
+  /** run seconds when it ended */
+  time: number
+  score: number
+}
+
+/** The headline when a program gives none. */
+export const FINISH_TITLES: Record<Outcome, string> = {
+  win: 'Mission complete',
+  lose: 'Mission failed',
+  abandoned: 'Mission abandoned',
+}
+
 /* ---- the API a program is written against ------------------------------------------------ */
 
 export interface GameApi {
@@ -727,7 +813,31 @@ export interface GameApi {
   /** every named place in this world */
   points(): WorldPoint[]
 
+  /** add to the score — `score.add(points)` with no label */
   award(points: number): void
+  /**
+   * THE SCORE, which is the run's winnings. `currency('$')` makes it money on the HUD and on the
+   * finish screen; `add(amount, label)` pays into a line of the breakdown ("Hits ×12 — $1,340"),
+   * and the same label again adds to the same line. The finish screen counts the total up and lists
+   * the lines unless `finish({ winnings })` says otherwise.
+   */
+  readonly score: {
+    /** what the score is counted in: '$', '€', '£'… before the number; '' or null is points */
+    currency(symbol: string | null): void
+    /** pay `amount` (negative takes it back), into the line `label` if given. Answers the new total */
+    add(amount: number, label?: string): number
+    /** make the line `label` exactly `amount`; with no label, make the TOTAL `amount`. Answers the new total */
+    set(amount: number, label?: string): number
+    get(): number
+    /** the breakdown so far, in the order the lines were first paid into */
+    lines(): WinningsLine[]
+  }
+  /**
+   * END THE RUN with a result: the outcome, a headline, the winnings, a few stats, and what stands
+   * on the finish screen's turntable. `win(text)` is `finish({ outcome: 'win', text })`.
+   * The first ending wins; anything after it is ignored.
+   */
+  finish(opts?: FinishOpts): void
   /** what the player is trying to do, in a sentence the HUD can show */
   goal(text: string): void
   /**
@@ -816,6 +926,8 @@ export interface GameApi {
   on(event: 'enters' | 'leaves', zone: string, fn: () => void): void
   /** the run ended */
   on(event: 'ends', fn: (outcome: Outcome) => void): void
+  /** the run ended, with everything the finish screen is about to show (after the 'ends' listeners) */
+  on(event: 'finish', fn: (result: FinishResult) => void): void
   /** when a fact crosses a threshold, once per crossing */
   when(condition: (f: Facts) => boolean, fn: () => void): void
 }
@@ -827,6 +939,12 @@ export interface GameDef {
   update?: (dt: number, api: GameApi) => void
   /** run when the level is torn down */
   teardown?: (api: GameApi) => void
+  /**
+   * false: the app never puts up its finish screen for this program — draw your own from
+   * `api.on('finish', …)`. Default true: a win or a loss gets the screen; an abandoned run gets it
+   * only when the program itself said `finish({ outcome: 'abandoned' })`.
+   */
+  finishScreen?: boolean
 }
 
 /** What `programs/<id>.ts` default-exports. A function only so the shape is checkable. */
@@ -882,6 +1000,14 @@ export class GameRun {
   private last: { x: number; y: number } | null = null
 
   score = 0
+  /** what the score is counted in ('$'), or null for points; the HUD and the finish screen read it */
+  currency: string | null = null
+  /** the breakdown, by label, in the order first paid; `unlabelled` is the rest of the total */
+  private scoreLines = new Map<string, { amount: number; count: number }>()
+  private unlabelled = 0
+  /** how the run ended, once it has: what `on('finish')` heard and the finish screen draws */
+  result: FinishResult | null = null
+  private finishFns: ((r: FinishResult) => void)[] = []
   goalText = ''
   outcome: Outcome | null = null
   /** the objective list and which one the arrow follows; what a HUD and a probe read */
@@ -1038,13 +1164,21 @@ export class GameRun {
       point: (id) => (typeof id === 'string' ? this.worldPoints().find((p) => p.id === id) ?? null : null),
       points: () => this.worldPoints(),
 
-      award: (p) => { this.score += p },
+      award: (p) => { this.payScore(p, undefined, false) },
+      score: {
+        currency: (s) => { this.currency = typeof s === 'string' && s ? s.slice(0, 4) : null },
+        add: (amount, label) => this.payScore(amount, label, false),
+        set: (amount, label) => this.payScore(amount, label, true),
+        get: () => this.score,
+        lines: () => this.winningsLines(),
+      },
+      finish: (opts) => this.finishWith(opts ?? {}, true),
       goal: (text) => { this.goalText = text },
       waypoint: (at, text) => this.host.waypoint?.(at, text),
       mark: (id, at, kind) => { if (id && at && Number.isFinite(at.x) && Number.isFinite(at.y)) this.host.mark?.(id, at, kind) },
       unmark: (id) => { if (id) this.host.unmark?.(id) },
-      win: (text) => this.finish('win', text),
-      lose: (text) => this.finish('lose', text),
+      win: (text) => this.finishWith({ outcome: 'win', text }, true),
+      lose: (text) => this.finishWith({ outcome: 'lose', text }, true),
 
       player: () => {
         const at = H.playerAt()
@@ -1083,6 +1217,7 @@ export class GameRun {
       every: (s, fn) => { this.timers.push({ at: this.t + s, every: Math.max(1e-3, s), fn }) },
       on: ((event: string, a: unknown, b?: unknown) => {
         if (event === 'ends') { this.endFns.push(a as (o: Outcome) => void); return }
+        if (event === 'finish') { if (typeof a === 'function') this.finishFns.push(a as (r: FinishResult) => void); return }
         const map = event === 'enters' ? this.enters : this.leaves
         const name = a as string
         // a world zone or point by id needs no `zone()` first; looked up now so it is watched
@@ -1346,19 +1481,99 @@ export class GameRun {
     this.syncPlaced()
   }
 
-  finish(outcome: Outcome, text?: string): void {
+  /* ---- the score and the end ------------------------------------------------------------- */
+
+  /**
+   * Pay into the score. `set` makes the line (or, with no label, the total) exactly `amount`.
+   * A number that is not a number pays nothing: a NaN in a payout would show as "$NaN" on the one
+   * screen the player is meant to be proud of.
+   */
+  private payScore(amount: number, label: string | undefined, set: boolean): number {
+    if (!finite(amount)) return this.score
+    const name = typeof label === 'string' ? label.trim() : ''
+    if (name) {
+      const line = this.scoreLines.get(name) ?? { amount: 0, count: 0 }
+      line.amount = set ? amount : line.amount + amount
+      line.count = set ? Math.max(1, line.count) : line.count + 1
+      this.scoreLines.set(name, line)
+    } else if (set) {
+      let lines = 0
+      for (const l of this.scoreLines.values()) lines += l.amount
+      this.unlabelled = amount - lines
+    } else {
+      this.unlabelled += amount
+    }
+    let total = this.unlabelled
+    for (const l of this.scoreLines.values()) total += l.amount
+    this.score = total
+    return total
+  }
+
+  private winningsLines(): WinningsLine[] {
+    return [...this.scoreLines].map(([label, l]) => ({ label, amount: l.amount, count: l.count }))
+  }
+
+  /**
+   * What the run won, as the finish screen will show it. A program's own `winnings` wins field by
+   * field; what it leaves out comes from the score. A run that never scored and never named a
+   * currency won nothing worth a count-up, and says so with null.
+   */
+  private resolveWinnings(w: Winnings | null | undefined): FinishResult['winnings'] {
+    if (w === null) return null
+    const cleanLines = (ls: unknown): WinningsLine[] => (Array.isArray(ls) ? ls : [])
+      .filter((l) => l && typeof l.label === 'string' && finite(l.amount))
+      .map((l) => ({ label: l.label, amount: l.amount, ...(finite(l.count) ? { count: Math.max(0, Math.floor(l.count)) } : {}) }))
+    if (w && typeof w === 'object') {
+      const lines = w.lines ? cleanLines(w.lines) : this.winningsLines()
+      const total = finite(w.total) ? w.total! : w.lines ? lines.reduce((s, l) => s + l.amount, 0) : this.score
+      const currency = typeof w.currency === 'string' ? w.currency.slice(0, 4) : (this.currency ?? '')
+      return { currency, total, lines }
+    }
+    if (this.currency === null && this.score === 0 && this.scoreLines.size === 0) return null
+    return { currency: this.currency ?? '', total: this.score, lines: this.winningsLines() }
+  }
+
+  /**
+   * End the run. `asked` is a program's own ending (win, lose, finish); the abandon that `stop()`
+   * makes of a run nobody finished is not, and gets no finish screen.
+   */
+  private finishWith(opts: FinishOpts, asked: boolean): void {
     if (this.outcome) return
+    const outcome: Outcome = opts.outcome === 'lose' || opts.outcome === 'abandoned' ? opts.outcome : 'win'
     this.outcome = outcome
+    const text = typeof opts.text === 'string' ? opts.text : ''
     if (text) {
       this.messages.push({ text, kind: outcome === 'win' ? 'ok' : 'warn', at: this.t })
       this.host.say(text, outcome === 'win' ? 'ok' : 'warn')
     }
+    const show = opts.show === 'car' || opts.show === 'character' || opts.show === 'none' ? opts.show : null
+    const result: FinishResult = {
+      outcome,
+      title: typeof opts.title === 'string' && opts.title.trim() ? opts.title.trim() : FINISH_TITLES[outcome],
+      text,
+      winnings: this.resolveWinnings(opts.winnings),
+      stats: (Array.isArray(opts.stats) ? opts.stats : [])
+        .filter((s) => s && typeof s.label === 'string' && (typeof s.value === 'string' || finite(s.value)))
+        .map((s) => ({ label: s.label, value: s.value })),
+      show,
+      model: typeof opts.model === 'string' && opts.model ? opts.model : null,
+      screen: asked && this.def.finishScreen !== false && opts.screen !== false && (outcome !== 'abandoned' || opts.outcome === 'abandoned'),
+      time: this.t,
+      score: this.score,
+    }
+    this.result = result
     for (const fn of this.endFns) this.guard(fn as () => void, outcome)
-    this.host.onFinish?.(outcome)
+    for (const fn of this.finishFns) this.guard(fn as () => void, { ...result, stats: [...result.stats] })
+    this.host.onFinish?.(outcome, result)
+  }
+
+  /** End the run from outside the program — the editor, a test. The program's own calls are `api.win/lose/finish`. */
+  finish(outcome: Outcome, text?: string): void {
+    this.finishWith({ outcome, text }, outcome !== 'abandoned')
   }
 
   stop(): void {
-    if (!this.outcome) this.finish('abandoned')
+    if (!this.outcome) this.finishWith({ outcome: 'abandoned' }, false)
     this.guard(() => this.def.teardown?.(this.api))
     for (const fn of this.cleanups.splice(0)) this.guard(fn)
     this.objectiveItems = []

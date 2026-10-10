@@ -6,7 +6,7 @@
 //   2. An OSM-IMPORT is a run like a bake: one Job, on the Overpass instance's node, with its volume
 //      and its scripts ConfigMap; on success the instance's coverage gains the region.
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -88,7 +88,7 @@ test('a dc-metro-take-2 bake is handed overpass-na, the coverage file, and says 
   }
 })
 
-test('refreshOsm reaches the bake as CORRIDOR_OSM_REFRESH, in every Job of a sharded run', async () => {
+test('refreshOsm refreshes ONCE: the plan Job asks Overpass again, the shards read what it fetched', async () => {
   const { root, store, coverage } = await setup(URLS, REGIONS)
   const k8s = cluster()
   try {
@@ -101,6 +101,17 @@ test('refreshOsm reaches the bake as CORRIDOR_OSM_REFRESH, in every Job of a sha
     // a Maryland world: the Maryland extract first
     assert.equal(e.CORRIDOR_OVERPASS_URL, URLS.join(','))
     assert.match(run.label, /fresh OSM/)
+    // the plan finishes; its shards must NOT refresh (2026-10-10: 25 shards each re-asked the
+    // whole network at once and one got a non-JSON 200 from an instance under that load)
+    await mkdir(path.join(store.sites, 'w', 'plan'), { recursive: true })
+    await writeFile(path.join(store.sites, 'w', 'plan', 'shards.json'), JSON.stringify({ n: 2, blocks: [{ index: 0 }, { index: 1 }] }))
+    for (const [name, j] of k8s.jobs) if (name.includes('-plan-')) j.status = { succeeded: 1 }
+    await until(() => [...k8s.jobs.keys()].filter((n) => n.includes('-shard-')).length === 2)
+    for (const [name, j] of k8s.jobs) {
+      if (!name.includes('-shard-')) continue
+      assert.equal(env(j.spec).CORRIDOR_OSM_REFRESH, undefined, `${name} refreshes`)
+      assert.ok(env(j.spec).CORRIDOR_OVERPASS_URL, `${name} still knows its upstreams`)
+    }
     await runs.cancel(run.id)
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })

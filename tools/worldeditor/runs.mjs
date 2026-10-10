@@ -398,7 +398,12 @@ export class Runs {
     // the control: osm.py refuses a query whose area its upstream does not hold (BakeFault)
     const cov = this.#coverageEnv('/data')
     if (overpass && cov) env.push({ name: 'CORRIDOR_OVERPASS_COVERAGE', value: cov })
-    if (run.refreshOsm) env.push({ name: 'CORRIDOR_OSM_REFRESH', value: '1' })
+    // FRESH OSM ONCE, NOT ONCE PER SHARD. The plan phase (or a single-Job bake) asks the whole
+    // network's queries; the shards ask the same ones and should read what the plan just fetched.
+    // With the refresh on every phase, all 25 dc-metro shards sent the full-world roads query to
+    // overpass-na at the same moment (2026-10-10) and one got a non-JSON 200 back — the bake died
+    // on a load the plan had already done.
+    if (run.refreshOsm && tag !== 'finalize' && !tag.startsWith('shard')) env.push({ name: 'CORRIDOR_OSM_REFRESH', value: '1' })
     if (this.cfg.bucket) {
       env.push(
         { name: 'CORRIDOR_S3_BUCKET', value: this.cfg.bucket },

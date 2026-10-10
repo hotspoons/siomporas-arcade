@@ -53,8 +53,15 @@ jobs:
           load: true
           tags: corridor:test
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-      - name: unit tests
-        run: docker run --rm -v "$PWD/tools/corridor/tests:/app/tests:ro" -w /app --entrypoint python corridor:test -m unittest discover -s tests -v
+      - id: unittests
+        name: unit tests
+        shell: bash
+        run: docker run --rm -v "$PWD/tools/corridor/tests:/app/tests:ro" -w /app --entrypoint python corridor:test -m unittest discover -s tests -v 2>&1 | tee ci-unittest.log
+
+      # only the failing tests and their tracebacks, on the run's summary page (scripts/ci-failures.mjs)
+      - name: What failed
+        if: failure() && steps.unittests.outcome == 'failure'
+        run: node scripts/ci-failures.mjs "corridor unit tests" ci-unittest.log >> "$GITHUB_STEP_SUMMARY"
       - uses: docker/build-push-action@v6
         with:
           context: tools/corridor

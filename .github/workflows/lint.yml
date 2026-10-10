@@ -18,16 +18,53 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Lint + typecheck + test + build
+      # ONE STEP PER CHECK, each keeping its output, so a red run says WHICH check and the last step
+      # can put only the failures on the run's summary page (Rich, 2026-10-10, reading CI from a
+      # phone: "What do you need from ci when it fails?" — the failing test and its error, not the
+      # three thousand lines around it). `shell: bash` is what makes `| tee` keep the exit status:
+      # GitHub runs it as `bash -eo pipefail`.
+      - name: Install
         run: |
           npm ci
           npm run check:lockfile
-          npm run lint
-          npx tsc -b
-          npx vitest run
-          # THE SERVICES' OWN TESTS. vitest's projects are apps/* and packages/*, so nothing under
-          # tools/ was ever run by CI — the world editor had three suites and has four, and none of
-          # them had ever gone red anywhere but on somebody's laptop. A test CI does not run is a
-          # test that rots.
-          node --test tools/worldeditor/*.test.mjs tools/assetsvc/*.test.mjs
-          npm run build -ws --if-present
+
+      - id: lint
+        name: Lint
+        shell: bash
+        run: npm run lint 2>&1 | tee ci-lint.log
+
+      - id: tsc
+        name: Typecheck
+        shell: bash
+        run: npx tsc -b 2>&1 | tee ci-tsc.log
+
+      - id: vitest
+        name: vitest
+        shell: bash
+        run: npx vitest run 2>&1 | tee ci-vitest.log
+
+      # THE SERVICES' OWN TESTS. vitest's projects are apps/* and packages/*, so nothing under
+      # tools/ was ever run by CI — the world editor had three suites and has four, and none of
+      # them had ever gone red anywhere but on somebody's laptop. A test CI does not run is a
+      # test that rots.
+      - id: node
+        name: Service tests (node --test)
+        shell: bash
+        run: node --test tools/worldeditor/*.test.mjs tools/assetsvc/*.test.mjs scripts/*.test.mjs 2>&1 | tee ci-node.log
+
+      - id: build
+        name: Build
+        shell: bash
+        run: npm run build -ws --if-present 2>&1 | tee ci-build.log
+
+      - name: What failed
+        if: failure()
+        shell: bash
+        env:
+          OUTCOMES: "lint=${{ steps.lint.outcome }} tsc=${{ steps.tsc.outcome }} vitest=${{ steps.vitest.outcome }} node=${{ steps.node.outcome }} build=${{ steps.build.outcome }}"
+        run: |
+          for pair in $OUTCOMES; do
+            id=${pair%%=*}; outcome=${pair#*=}
+            [ "$outcome" = failure ] && node scripts/ci-failures.mjs "$id" "ci-$id.log" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit 0

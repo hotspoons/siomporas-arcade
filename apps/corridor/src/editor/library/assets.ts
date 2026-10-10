@@ -21,6 +21,9 @@ import { weaponExtension } from './weapons'
 import { vehicleExtension } from './vehicles'
 import { trafficExtension } from './trafficsets'
 import { soundsExtension } from './sounds'
+// the panel classes every library tab scrolls by (`.lib-screen`); imported here as well as by the
+// build screens because the Materials and Service tabs below wear them too
+import './buildscreen.css'
 
 /**
  * WHAT SORT OF THING IT IS, and where the list of sorts comes from.
@@ -1042,7 +1045,11 @@ export class AssetCatalog {
 
   // ---- service tab ---------------------------------------------------------------------------
 
-  private async buildService(host: HTMLElement) {
+  private async buildService(panel: HTMLElement) {
+    // a column of groups taller than a laptop's pane: it scrolls on its own (`.lib-screen`)
+    panel.classList.add('lib-screen')
+    const host = el('div', 'lib-scroll')
+    panel.replaceChildren(host)
     if (!this.reachable) {
       host.append(this.notConfigured())
       return
@@ -1135,6 +1142,9 @@ export class AssetCatalog {
    */
   private async buildMaterials(host: HTMLElement) {
     host.replaceChildren()
+    // the panel is the start of the scroll chain (buildscreen.css, `.lib-screen`): without it the
+    // right-hand column grew to its content in the world editor's pane and was clipped there
+    host.classList.add('lib-screen')
     try {
       this.materials = (await assetsvc.materials()).materials
     } catch {

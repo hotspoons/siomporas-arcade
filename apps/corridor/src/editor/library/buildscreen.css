@@ -275,3 +275,47 @@
 .snd-screen { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
 .snd-screen[hidden] { display: none; }
 .snd-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: var(--s2); }
+
+/* ---- every other library tab: Materials, Service, Fixtures, Buildings ---------------------------- */
+/*
+ * THE SAME CHAIN, FOR THE REST. Rich, 2026-10-10: "Materials and fixtures don't scroll." Neither
+ * did Service. In the world editor's pane `.tab-panel` is `overflow: hidden` at the pane's height,
+ * so a tab that does not own a scroller of its own is simply CLIPPED — and a clipped list looks
+ * exactly like a short one. In the dialog the tab body happened to scroll, which is why it was only
+ * ever reported from world.html. Sounds was fixed on its own the day before; this is that fix as a
+ * class any tab can wear, and `probes/corridor-library-scroll.mjs` measures every tab on both
+ * pages so the next one cannot break quietly.
+ *
+ * On the PANEL, as with `.snd-screen`: a flex child under a block panel grows to its content. And
+ * the `[hidden]` partner, as above. `.lib-foot` is a row of buttons that stays at the bottom while
+ * the rest scrolls above it (Rich, 2026-09-28: "Buttons need to be fixed on the bottom, if the form
+ * overflows it needs to scroll above the buttons").
+ */
+.tab-body:has(> .lib-screen) { display: flex; flex-direction: column; }
+.lib-screen { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.lib-screen[hidden] { display: none; }
+.lib-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: var(--s2); }
+.lib-foot { flex: none; display: flex; gap: var(--s2); align-items: center; padding-top: var(--s3); margin-top: var(--s2); border-top: 1px solid var(--line-1); }
+
+/*
+ * MATERIALS: two columns that each scroll, inside the panel's height.
+ *
+ * `.material-split` is `align-items: start` (ui.css), so in the pane its right column was sized to
+ * its CONTENT — search, form and thirty-six textures, ~3000 px — and clipped by the panel. The
+ * columns stretch to the row now, and the row is the panel. In the right column the form gives way
+ * before the list does: the list keeps at least 160 px however tall the form is, and the form
+ * scrolls itself when a short window cannot hold both.
+ */
+.tab-panel.lib-screen > .material-split { flex: 1 1 auto; min-height: 0; height: auto; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
+.tab-panel.lib-screen .material-side { position: static; min-height: 0; overflow-y: auto; align-content: start; }
+.tab-panel.lib-screen .material-right { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; overflow: hidden; }
+.tab-panel.lib-screen .material-right > .tree-filter { flex: none; }
+.tab-panel.lib-screen .material-right > .group { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+.tab-panel.lib-screen .material-list { flex: 1 1 240px; min-height: 160px; max-height: none; overflow-y: auto; }
+@media (max-width: 860px) {
+  /* one column: the whole split scrolls, because two stacked scrollers in a phone-height pane are
+     two slivers */
+  .tab-panel.lib-screen > .material-split { overflow-y: auto; grid-template-rows: none; }
+  .tab-panel.lib-screen .material-right { overflow: visible; }
+  .tab-panel.lib-screen .material-list { flex: none; max-height: none; overflow: visible; }
+}

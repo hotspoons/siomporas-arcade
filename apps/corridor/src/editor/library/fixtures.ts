@@ -31,8 +31,17 @@ export function fixturesExtension(o: FixturesExtensionOpts): AssetExtension {
   return { tabs: [tab] }
 }
 
-async function build(host: HTMLElement, o: FixturesExtensionOpts) {
-  host.replaceChildren()
+async function build(panel: HTMLElement, o: FixturesExtensionOpts) {
+  /*
+   * THE TAB SCROLLS, and Save stays put under it. Rich, 2026-10-10: "Materials and fixtures don't
+   * scroll." Eleven classes of groups is three screens, and in the world editor's pane the panel
+   * clips rather than scrolls — so the groups go in a scroller of their own and Save sits in the
+   * foot, reachable without scrolling to the end (buildscreen.css, `.lib-screen`).
+   */
+  panel.replaceChildren()
+  panel.classList.add('lib-screen')
+  const host = el('div', 'lib-scroll')
+  panel.append(host)
   const slug = o.slug()
   if (!slug) {
     host.append(el('p', 'dim', 'Open a world first: fixtures are what a world wears.'))
@@ -79,10 +88,10 @@ async function build(host: HTMLElement, o: FixturesExtensionOpts) {
     }
     host.append(g)
   }
-  const actions = el('div', 'row')
+  const actions = el('div', 'lib-foot')
   actions.append(button({
     label: 'Save fixtures', icon: 'document-arrow-down', variant: 'primary',
     onClick: () => void o.save(draft).then(() => toast(`fixtures saved for ${slug}`, 'ok')).catch((e) => toast(`fixtures: ${(e as Error).message}`, 'danger', 6000)),
   }))
-  host.append(actions)
+  panel.append(actions)
 }

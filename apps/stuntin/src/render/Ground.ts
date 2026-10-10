@@ -1,10 +1,14 @@
 // The flat world: a huge plane with a cell grid that fades with distance and
 // a soft horizon. Retro mode gets flat bands and no gradient.
 
-import { BufferAttribute, BufferGeometry, Color, Mesh, PlaneGeometry, ShaderMaterial, Vector3 } from 'three'
+import { BufferAttribute, BufferGeometry, Color, Mesh, PlaneGeometry, ShaderMaterial, Vector3, type WebGLRenderer } from 'three'
+import { setPolygonOffset } from '@apex/engine/render/depth'
 import { CELL } from '../sim/Tuning'
 import type { Track } from '../sim/Track'
 import { GROUND_SIZE } from './RenderTuning'
+
+/** How far the ground is pushed back, as for a forward depth buffer (polygonOffset factor, units). */
+const GROUND_OFFSET = { factor: 2, units: 4 }
 
 export class Ground {
   readonly mesh: Mesh
@@ -46,14 +50,23 @@ export class Ground {
         }`,
     })
     // Pushed back in depth so a level-0 road never fights it, whatever the camera distance.
+    // Written for a forward depth buffer; `matchDepth` turns it round for a reversed one.
     this.material.polygonOffset = true
-    this.material.polygonOffsetFactor = 2
-    this.material.polygonOffsetUnits = 4
+    this.material.polygonOffsetFactor = GROUND_OFFSET.factor
+    this.material.polygonOffsetUnits = GROUND_OFFSET.units
     this.mesh = new Mesh(new PlaneGeometry(GROUND_SIZE, GROUND_SIZE), this.material)
     this.mesh.rotation.x = -Math.PI / 2
     this.mesh.position.y = -0.05
     this.mesh.renderOrder = -5
     this.mesh.frustumCulled = false
+  }
+
+  /**
+   * The offset is in window depth, which a reversed depth buffer counts the other way: without this
+   * the ground is pulled TOWARD the camera and the road sinks into it (@apex/engine/render/depth).
+   */
+  matchDepth(renderer: WebGLRenderer): void {
+    setPolygonOffset(this.material, renderer, GROUND_OFFSET.factor, GROUND_OFFSET.units)
   }
 
   /** Rebuild the landscape mesh for a track (removed again when the track is flat). */

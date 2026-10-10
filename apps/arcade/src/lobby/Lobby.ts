@@ -5,11 +5,12 @@
 // post-processing — which is the point. Walking from the marquees into Turbo Radrun swaps one
 // mounted module for another and nothing else about the page changes.
 
-import { AmbientLight, BoxGeometry, Color, Fog, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, type Object3D, PerspectiveCamera, PlaneGeometry, PointLight, Raycaster, RepeatWrapping, Scene, SRGBColorSpace, TextureLoader, Vector2, Vector3, WebGLRenderer } from 'three'
+import { AmbientLight, BoxGeometry, Color, Fog, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, type Object3D, PerspectiveCamera, PlaneGeometry, PointLight, Raycaster, RepeatWrapping, Scene, SRGBColorSpace, TextureLoader, Vector2, Vector3, type WebGLRenderer } from 'three'
 import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
 import { Disposer } from '@apex/engine/app/Disposer'
 import type { GameHost, GameModule, MountedGame } from '@apex/engine/app/GameModule'
 import { ModernStyle } from '@apex/engine/render/styles/ModernStyle'
+import { createRenderer, depthRequestFromURL } from '@apex/engine/render/depth'
 import { KeyboardSource } from '@apex/engine/input/KeyboardSource'
 import { GamepadSource } from '@apex/engine/input/GamepadSource'
 import { GAMES } from '../catalog'
@@ -122,7 +123,8 @@ class Lobby implements LoopClient, MountedGame {
     this.pos = startIndex
     this.target = startIndex
 
-    this.renderer = new WebGLRenderer({ canvas: host.canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
+    // the engine's renderer: reversed float depth where the browser can, `?depth=` for an A/B
+    this.renderer = createRenderer({ canvas: host.canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false, depthMode: depthRequestFromURL() ?? 'auto', label: 'arcade lobby' }).renderer
     this.renderer.setClearColor(0x05060b, 1)
     this.gone.add(() => {
       this.renderer.dispose()

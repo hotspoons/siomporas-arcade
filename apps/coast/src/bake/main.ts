@@ -10,7 +10,7 @@
 // This page is deliberately absent from `vite.config.ts`'s rollup inputs, so it is a dev-server
 // tool and not something shipped to anyone.
 
-import { WebGLRenderer } from 'three'
+import { createRenderer } from '@apex/engine/render/depth'
 
 import { SpriteAtlas } from '../render/SpriteAtlas'
 import { atlasKey } from '../render/AtlasCache'
@@ -33,7 +33,8 @@ const say = (msg: string) => {
 
 async function main() {
   const canvas = document.createElement('canvas')
-  const renderer = new WebGLRenderer({ canvas, antialias: false, alpha: true })
+  // the game's own renderer, depth and all (RenderWorld): the bake is the game's bake
+  const { renderer } = createRenderer({ canvas, antialias: false, alpha: true, depthMode: 'auto', label: 'coast bake' })
   const max = renderer.capabilities.maxTextureSize
   if (size > max) throw new Error(`this GPU caps textures at ${max}px, cannot bake ${size}px`)
 

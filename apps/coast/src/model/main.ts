@@ -9,7 +9,8 @@
 // game will really draw.
 
 import '../style.css'
-import { AmbientLight, DirectionalLight, GridHelper, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
+import { AmbientLight, DirectionalLight, GridHelper, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace } from 'three'
+import { createRenderer } from '@apex/engine/render/depth'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { glbLoader } from '../render/loadGlb'
 import { buildArch, buildBlock, buildDiner, buildFacade, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, ensureFonts, LIVERIES, PROCGEN_VERSION } from '../render/procgen'
@@ -31,7 +32,8 @@ app.innerHTML = `
   </div>`
 
 const canvas = app.querySelector<HTMLCanvasElement>('canvas.stage')!
-const renderer = new WebGLRenderer({ canvas, antialias: true })
+// the game's depth buffer (RenderWorld), so a model that reads here reads in the game
+const { renderer } = createRenderer({ canvas, antialias: true, depthMode: 'auto', label: 'coast model' })
 renderer.outputColorSpace = SRGBColorSpace
 renderer.setClearColor(0x11151c)
 

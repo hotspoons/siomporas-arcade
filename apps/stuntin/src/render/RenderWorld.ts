@@ -1,6 +1,7 @@
 // Scene owner for the driving game. Reads snapshots, never writes sim state.
 
-import { AmbientLight, Color, DirectionalLight, Group, HemisphereLight, MeshStandardMaterial, Scene, Vector3, WebGLRenderer } from 'three'
+import { AmbientLight, Color, DirectionalLight, Group, HemisphereLight, MeshStandardMaterial, Scene, Vector3, type WebGLRenderer } from 'three'
+import { createRenderer, depthRequestFromURL, type RendererDepth } from '@apex/engine/render/depth'
 import { Particles } from '@apex/engine/render/Particles'
 import { Sky } from '@apex/engine/render/Sky'
 import type { RenderStats } from '@apex/engine/render/RenderStats'
@@ -20,6 +21,8 @@ import { makeRoadMaterial, makeRoadUniforms } from './RoadMaterial'
 
 export class RenderWorld {
   readonly renderer: WebGLRenderer
+  /** which depth buffer the renderer was built with */
+  readonly depth: RendererDepth
   readonly scene = new Scene()
   readonly root = new Group()
   readonly rig: CameraRig
@@ -47,7 +50,12 @@ export class RenderWorld {
   private prevSpeed = 0
 
   constructor(canvas: HTMLCanvasElement, spec: CarSpec) {
-    this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
+    // Reversed float depth where the browser has EXT_clip_control, the plain buffer otherwise;
+    // `?depth=standard|reversed|log` for an A/B (@apex/engine/render/depth).
+    const built = createRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false, depthMode: depthRequestFromURL() ?? 'auto', label: 'stuntin' })
+    this.renderer = built.renderer
+    this.depth = built.depth
+    this.ground.matchDepth(this.renderer)
     this.renderer.setClearColor(this.bg, 1)
     this.renderer.info.autoReset = false
     this.rig = new CameraRig(1)

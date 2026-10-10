@@ -1,7 +1,8 @@
 // Owns the three.js scene and everything in it. Reads SimSnapshots (prev/curr
 // + alpha), never writes sim state. Styles decide how the scene is presented.
 
-import { AmbientLight, Color, Group, HemisphereLight, PointLight, Scene, Vector3, WebGLRenderer } from 'three'
+import { AmbientLight, Color, Group, HemisphereLight, PointLight, Scene, Vector3, type WebGLRenderer } from 'three'
+import { createRenderer, depthRequestFromURL, type RendererDepth } from '@apex/engine/render/depth'
 import { angleDelta, clamp, expApproach } from '@apex/engine/math/scalar'
 import { Vec3 } from '@apex/engine/math/Vec3'
 import type { SimEvent } from '../sim/Events'
@@ -27,6 +28,8 @@ import { disposeObject3D } from '@apex/engine/render/dispose'
 
 export class RenderWorld {
   readonly renderer: WebGLRenderer
+  /** which depth buffer the renderer was built with */
+  readonly depth: RendererDepth
   readonly scene = new Scene()
   /** Floating-origin root: everything in sim coordinates hangs off this. */
   readonly root = new Group()
@@ -66,7 +69,12 @@ export class RenderWorld {
 
   constructor(canvas: HTMLCanvasElement, track: Track) {
     this.track = track
-    this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, depth: true, alpha: false })
+    // Reversed float depth where the browser has EXT_clip_control, the plain buffer otherwise;
+    // `?depth=standard|reversed|log` for an A/B. It switches itself back to forward for a WebXR
+    // session, whose projections are forward (@apex/engine/render/depth).
+    const built = createRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, depth: true, alpha: false, depthMode: depthRequestFromURL() ?? 'auto', label: 'conduit' })
+    this.renderer = built.renderer
+    this.depth = built.depth
     this.renderer.setClearColor(this.bg, 1)
     // Post stacks render several passes per frame; count them all.
     this.renderer.info.autoReset = false

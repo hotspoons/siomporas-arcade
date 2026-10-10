@@ -231,6 +231,27 @@ def _sample(src_path, w: float, s: float, e: float, n: float, px: int, nodata: f
     return dst
 
 
+def _fill_canopy(c, dtm_lidar_p, gchm_p, w: float, s: float, e: float, n: float):
+    """`c` with every cell the lidar DTM does not cover taken from the global canopy, and how many.
+
+    `c` may be None (no lidar canopy at all): then the global model IS the canopy. A DTM that does
+    not exist covers nothing.
+    """
+    import numpy as np
+
+    zl = _sample(dtm_lidar_p, w, s, e, n, TILE_PX, -9999.0)
+    nolidar = np.ones((TILE_PX, TILE_PX), bool) if zl is None else (~np.isfinite(zl) | (zl <= -9998))
+    if not nolidar.any():
+        return c, 0
+    g = _sample(gchm_p, w, s, e, n, TILE_PX, 0.0)
+    if g is None:
+        return c, 0
+    g = np.clip(np.nan_to_num(g, nan=0.0), 0.0, 60.0)
+    out = np.zeros((TILE_PX, TILE_PX), np.float32) if c is None else np.nan_to_num(c, nan=0.0)
+    out[nolidar] = g[nolidar]
+    return out, int(nolidar.sum())
+
+
 def _sample_rgb(src_path, w: float, s: float, e: float, n: float, px: int):
     import numpy as np
     import rasterio
@@ -344,7 +365,16 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
         tiles = [Tile(int(z), int(x), int(y)) for z, x, y in only_tiles]
 
     dem_p = site_dir / "dem_1m.tif"
-    chm_p = site_dir / "lidar" / "chm.vrt"
+    ldir = site_dir / "lidar"
+    chm_p = ldir / "chm.vrt" if (ldir / "chm.vrt").exists() else ldir / "chm.tif"
+    # WHERE THE LIDAR STOPS, THE CANOPY IS THE GLOBAL MODEL — the rule the flat tiles already
+    # follow (network_tiles.export). The point cloud is read only in a band along the roads, and
+    # the lidar CHM reads 0 outside it, so every pyramid tile past the band carried "no trees":
+    # all of Rockville on dc-metro-take-2, with woods on every street (Rich, 2026-10-10). A cell
+    # the lidar DTM does not cover takes `canopy_global.tif` instead.
+    dtm_lidar_p = ldir / "dtm.vrt" if (ldir / "dtm.vrt").exists() else ldir / "dtm.tif"
+    gchm_p = site_dir / "canopy_global.tif"
+    canopy_filled = 0
     naip_p = site_dir / "naip_1m.tif"
     if not naip_p.exists():
         naip_p = site_dir / "naip.tif"
@@ -398,6 +428,9 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
         entry["dem"] = {"zmin": zmn, "zscale": scale}
 
         c = _sample(chm_p, w, s, e, n, TILE_PX, 0.0)
+        if gchm_p.exists():
+            c, filled = _fill_canopy(c, dtm_lidar_p, gchm_p, w, s, e, n)
+            canopy_filled += filled
         if c is not None and np.isfinite(c).any():
             buf = io.BytesIO()
             Image.fromarray(np.clip(np.round(np.nan_to_num(c) * 4), 0, 255).astype(np.uint8), "L").save(buf, "PNG", optimize=True)
@@ -445,6 +478,11 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
             f"{tone}): {dict(sorted(byz.items()))} e.g. {sample}",
             flush=True,
         )
+
+    if canopy_filled:
+        print(f"  pyramid canopy: {canopy_filled:,} cells outside the lidar band took the global canopy", flush=True)
+    elif chm_p.exists() and not gchm_p.exists():
+        print("  pyramid canopy: lidar only — no canopy_global.tif, so ground past the lidar band has no trees", flush=True)
 
     out_block = {
         "scheme": "geo-quadtree",   # 2^(z+1) lon cols, 2^z lat rows — same ids as trailworks

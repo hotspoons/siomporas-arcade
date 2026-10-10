@@ -1316,9 +1316,23 @@ def overview(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> dict
         layers["dem"] = {"file": "dem_8m.png", "res": OVERVIEW_DEM_M, "size": [w, h], "bbox": rel(bbox), "geo": frame.control_lattice(bbox), "zmin": zmin, "zscale": scale, "overview": True}
 
     chm_p = _raster(site_dir / "lidar", "chm")
-    if chm_p.exists() and "dem" in layers:
-        c, (w, h) = read(chm_p, OVERVIEW_DEM_M)
-        c = np.nan_to_num(c.astype(np.float32), nan=0.0)
+    gchm_p = site_dir / "canopy_global.tif"
+    if (chm_p.exists() or gchm_p.exists()) and "dem" in layers:
+        # the lidar canopy where the lidar DTM has ground, the global model everywhere else — the
+        # same rule as the tiles and the pyramid. This overview is what the planter reads past the
+        # resident tiles, and it was 0 wherever the point cloud was not read (Rockville, 2026-10-10).
+        c = read(chm_p, OVERVIEW_DEM_M)[0] if chm_p.exists() else None
+        c = np.zeros((h, w), np.float32) if c is None else np.nan_to_num(c.astype(np.float32), nan=0.0)
+        if gchm_p.exists():
+            dtm_l = _raster(site_dir / "lidar", "dtm")
+            zl = read(dtm_l, OVERVIEW_DEM_M)[0] if dtm_l.exists() else None
+            nolidar = np.ones(c.shape, bool) if zl is None else (~np.isfinite(zl) | (zl.astype(np.float32) <= -9998))
+            if nolidar.any():
+                g = read(gchm_p, OVERVIEW_DEM_M)[0]
+                if g is not None:
+                    g = np.clip(np.nan_to_num(g.astype(np.float32), nan=0.0), 0.0, 60.0)
+                    c[nolidar] = g[nolidar]
+                    print(f"  overview canopy: {int(nolidar.sum()):,} of {c.size:,} cells outside the lidar band took the global canopy", flush=True)
         if mask_shapes:
             tr = from_origin(bbox[0], bbox[3], OVERVIEW_DEM_M, OVERVIEW_DEM_M)
             c[rasterize([(g, 1) for g in mask_shapes], out_shape=c.shape, transform=tr, fill=0, dtype=np.uint8).astype(bool)] = 0.0

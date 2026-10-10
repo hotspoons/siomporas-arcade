@@ -29,6 +29,7 @@ import requests
 from PIL import Image
 from rasterio.transform import from_origin
 
+from . import BakeFault
 from .geo import Frame
 from . import rastercache
 
@@ -54,8 +55,14 @@ session = requests.Session()
 session.headers["User-Agent"] = "apex-conduit corridor (github.com/hotspoons)"
 
 
-def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5, session: requests.Session | None = None):
-    """USGS's ArcGIS image services answer 502/503 under load and recover in seconds. Back off."""
+def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 9, session: requests.Session | None = None):
+    """USGS's ArcGIS image services answer 502/503/504 under load. Back off — PATIENTLY.
+
+    They usually recover in seconds, but on 2026-10-10 the NAIP ImageServer answered 504 for about
+    four minutes, and the old five tries (two minutes in all) killed one shard of a 25-shard
+    dc-metro bake and with it the run. Nine tries backing off 10, 20, 40, then 60 s gives an outage
+    about seven minutes to pass before this gives up.
+    """
     import time
 
     session = session or globals()["session"]
@@ -68,7 +75,8 @@ def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5, sessio
             last = RuntimeError(f"HTTP {r.status_code}")
         except Exception as exc:
             last = exc
-        time.sleep(8 * (attempt + 1))
+        if attempt + 1 < tries:
+            time.sleep(min(60, 10 * 2**attempt))
     raise RuntimeError(f"{url}: {last}")
 
 
@@ -158,15 +166,18 @@ def covered(frame: Frame, bbox: tuple[float, float, float, float]) -> bool:
                 "size": "32,32", "bandIds": "0,1,2", "format": "jpg", "pixelType": "U8", "noData": "0", "f": "image",
             },
             timeout=120,
-            tries=2,
         )
-        if not r.headers.get("content-type", "").startswith("image"):
-            return False
-        probe = np.asarray(Image.open(io.BytesIO(r.content)).convert("RGB"))
-        return len(np.unique(probe.reshape(-1, 3), axis=0)) > 1
     except Exception as exc:
-        print(f"  naip    coverage probe failed ({exc}); assuming no NAIP here", flush=True)
-        return False
+        # NOT "no NAIP here". On 2026-10-10 a four-minute 504 from the ImageServer was read as an
+        # answer, and the shard swapped 0.6 m aerial photography for 10 m Sentinel-2 with nothing
+        # failing — the silent-success family again (an outage is not an answer). A probe that
+        # could not ask stops the bake; the run is retried when the service is back.
+        raise BakeFault(f"naip coverage probe could not reach the service, so this bake cannot tell whether NAIP covers it: {exc}") from exc
+    if not r.headers.get("content-type", "").startswith("image"):
+        # an ArcGIS error document comes back as 200 JSON: also not an answer about coverage
+        raise BakeFault(f"naip coverage probe got {r.headers.get('content-type', 'no content type')} instead of an image: {r.text[:200]!r}")
+    probe = np.asarray(Image.open(io.BytesIO(r.content)).convert("RGB"))
+    return len(np.unique(probe.reshape(-1, 3), axis=0)) > 1
 
 
 def fetch_sentinel2(frame: Frame, bbox: tuple[float, float, float, float], out: Path, res: float = S2_RES) -> dict:

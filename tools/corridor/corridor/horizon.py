@@ -28,8 +28,14 @@ session = requests.Session()
 session.headers["User-Agent"] = "apex-conduit corridor (github.com/hotspoons)"
 
 
-def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5):
-    """USGS's ArcGIS image services answer 502/503 under load and recover in seconds. Back off."""
+def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 9):
+    """USGS's ArcGIS image services answer 502/503/504 under load. Back off — PATIENTLY.
+
+    They usually recover in seconds, but on 2026-10-10 the NAIP ImageServer answered 504 for about
+    four minutes, and the old five tries (two minutes in all) killed one shard of a 25-shard
+    dc-metro bake and with it the run. Nine tries backing off 10, 20, 40, then 60 s gives an outage
+    about seven minutes to pass before this gives up.
+    """
     import time
 
     last = None
@@ -41,7 +47,8 @@ def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5):
             last = RuntimeError(f"HTTP {r.status_code}")
         except Exception as exc:
             last = exc
-        time.sleep(8 * (attempt + 1))
+        if attempt + 1 < tries:
+            time.sleep(min(60, 10 * 2**attempt))
     raise RuntimeError(f"{url}: {last}")
 
 

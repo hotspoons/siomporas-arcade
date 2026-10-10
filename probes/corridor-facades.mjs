@@ -2,12 +2,12 @@
 //
 // Rich, 2026-10-10: "random textures feed a single building type so we can get variety … glass ->
 // skyscraper. Need to be able to assign reflectiveness for cases like skyscrapers." So this asks the
-// running game, not the code: every loaded footprint is classed; the classes a street holds draw
-// from their pools (more than one material on a street of houses — variety, measured from the
-// vertex layers the massing actually wrote); the same building picks the same material on a second
-// build (stable); the cost is one texture array and no extra draw calls; and a tall building's
-// walls are drawn with its class's reflectiveness — which, with BUILDING_FACADES off, they are not
-// (the check can fail).
+// running game, not the code: every loaded footprint is classed; a class draws more than one
+// material from its pool (variety, measured from the vertex layers the massing actually wrote);
+// every cell compiles to the one facade program; and a class's reflectiveness reaches the pixels —
+// the same view drawn with the class mirror-smooth and matte must differ. Then it loads the world
+// again with BUILDING_FACADES 0 and the same measurements must find nothing pooled (the checks can
+// fail). That a building draws the same material on every build is test/facades.test.ts.
 //
 //   PORT=5196 WORLD=crofton-triangle SHOTS=/tmp/shots node probes/corridor-facades.mjs
 import { chromium } from 'playwright'
@@ -99,7 +99,41 @@ if (SHOTS && street) {
   await page.screenshot({ path: `${SHOTS}/facades-street-${WORLD}.png`, timeout: 300000 })
 }
 
+// REFLECTIVENESS REACHES THE PIXELS: the street's own class, drawn matte and then mirror-smooth
+const sample = () => page.evaluate(() => {
+  const c = window.corridor
+  c.renderer.render(c.scene, c.camera)
+  const gl = c.renderer.getContext()
+  const px = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4)
+  gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, px)
+  return Array.from(px.filter((_, i) => i % 64 === 0))
+})
+const surf = (m, r) => page.evaluate(([m, r]) => window.corridor.site.facades()?.setSurface('house', { metalness: m, roughness: r }), [m, r])
+await surf(0, 0.9)
+const matte = await sample()
+await surf(0.9, 0.08)
+const shiny = await sample()
+await surf(0, 0.9)
+let diff = 0
+for (let i = 0; i < matte.length; i++) diff += Math.abs(matte[i] - shiny[i])
+ok('a class’s reflectiveness changes what is drawn', diff / matte.length > 1, `mean |Δ| ${(diff / matte.length).toFixed(2)} over ${matte.length} samples`)
 ok('no page errors', errors.length === 0, errors[0] ?? 'none')
+await page.close()
+
+// AND OFF: the knob as the F6 panel keeps it, the same questions, nothing pooled
+const off = await browser.newPage({ viewport: { width: 1280, height: 760 } })
+await off.addInitScript(() => { try { localStorage.setItem('apex-corridor-world.tune.v1', JSON.stringify({ v: 2, values: { BUILDING_FACADES: 0 }, touched: ['BUILDING_FACADES'] })) } catch { /* */ } })
+await off.goto(`http://127.0.0.1:${PORT}/?ui=dev#${WORLD}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+await off.waitForFunction((slug) => window.corridor?.site?.manifest?.slug === slug, WORLD, { timeout: 300000 })
+if (street) await off.evaluate(([x, y]) => { const c = window.corridor; const gy = c.site.groundAt(x + 24, -(y - 18)) ?? 0; c.camera.position.set(x + 24, gy + 7, -(y - 18)); c.orbit.target.set(x, gy + 3, -y); c.orbit.update() }, [street.x, street.y])
+for (let i = 0; i < 120; i++) { if (await off.evaluate(() => { let n = 0; window.corridor.scene.traverse((o) => { if (o.name === 'buildings:massing') n++ }); return n })) break; await off.waitForTimeout(2000) }
+const offFacts = await off.evaluate(() => {
+  const c = window.corridor
+  let textured = 0, total = 0
+  c.scene.traverse((o) => { if (o.name !== 'buildings:massing') return; const lay = o.geometry.getAttribute('layer')?.array ?? []; total += lay.length; for (const v of lay) if (v >= 0) textured++ })
+  return { facades: !!c.site.facades(), textured, total }
+})
+ok('with BUILDING_FACADES 0 there are no facades and nothing is pooled — the checks above can fail', !offFacts.facades && offFacts.total > 0 && offFacts.textured === 0, JSON.stringify(offFacts))
 await browser.close()
 console.log(fails.length ? `\nFAIL: ${fails.length} — ${fails.join('; ')}` : '\nPASS: buildings are classed and drawn from their pools')
 process.exit(fails.length ? 1 : 0)

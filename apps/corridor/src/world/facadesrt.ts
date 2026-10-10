@@ -202,6 +202,11 @@ varying vec3 vFNrm;`)
     fMetal = facadeMetal[fS];
     float gr = facadeGlassRough[fL];
     if (facadeGlass[fS] > 0.5 && gr >= 0.0) fRough = mix(gr, fRough, fc.a);
+    #ifndef USE_ENVMAP
+    // nothing to reflect (the editor's scene has no sky map): a mirror with no sky in it is a
+    // black wall, so a reflective class keeps a quarter of it and reads as dark glass instead
+    fMetal *= 0.25;
+    #endif
   }`)
         .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
   if (fRough >= 0.0) { roughnessFactor = fRough; metalnessFactor = fMetal; }`)

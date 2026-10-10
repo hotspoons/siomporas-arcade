@@ -8,7 +8,7 @@
 image:
   repository: wiktorn/overpass-api
   tag: "latest"       # multi-arch; arm64 present, which the GH200 nodes need
-  pullPolicy: IfNotPresent
+  pullPolicy: Always    # every image, every chart (Rich, 2026-10-10)
 
 fullnameOverride: overpass
 

@@ -1039,7 +1039,7 @@ export function osmImportJob({ name, runId, upstream, region, node, image, ttlSe
             {
               name: 'import',
               image,
-              imagePullPolicy: 'IfNotPresent',
+              imagePullPolicy: 'Always',
               command: ['/bin/bash', '/opt/regions/import.sh'],
               env: [
                 { name: 'UPSTREAM', value: upstream },

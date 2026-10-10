@@ -215,6 +215,7 @@ function assertCodeInit(r) {
   return [{
     name: 'assert-code',
     image: r.image,
+    imagePullPolicy: 'Always',
     command: ['/workspace/gaussworks/scripts/assert-code.sh'],
     args: [r.codeSha],
     volumeMounts: [{ name: 'out', mountPath: '/out' }],
@@ -323,6 +324,7 @@ export function jobSet(run) {
   const container = (role) => ({
     name: 'gaussworks',
     image: r.image,
+    imagePullPolicy: 'Always',
     command: r.command,
     args: roleArgs(r, role),
     env: [...env(r), { name: 'PAI_PATH_0', value: '/out' }, { name: 'SPLAT_ROLE', value: role }],

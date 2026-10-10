@@ -2,6 +2,7 @@
 // Z = south — i.e. (x, y, z)_site -> (x, z, -y)_three, right-handed with Y up so nothing in
 // three's camera/controls code has to be told about Z-up.
 import * as THREE from 'three'
+import { depthSign } from '@apex/engine/render/depth'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { inside } from './polygon'
 import { VegCover } from '../lod/vegmask'
@@ -927,7 +928,13 @@ if (uLodOn > 0.5) {
         // empty quadrants, and the child has to win the depth test on the ground they share.
         // The offset is in window depth, which a reversed depth buffer turns round (main.ts, the
         // renderer), so the sign goes with it.
-        const bias = (1 + t.z - L.pyramid!.zmin) * (renderer?.capabilities.reversedDepthBuffer ? -1 : 1)
+        // NOTE (2026-10-10, moving this into the engine): three r185 ALREADY negates
+        // polygonOffsetFactor under a reversed buffer (not the units), so the factor here is turned
+        // twice — the slope term pushes a finer level BACK while the units pull it forward. That is
+        // the ground Rich played through on 2026-10-09 and saw nothing wrong with, so it is kept as
+        // it was; `setPolygonOffset(m, renderer, -base, -base)` (@apex/engine/render/depth) is the
+        // both-terms-forward version, should a seam ever show.
+        const bias = (1 + t.z - L.pyramid!.zmin) * depthSign(renderer)
         m.polygonOffset = true
         m.polygonOffsetFactor = -bias
         m.polygonOffsetUnits = -bias

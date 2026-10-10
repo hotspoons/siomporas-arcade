@@ -19,12 +19,14 @@
 // that puts the stars in front of the canopy.
 
 import * as THREE from 'three'
+import { FAR_PLANE_GLSL } from '@apex/engine/render/depth'
 import { DATA_BASE } from '../world/site'
 
 /** what the ingest wrote — see tools/sky/ingest.mjs */
 const BYTES_PER_STAR = 12
 
 const VERT = /* glsl */ `
+${FAR_PLANE_GLSL}
   attribute float aMag;
   attribute float aBV;
   uniform float uPixel;
@@ -52,13 +54,9 @@ const VERT = /* glsl */ `
     // the sphere sits at the camera and never parallaxes, exactly as the dome does
     vec4 p = projectionMatrix * mat4(mat3(modelViewMatrix)) * vec4(position, 1.0);
     // THE FAR PLANE, WHICHEVER WAY DEPTH RUNS. z = w is the far plane of a forward depth buffer and
-    // the NEAR plane of a reversed one (main.ts, the renderer): the dome then drew in front of the
-    // whole world, a sky and nothing else (2026-10-08). three defines the reversed case.
-    #ifdef USE_REVERSED_DEPTH_BUFFER
-    gl_Position = vec4(p.xy, 0.0, p.w);
-    #else
-    gl_Position = p.xyww;
-    #endif
+    // the NEAR plane of a reversed one: the dome then drew in front of the whole world, a sky and
+    // nothing else (2026-10-08). toFarPlane is the engine's (@apex/engine/render/depth).
+    gl_Position = toFarPlane(p);
     vAlt = normalize((modelMatrix * vec4(position, 1.0)).xyz).y;
     // BRIGHTNESS IS A MAGNITUDE, so it is logarithmic: five magnitudes is a factor of a hundred.
     // Without that the sky is a uniform dusting and Sirius looks like everything else.

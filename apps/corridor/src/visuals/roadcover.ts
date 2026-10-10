@@ -8,6 +8,7 @@
 // there; clipping the leaf and impostor materials punched a hole in the trees above every road.
 // Only bark, trunk, grass, rocks and terrain take the mask now.
 import * as THREE from 'three'
+import { setDepthClear } from '@apex/engine/render/depth'
 
 /** Half-width of the mask around the eye, metres. Past this, nothing is clipped. */
 const HALF = 256
@@ -211,11 +212,10 @@ export class RoadCover {
       // THROUGH THREE'S STATE, not gl.clearDepth: three caches the clear depth and, under a
       // reversed depth buffer, inverts it. A raw gl.clearDepth(1) here left GL at 1 while three
       // believed 0, the main frame cleared its depth to "nearest", and every depth test failed —
-      // a sky and nothing else (2026-10-08).
-      const depthState = this.renderer.state.buffers.depth
-      depthState.setClear(0)
+      // a sky and nothing else (2026-10-08). setDepthClear is that, from the engine.
+      setDepthClear(this.renderer, 0)
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-      depthState.setClear(1)
+      setDepthClear(this.renderer, 1)
       this.renderer.render(root, this.cam)
       roadClipUniforms.uRoadViewProj.value.multiplyMatrices(this.cam.projectionMatrix, this.cam.matrixWorldInverse)
       roadClipUniforms.uRoadCoverOn.value = 1

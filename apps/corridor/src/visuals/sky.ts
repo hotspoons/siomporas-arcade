@@ -14,6 +14,7 @@
 // dome is the background and the scene lands on top. The radius is only there to keep the sphere
 // well inside the far plane.
 import * as THREE from 'three'
+import { FAR_PLANE_GLSL } from '@apex/engine/render/depth'
 
 export interface SkyLook {
   zenith: THREE.Color
@@ -51,6 +52,7 @@ export interface SkyLook {
 }
 
 const VERT = /* glsl */ `
+${FAR_PLANE_GLSL}
   varying vec3 vDir;
   void main() {
     vDir = normalize(position);
@@ -58,13 +60,9 @@ const VERT = /* glsl */ `
     vec4 p = projectionMatrix * mat4(mat3(modelViewMatrix)) * vec4(position, 1.0);
     // and lives at the far edge of clip space, so it never occludes anything with depth on
     // THE FAR PLANE, WHICHEVER WAY DEPTH RUNS. z = w is the far plane of a forward depth buffer and
-    // the NEAR plane of a reversed one (main.ts, the renderer): the dome then drew in front of the
-    // whole world, a sky and nothing else (2026-10-08). three defines the reversed case.
-    #ifdef USE_REVERSED_DEPTH_BUFFER
-    gl_Position = vec4(p.xy, 0.0, p.w);
-    #else
-    gl_Position = p.xyww;
-    #endif
+    // the NEAR plane of a reversed one: the dome then drew in front of the whole world, a sky and
+    // nothing else (2026-10-08). toFarPlane is the engine's (@apex/engine/render/depth).
+    gl_Position = toFarPlane(p);
   }
 `
 

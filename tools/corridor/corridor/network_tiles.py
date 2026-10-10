@@ -61,7 +61,9 @@ CHM_MAX = 80.0
 #: The six rasters written per 1 km tile, and the marker that says the lidar stage finished.
 _TILE_KINDS = ("dtm", "dsm", "chm", "deck_z", "deck_n", "building_n")
 _LIDAR_MARKER = "lidar.done.json"
-_LIDAR_MARKER_VERSION = 1
+# 2: tiles are named on the grid the caller gives (a shard: the WORLD's), so a version-1 shard
+# directory, named on its own bbox, must not be reused
+_LIDAR_MARKER_VERSION = 2
 
 
 def _fill_naip_blank(rgb: np.ndarray) -> float:
@@ -128,15 +130,25 @@ class LazyRaster:
         self.ds.close()
 
 
-def tile_index(bbox, corridor) -> tuple[tuple[float, float], list[tuple[int, int]]]:
-    """Tile origin (bbox lower-left snapped to 1 km) and the (x, y) tiles intersecting the corridor."""
-    x0 = float(np.floor(bbox[0] / TILE_M) * TILE_M)
-    y0 = float(np.floor(bbox[1] / TILE_M) * TILE_M)
+def tile_index(bbox, corridor, origin: tuple[float, float] | None = None) -> tuple[tuple[float, float], list[tuple[int, int]]]:
+    """Tile origin and the (x, y) tiles intersecting the corridor.
+
+    The origin is the bbox's lower-left snapped to 1 km, unless the caller names one. A SHARD must:
+    its tiles are merged with every other shard's by file name, and on 2026-10-10 the dc-metro
+    shards had grids anchored at (310000, 4296000), (310000, 4286000), (304000, 4296000) ... — so
+    `3_4.dtm.tif` was a different square kilometre in each, and the finalizer's first-writer-wins
+    copy kept one and silently dropped the rest. A shard passes the world grid
+    (`shards.tile_grid`), on which a name is a place.
+    """
+    x0 = float(np.floor(bbox[0] / TILE_M) * TILE_M) if origin is None else float(origin[0])
+    y0 = float(np.floor(bbox[1] / TILE_M) * TILE_M) if origin is None else float(origin[1])
     nx = int(np.ceil((bbox[2] - x0) / TILE_M))
     ny = int(np.ceil((bbox[3] - y0) / TILE_M))
+    tx_lo = max(0, int(np.floor((bbox[0] - x0) / TILE_M)))
+    ty_lo = max(0, int(np.floor((bbox[1] - y0) / TILE_M)))
     tiles = []
-    for tx in range(nx):
-        for ty in range(ny):
+    for tx in range(tx_lo, nx):
+        for ty in range(ty_lo, ny):
             sq = box(x0 + tx * TILE_M, y0 + ty * TILE_M, x0 + (tx + 1) * TILE_M, y0 + (ty + 1) * TILE_M)
             if sq.intersects(corridor):
                 tiles.append((tx, ty))
@@ -158,15 +170,17 @@ class NoLidarHere(RuntimeError):
     """
 
 
-def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, cache: Path) -> dict:
-    """Points → per-tile rasters + near-road corridor.laz. Returns what the manifest records."""
+def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, cache: Path, origin: tuple[float, float] | None = None) -> dict:
+    """Points → per-tile rasters + near-road corridor.laz. Returns what the manifest records.
+
+    `origin` anchors the 1 km tile names (see `tile_index`); a shard passes the world's grid."""
     ldir.mkdir(exist_ok=True)
     tdir = ldir / "tiles"
     tdir.mkdir(exist_ok=True)
     done = _resume_lidar(frame, bbox, chains, ldir)
     if done is not None:
         return done
-    (x0, y0), tiles = tile_index(bbox, corridor)
+    (x0, y0), tiles = tile_index(bbox, corridor, origin)
     n = int(TILE_M)
     acc: dict[tuple[int, int], dict[str, np.ndarray]] = {}
     for t in tiles:

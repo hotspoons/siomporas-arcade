@@ -307,6 +307,16 @@ def bbox_in(frame: Frame, bbox, crs: CRS) -> tuple[float, float, float, float]:
     return float(np.min(tx)), float(np.min(ty)), float(np.max(tx)), float(np.max(ty))
 
 
+def area_in(frame: Frame, bbox, clip: BaseGeometry | None, crs: CRS) -> tuple[BaseGeometry, float]:
+    """The area a source is read over — the streets' outline, or the bbox without one — in the
+    EPT's CRS, and its true area in m² (measured in the site frame, before reprojection)."""
+    geom = clip if clip is not None else box(*bbox)
+    geom = geom.intersection(box(*bbox))
+    tr = Transformer.from_crs(frame.crs, crs, always_xy=True)
+    # densified first: a 10 km straight edge reprojected by its two ends is not the same curve
+    return shapely.transform(shapely.segmentize(geom, 250.0), lambda xy: np.column_stack(tr.transform(xy[:, 0], xy[:, 1]))), float(geom.area)
+
+
 def node_box(ept: dict, key: str) -> tuple[float, float, float, float]:
     b = ept["bounds"]
     d, x, y, _ = (int(v) for v in key.split("-"))
@@ -333,19 +343,78 @@ def choose_depth(counts: list[tuple[str, int, float]], area_m2: float, target: f
     return (max(per) if per else 0), cum / max(area_m2, 1.0)
 
 
-def nodes_over(src: EptSource, bbox_ept, get_json, target: float) -> tuple[list[str], int, float]:
-    """Nodes over the bbox down to the depth that reaches the density target over the part of
-    the bbox this source covers (src.share)."""
+class AreaShare:
+    """How much of an EPT node's box lies inside the area being read (the streets' outline, in the
+    EPT's CRS): a mask of the area on a grid, summed once, so a node's share is four lookups.
+
+    Exact areas would be a polygon intersection per node — 40,000 of them against a 7,700-vertex
+    outline for one dc-metro shard. The grid is ~4 M cells over the bbox; a node smaller than a few
+    cells gets a coarse share, which is what a density estimate needs.
+    """
+
+    def __init__(self, area_ept: BaseGeometry, bbox_ept, cells: int = 4_000_000):
+        from rasterio.features import rasterize
+        from rasterio.transform import from_origin
+
+        self.area = area_ept
+        shapely.prepare(self.area)
+        x0, y0, x1, y1 = bbox_ept
+        self.x0, self.y1 = x0, y1
+        self.c = max(1.0, float(np.sqrt(max((x1 - x0) * (y1 - y0), 1.0) / cells)))
+        w, h = max(1, int(np.ceil((x1 - x0) / self.c))), max(1, int(np.ceil((y1 - y0) / self.c)))
+        m = rasterize([(area_ept, 1)], out_shape=(h, w), transform=from_origin(x0, y1, self.c, self.c), fill=0, all_touched=False, dtype=np.uint8)
+        self.sat = np.zeros((h + 1, w + 1), np.int64)
+        self.sat[1:, 1:] = m.astype(np.int64).cumsum(0).cumsum(1)
+        self.h, self.w = h, w
+
+    def touches(self, nb) -> bool:
+        return bool(self.area.intersects(box(*nb)))
+
+    def share(self, nb) -> float:
+        nx0, ny0, nx1, ny1 = nb
+        c0 = int(np.clip(np.floor((nx0 - self.x0) / self.c), 0, self.w))
+        c1 = int(np.clip(np.ceil((nx1 - self.x0) / self.c), 0, self.w))
+        r0 = int(np.clip(np.floor((self.y1 - ny1) / self.c), 0, self.h))
+        r1 = int(np.clip(np.ceil((self.y1 - ny0) / self.c), 0, self.h))
+        cells = ((nx1 - nx0) / self.c) * ((ny1 - ny0) / self.c)
+        if r1 <= r0 or c1 <= c0 or cells <= 0:
+            return 0.0
+        inside = self.sat[r1, c1] - self.sat[r0, c1] - self.sat[r1, c0] + self.sat[r0, c0]
+        return float(min(1.0, inside / cells))
+
+
+def nodes_over(src: EptSource, bbox_ept, get_json, target: float, area_ept: BaseGeometry | None = None, area_m2: float | None = None) -> tuple[list[str], int, float]:
+    """Nodes over the area to read, down to the depth that reaches the density target there.
+
+    THE AREA IS THE STREETS, NOT THEIR BBOX (2026-10-10). dc-metro-take-2 shard 5's streets are
+    97.5 km² inside a 1,014 km² bbox. Walking the bbox fetched 222,212 nodes and decoded 10.5 B
+    points of which 1.86 B landed on the streets, and the density that chose the depth was points
+    over (bbox x `src.share`) — but `share` is the source's coverage of the STREETS, so where the
+    survey covered a quarter of the bbox and three quarters of the streets, the estimate came out
+    a third of the truth and the walk went two levels too deep: depth 12, 25.6 pts/m² on the
+    streets for a target of 8, where depth 10 already gave 10.7.
+
+    So with `area_ept` (the streets' outline in the EPT's CRS) a node whose box does not touch it
+    is not walked, its subtree's hierarchy is not fetched and it is not read; a node's points count
+    by the share of its box inside the outline; and the density is over `area_m2` — the outline's
+    TRUE area, measured in the site frame, times the source's coverage of that same outline. (The
+    old denominator was in the EPT's own units, which for USGS's Web Mercator is 1.6 x the true m²
+    at the latitude of Washington.) Without `area_ept` the bbox is the area, as before.
+    """
     ept = src.ept
     x0, y0, x1, y1 = bbox_ept
+    grid = AreaShare(area_ept, bbox_ept) if area_ept is not None and not area_ept.is_empty else None
     hier: dict[str, int] = dict(get_json("ept-hierarchy/0-0-0-0.json"))
     found: list[tuple[str, int, float]] = []
     stack = ["0-0-0-0"]
     while stack:
         key = stack.pop()
-        nx0, ny0, nx1, ny1 = node_box(ept, key)
+        nb = node_box(ept, key)
+        nx0, ny0, nx1, ny1 = nb
         if nx0 > x1 or nx1 < x0 or ny0 > y1 or ny1 < y0:
             continue
+        if grid is not None and not grid.touches(nb):
+            continue  # and neither does anything under it: no hierarchy file, no node read
         count = hier.get(key)
         if count is None:
             continue
@@ -353,7 +422,10 @@ def nodes_over(src: EptSource, bbox_ept, get_json, target: float) -> tuple[list[
             hier.update(get_json(f"ept-hierarchy/{key}.json"))
             count = hier.get(key, 0)
         if count > 0:
-            share = max(0.0, min(x1, nx1) - max(x0, nx0)) * max(0.0, min(y1, ny1) - max(y0, ny0)) / ((nx1 - nx0) * (ny1 - ny0))
+            if grid is not None:
+                share = grid.share(nb)
+            else:
+                share = max(0.0, min(x1, nx1) - max(x0, nx0)) * max(0.0, min(y1, ny1) - max(y0, ny0)) / ((nx1 - nx0) * (ny1 - ny0))
             found.append((key, count, share))
         d, x, y, z = (int(v) for v in key.split("-"))
         for dx in (0, 1):
@@ -362,7 +434,8 @@ def nodes_over(src: EptSource, bbox_ept, get_json, target: float) -> tuple[list[
                     child = f"{d + 1}-{2 * x + dx}-{2 * y + dy}-{2 * z + dz}"
                     if child in hier:
                         stack.append(child)
-    depth, density = choose_depth(found, (x1 - x0) * (y1 - y0) * max(src.share, 0.05), target)
+    base = area_m2 if area_m2 is not None else (x1 - x0) * (y1 - y0)
+    depth, density = choose_depth(found, base * max(src.share, 0.05), target)
     return [k for k, _, _ in found if int(k.split("-", 1)[0]) <= depth], depth, density
 
 
@@ -568,7 +641,8 @@ def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], 
         if src.ept is None:
             src.ept = _get_json(src.base + "ept.json", cache / "ept" / src.slug / "ept.json")
         crs = ept_crs(src.ept)
-        keys, depth, density = nodes_over(src, bbox_in(frame, bbox, crs), lambda rel: _get_json(src.base + rel, cache / "ept" / src.slug / rel.replace("ept-hierarchy/", "h/")), target)
+        area_ept, area_m2 = area_in(frame, bbox, clip, crs)
+        keys, depth, density = nodes_over(src, bbox_in(frame, bbox, crs), lambda rel: _get_json(src.base + rel, cache / "ept" / src.slug / rel.replace("ept-hierarchy/", "h/")), target, area_ept, area_m2)
         if not keys:
             continue
         first = not used

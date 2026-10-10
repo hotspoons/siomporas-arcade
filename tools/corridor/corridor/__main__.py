@@ -404,7 +404,14 @@ def cmd_finalize(a: argparse.Namespace) -> None:
         except Exception as exc:
             print(f"  canopy  global CHM unavailable: {exc}")
 
-    nt = shards.merge_tree(present, site_dir, "lidar")
+    # lidar by PLACE, the owner's copy of a seam tile first, and the primary's near-road cloud
+    # from every block (shards.merge_lidar); the per-shard VRTs and markers are rebuilt below
+    from shapely.geometry import LineString as _Line
+
+    spine = json.loads((site_dir / "spine_utm.json").read_text()) if (site_dir / "spine_utm.json").exists() else None
+    lm = shards.merge_lidar([(i, p) for i, p in enumerate(parts) if p.exists()], site_dir, plan, _Line(spine["coords"]) if spine and len(spine.get("coords") or []) > 1 else None)
+    nt = lm["tiles"]
+    print(f"  merge   lidar {lm['tiles']} tiles ({lm['seam_tiles']} on seams, {lm['filled_px']:,} px filled from a neighbour); primary near-road cloud {lm['near_points']:,} points", flush=True)
     nw = shards.merge_tree(present, site_dir, "web/tiles")
     npg = shards.merge_tree(present, site_dir, "web/pyr")
     nb = shards.merge_branches(present, site_dir)

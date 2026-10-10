@@ -120,6 +120,63 @@ class DensityTest(unittest.TestCase):
         self.assertAlmostEqual(ls.choose_depth([("0-0-0-0", 200, 0.5)], 100.0, 1.0)[1], 1.0)
 
 
+class AreaWalkTest(unittest.TestCase):
+    """nodes_over over the STREETS, not their bbox (dc-metro-take-2 shard 5, 2026-10-10: 222,212
+    nodes walked for 40,896 that touched the streets, and depth 12 where 10 already met 8 /m²)."""
+
+    def setUp(self):
+        from shapely.geometry import box as _box
+
+        # a 1000 m cube; the streets are a 100 m square in the south-west corner of the bbox
+        self.src = ls.EptSource("TEST:X", "unused/", share=1.0)
+        self.src.ept = {"bounds": [0.0, 0.0, 0.0, 1000.0, 1000.0, 1000.0]}
+        self.area = _box(0.0, 0.0, 100.0, 100.0)
+        # root; four depth-1 children; under the south-west child a depth-2 node over the streets.
+        # The north-east child's counts live in their own file (-1), which must never be fetched.
+        self.hier = {
+            "ept-hierarchy/0-0-0-0.json": {"0-0-0-0": 1000, "1-0-0-0": 1000, "1-1-0-0": 1000, "1-0-1-0": 1000, "1-1-1-0": -1, "2-0-0-0": 1000},
+            "ept-hierarchy/1-1-1-0.json": {"1-1-1-0": 1000},
+        }
+        self.asked: list[str] = []
+
+    def get(self, rel):
+        self.asked.append(rel)
+        return self.hier[rel]
+
+    def test_a_node_that_never_touches_the_streets_is_not_walked(self):
+        keys, depth, _ = ls.nodes_over(self.src, (0.0, 0.0, 1000.0, 1000.0), self.get, 1e9, self.area, self.area.area)
+        self.assertNotIn("ept-hierarchy/1-1-1-0.json", self.asked, "a subtree off the streets was fetched")
+        self.assertEqual(sorted(keys), ["0-0-0-0", "1-0-0-0", "2-0-0-0"])
+        # without the area every node in the bbox is walked, as before
+        self.asked.clear()
+        keys, _, _ = ls.nodes_over(self.src, (0.0, 0.0, 1000.0, 1000.0), self.get, 1e9)
+        self.assertIn("ept-hierarchy/1-1-1-0.json", self.asked)
+        self.assertEqual(len(keys), 6)
+
+    def test_density_is_over_the_area_read_so_the_walk_stops_where_it_is_met(self):
+        # over the streets (10,000 m²): the root lends 1 % of its 1000 points, depth 1 4 % of 1000,
+        # depth 2 16 % of 1000 = 10 + 40 + 160 points: 0.001, 0.005, 0.021 /m² cumulatively
+        _, depth, dens = ls.nodes_over(self.src, (0.0, 0.0, 1000.0, 1000.0), self.get, 0.004, self.area, self.area.area)
+        self.assertEqual(depth, 1)
+        self.assertAlmostEqual(dens, 0.005, places=4)
+        # a source covering only half the streets is held to the target over that half
+        self.src.share = 0.5
+        _, depth, _ = ls.nodes_over(self.src, (0.0, 0.0, 1000.0, 1000.0), self.get, 0.004, self.area, self.area.area)
+        self.assertEqual(depth, 1, "0.005 /m² over half the streets is 0.010: still depth 1")
+        _, depth, _ = ls.nodes_over(self.src, (0.0, 0.0, 1000.0, 1000.0), self.get, 0.009, self.area, self.area.area)
+        self.assertEqual(depth, 1)
+        _, depth, _ = ls.nodes_over(self.src, (0.0, 0.0, 1000.0, 1000.0), self.get, 0.011, self.area, self.area.area)
+        self.assertEqual(depth, 2)
+
+    def test_the_area_is_measured_in_true_metres_not_the_epts_units(self):
+        from shapely.geometry import box as _box
+
+        clip = _box(OX - 100, OY - 100, OX + 100, OY + 100)
+        merc, m2 = ls.area_in(FRAME, BBOX, clip, ls.CRS.from_epsg(3857))
+        self.assertAlmostEqual(m2, 40000.0, delta=1.0)
+        self.assertGreater(merc.area / m2, 1.5, "Web Mercator square metres at 39 N are ~1.6 true ones")
+
+
 class NoaaIndexTest(unittest.TestCase):
     def feature(self, ident, href, start="2020-12-08T00:00:00Z", poly=(-76.8, 38.9, -76.6, 39.1)):
         return {"id": f"DigitalCoast_DAV:id_{ident}", "geometry": box(*poly).__geo_interface__,

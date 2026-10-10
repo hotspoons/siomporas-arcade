@@ -904,7 +904,8 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
     bbox = snap_bbox((block[0] - margin, block[1] - margin, block[2] + margin, block[3] + margin))
     region = shp_box(*bbox)
     corridor = unary_union([c["line"].buffer(half_width, cap_style="flat") for c in shard_chains])
-    lidar_corridor = unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in shard_chains])
+    # the PRIMARY only over this block and its margin; the assigned chains whole (shards.lidar_area)
+    lidar_corridor = shardlib.lidar_area(prim["line"], [c["line"] for c in shard_chains if c is not prim], block, margin, lidar_half_width)
 
     if "dem" not in skip:
         dem.fetch_dem(frame, bbox, sdir / "dem_1m.tif", cache)
@@ -937,7 +938,9 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
         ldir = sdir / "lidar"
         lbbox = snap_bbox(lidar_corridor.bounds)
         try:
-            meta = network_tiles.lidar_tiled(frame, lbbox, lidar_corridor, shard_chains, ldir, cache)
+            # tiles named on the WORLD's grid, so the finalizer's merge by file name is by place
+            gx, gy, _ = shardlib.tile_grid(tuple(plan["bbox"]))
+            meta = network_tiles.lidar_tiled(frame, lbbox, lidar_corridor, shard_chains, ldir, cache, origin=(gx, gy))
         except network_tiles.NoLidarHere as exc:
             no_lidar = str(exc)
             meta = None
@@ -949,6 +952,8 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
 
         with progress.heartbeat("profile", f"primary {prim['ident']} {prim['line'].length / 1000:.0f} km"):
             prof = network_tiles.profile_tiled(prim["line"], ldir, pts, prim_idx, fill=False, crossings_over_s=network_tiles.crossings_over(out))
+        # which stations are THIS block's: the stitch takes each station from its owner
+        prof["owned"] = shardlib.owner_runs(shardlib.profile_owner(prim["line"], prof["s"], plan["blocks"]), index)
         (sdir / "profile.json").write_text(json.dumps(prof))
         manifest_lidar = meta
         others = [c for c in shard_chains if c is not prim]
@@ -963,6 +968,8 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
         if not dem_p.exists():
             raise RuntimeError("no lidar and no DEM: nothing can say how high the roads are")
         prof = network_tiles.profile_from_dem(prim["line"], dem_p)
+        if prof.get("s"):
+            prof["owned"] = shardlib.owner_runs(shardlib.profile_owner(prim["line"], prof["s"], plan["blocks"]), index)
         (sdir / "profile.json").write_text(json.dumps(prof))
         manifest_lidar = {"source": "none", "why": no_lidar, "profiles_from": "dem", "structures": []}
         for c in shard_chains:

@@ -31,6 +31,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MULTIPART_OVER } from './cloudflare.mjs'
 import { SITE_DOCS } from './mcp.mjs'
+import { builtinFacades } from './facades.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 /** the Worker module, as published */
@@ -387,10 +388,26 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
      * its record, its file listing (the viewer finds the hex-tiling variants and the macro map
      * through it) and every map in it.
      */
+    /*
+     * THE BUILDING CLASSES' POOLS (apps/corridor/src/world/facades.ts). Every world draws its
+     * buildings from them now, whether or not a document names a material: the built-in set and
+     * the library's shared `/facades` records are read by the game itself. So the shared records
+     * are carried whole, and every material any of the three layers names goes in with the roads.
+     */
+    const facadeMats = new Set()
+    try {
+      const shared = (await get('/facades')).facades ?? []
+      const body = JSON.stringify({ facades: shared })
+      add({ key: 'assetsvc/facades', body, bytes: Buffer.byteLength(body), contentType: 'application/json', group: 'assets' })
+      for (const r of shared) for (const e of [...(r.walls ?? []), ...(r.roofs ?? [])]) if (e?.material) facadeMats.add(e.material)
+    } catch {
+      /* an older service with no /facades: the built-in set alone */
+    }
+    for (const c of await builtinFacades().catch(() => [])) for (const e of [...c.walls, ...c.roofs]) facadeMats.add(e.material)
     try {
       const mats = (await get('/materials')).materials ?? []
       const surfaceish = new Set(['road', 'paving', 'shoulder', 'ground_cover', 'verge', 'sidewalk'])
-      const carried = mats.filter((m) => surfaceish.has(m.category) || seen.has(m.id))
+      const carried = mats.filter((m) => surfaceish.has(m.category) || seen.has(m.id) || facadeMats.has(m.id))
       const list = JSON.stringify({ materials: carried })
       add({ key: 'assetsvc/materials', body: list, bytes: Buffer.byteLength(list), contentType: 'application/json', group: 'assets' })
       for (const m of carried) {

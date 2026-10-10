@@ -96,7 +96,8 @@ export const MESH_FILE: Record<MeshVariant, string> = {
 }
 
 /** The collections that hold a visual plus its configuration. */
-export type BuildKind = 'vehicles' | 'actors' | 'weapons' | 'presets' | 'traffic'
+/** `facades` is the shared default per building class (src/world/facades.ts) — one record per class, keyed by its id */
+export type BuildKind = 'vehicles' | 'actors' | 'weapons' | 'presets' | 'traffic' | 'facades'
 
 /**
  * One crafted thing: a chosen model, a preset it started from, and the document that configures it.
@@ -199,6 +200,10 @@ export interface Material {
   /** the seed and the prompt that drew it — what makes a texture improvable rather than final */
   seed?: number
   prompt?: string
+  /** a glazing material's pane mask (white is glass), drawn with the mullion grid — see facadesrt.ts */
+  glass_mask?: string
+  /** how its panes behave: the facade reads `roughness`; the rest is for a consumer with an interior */
+  glass?: { transmission?: number; ior?: number; roughness?: number; thickness?: number; tint?: [number, number, number] } | null
 }
 
 export const assetsvc = {

@@ -16,7 +16,12 @@ names. Pointing the page at a published bucket with `?data=` disables saving.
 
 | file | role |
 |---|---|
-| `main.ts` | scene, top-down orbit, one ground raycast per click, mode switching, save, preview |
+| `main.ts` | scene, one ground raycast per click, mode switching, save, preview |
+| `view/nav.ts` | the camera: trailworks' map navigation (see *Navigating* below) |
+| `view/navmath.ts` | its maths, pure — zoom/orbit about a point, grab pan, ray march, clamps |
+| `view/navrail.ts` | the on-screen rail: +, −, compass, frame the world, the scale |
+| `view/maproads.ts` | every road as a map line by tier, and the road names (`maplabels.ts` places them) |
+| `view/mapbuildings.ts` | building footprints around the view, the *Buildings* layer |
 | `store/schema.ts` | both file formats, the vocabularies, load/save, point-in-polygon |
 | `author/areas.ts` | mode 1: draw, select, slide, delete |
 | `author/place.ts` | mode 2: arm an asset, click, drag, rotate, scale |
@@ -29,7 +34,8 @@ names. Pointing the page at a published bucket with `?data=` disables saving.
 | `view/drape.ts` | polygons made to lie on the ground rather than hover over it |
 | `author/ui.ts` | the panel's sliders and rows |
 
-Keys: `1`/`2`/`3`/`4` mode · `T` top · `F` fly to selection · `V` preview · `Ctrl+S` save.
+Keys: `1`…`7` mode · `T` frame the world · `C` fly to selection · `V` preview · `Ctrl+S` save
+(the camera's own keys are under *Navigating*).
 **Areas**: `N` draw, click to add a vertex, click the first vertex or `Enter` to close, `Esc`
 cancel, `Del` remove, drag a handle to nudge. **Place**: pick an asset then click the ground, drag
 to move, `Q`/`E` or shift+wheel to rotate, `[` `]` to scale, `Del` remove. **Grow**: `G` generate;
@@ -37,6 +43,55 @@ the items it makes are ordinary placements, so mode 2 edits them. **Preview**: `
 drive, `Space` handbrake, drag to look, `Tab` fly, `R` reset, `Esc` close. **Structures**: `N`
 then click the road twice (start, then end), drag an end sphere along the spine, `Q`/`E` turn a
 bridge, `Del` remove.
+
+## Navigating
+
+Rich, 2026-10-10: *"The place editor does not scale up to something like the DC area for map
+navigation … adopt the full navigation experience from trailworks, including point-based zooms
+and pivots, the whole thing."* So the camera is trailworks' (`view/nav.ts` lists every behaviour
+it ports and where), and it works from a 60 km overview to two metres over a kerb with no mode
+switch:
+
+| do | and |
+|---|---|
+| **drag** | grabs the ground: the point you pressed stays under the cursor, and a flick coasts |
+| **wheel** | zooms toward the point under the cursor; move the mouse mid-zoom to steer it |
+| **right-drag** | zooms about the point you pressed (drag up to close in) |
+| **middle-drag**, or **shift+drag** | orbits and tilts about the point you pressed — it holds its pixel |
+| **two fingers** | pinch zooms, twist turns, both fingers up or down tilts; one finger grabs |
+| **double-tap** · **two-finger double-tap** | zoom in ×0.55 · out ×1.8 toward the tap |
+| `W` `A` `S` `D` / arrows | slide the view, faster as you go higher; shift is faster still |
+| `Q` `E` · `R` `F` | turn about the eye · rise and drop |
+| `+` `−` | zoom about the centre (the rail's buttons) |
+| `Home` / the compass | north up, straight down |
+| `T` / the frame button | the whole world, north up |
+| `C` | fly to the selection |
+
+A cyan ring marks the point a zoom or an orbit is turning about. Every glide stops the moment you
+press, scroll or touch a movement key. Where you were in each world comes back on reload.
+
+The tools still come first: a press on a vertex handle, a gizmo or a stunt piece belongs to that
+tool, exactly as it did under OrbitControls (`orbit.enabled`); while an area or a traffic zone is
+being drawn the ground holds still and only zooming is allowed. Shift+wheel on a selected
+placement still rotates it.
+
+### The map layer
+
+Three toggles in the layers panel, group *Map*. **Roads** are drawn as a map draws them — a line a
+few pixels wide with a dark casing, the same width at every zoom: motorways, trunks and primaries
+always; secondary, tertiary and residential streets from the z14 scale down (≤ 10 m a pixel — the
+rail shows the scale); service roads and tracks from 2.5 m a pixel. Close in, where the photograph
+shows the asphalt itself, the lines fade back. **Road names** are laid along their roads, the
+important road first and the one nearest the middle of the screen next, never overlapping, a name
+not repeated within a few hundred pixels, at most 45 / 90 / 120 at the three zooms. **Buildings**
+(off by default) are footprints around the view below 3 m a pixel.
+
+The roads come from the bake's `context.json` (every road, class and name — the file the game's
+minimap reads), parsed in a worker while the site builds; a world baked before it falls back to
+its manifest's spine and branches, and a tiled one to the branches of the vector tiles around the
+view. Nothing new is fetched. Over the ground, the editor drives the LOD pyramid from the camera
+(the game does it from the car), draws the overview photograph as an underlay under every tile,
+and shows a tile only once it has a photograph of its own — see `editorGround` in `main.ts`.
 
 ## Structures are intervals, not polygons
 

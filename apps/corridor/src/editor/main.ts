@@ -11,7 +11,10 @@ import { fixturesExtension } from './library/fixtures'
 import { loadFixtures, saveFixtures } from '../game/world/fixtures'
 import { DROP_TYPE } from './author/ui'
 import * as THREE from 'three'
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { MapNav } from './view/nav'
+import { RoadMap } from './view/maproads'
+import { MapBuildings } from './view/mapbuildings'
+import { NavRail } from './view/navrail'
 import { buildSite, type Site } from '../world/scene'
 import { RoadWidth } from './view/roadwidth'
 import { TUNE_TABS } from '../tuning'
@@ -23,7 +26,7 @@ import { GrowMode } from './author/grow'
 import { Preview, markOverlay } from './view/preview'
 import { CAN_SAVE, type Area } from './store/schema'
 import { LOOK, type Season } from '../visuals/season'
-import { EditorUI } from './chrome/editor'
+import { EditorUI, EDITOR_LAYERS } from './chrome/editor'
 import { AssetCatalog } from './library/assets'
 import { confirm, el, installShellKeys, toast, status } from '../ui/shell'
 import { select } from '../ui/controls'
@@ -66,9 +69,51 @@ scene.background = new THREE.Color(0x8fa6c2)
 // those densities ever rise. Colour and density are re-set per season; this only has to exist.
 scene.fog = new THREE.FogExp2(0x8fa6c2, LOOK.summer.fog)
 const camera = new THREE.PerspectiveCamera(55, 1, 1, 120_000)
-const orbit = new OrbitControls(camera, canvas)
-orbit.enableDamping = true
-orbit.maxPolarAngle = Math.PI / 2 - 0.02
+/*
+ * THE CAMERA IS TRAILWORKS' NAVIGATION (view/nav.ts, which lists everything it does). Rich,
+ * 2026-10-10: "adopt the full navigation experience from trailworks, including point-based zooms
+ * and pivots, the whole thing." It is still called `orbit` here because every tool in this file
+ * hands it the grab lock as `orbit.enabled` and the draw lock as `enableRotate`/`enablePan`, which
+ * it honours exactly as OrbitControls did — the place it yields to them is the same.
+ */
+const orbit = new MapNav({
+  camera,
+  canvas,
+  heightAt: (x, z) => {
+    if (!site) return null
+    const h = site.heightAt(x, -z)
+    return Number.isFinite(h) ? h : null
+  },
+  // not while the preview owns the keyboard, not while a text field has it, and not while this
+  // editor is the hidden half of the world editor
+  active: () => active && !preview.open && !typingInAField(),
+  // trailworks' long-press drops a pin; this editor's pin is the double-click that places
+  onLongPress: (x, y) => {
+    if (mode !== 'place') return
+    const pt = groundAt({ clientX: x, clientY: y } as PointerEvent)
+    if (pt) void place.placeAt(pt)
+  },
+})
+scene.add(markOverlay(orbit.ring))
+/*
+ * THE MAP LAYER: every road as a line you can read at any zoom, its name, and the footprints
+ * (view/maproads.ts, view/mapbuildings.ts). Overlays, so the preview stands them down. Their three
+ * toggles are a group of their own in the layers panel.
+ */
+EDITOR_LAYERS.push({
+  title: 'Map',
+  layers: [
+    { id: 'roads', label: 'Roads', on: true },
+    { id: 'labels', label: 'Road names', on: true },
+    // off by default: at dc-metro scale a kilometre tile is up to 1.7 MB to fetch for its footprints
+    { id: 'buildings', label: 'Buildings (zoomed in)', on: false },
+  ],
+})
+const roads = new RoadMap({ camera, canvas, renderer })
+scene.add(markOverlay(roads.group))
+const footprints = new MapBuildings()
+scene.add(markOverlay(footprints.group))
+const rail = new NavRail(orbit, canvas, () => toTop(true))
 scene.add(new THREE.HemisphereLight(0xe9eef2, 0x7a6a50, 0.9))
 const sun = new THREE.DirectionalLight(0xfff0d8, 1.7)
 sun.position.set(-3000, 4000, 2500)
@@ -106,7 +151,6 @@ import { ZoneMode } from './author/zones'
 import { StuntMode } from './author/stuntmode'
 import { CourseMode } from './author/coursemode'
 import { PointMode } from './author/pointmode'
-import { FlyCam } from './view/flycam'
 import { Zones } from '../game/world/zones'
 import { fixtureFootprint } from '../game/stunt/stunts'
 // an old link's `:races` and `:grow` are the Points and Place tabs now
@@ -229,6 +273,8 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
   }
   status(`loading ${slug}…`)
   const manifest = await fetchJSON<Manifest>(`/sites/${slug}/web/manifest.json`)
+  // the map's roads are read in a worker while the site builds — the build is the long pole
+  roads.prefetch(manifest)
   const built = await buildSite(manifest, status, false, quality === 'preview' ? renderer : undefined, scene.fog as THREE.FogExp2, season, undefined, { plantWhole: true })
   if (gen !== loadGen) {
     dropSite(built)
@@ -249,6 +295,9 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
   await races.load(slug, ground, site)
   await points.load(slug, ground, site)
   roadWidth.setSite(site)
+  roads.attach(site)
+  footprints.attach(site)
+  rail.lat = site.manifest.frame?.anchor?.lat ?? 39
   grow.adopt()
   ;(window as unknown as { corridor: unknown }).corridor = {
     site, scene, camera, areas, place, grow, preview, orbitTarget: orbit.target,
@@ -271,6 +320,11 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
      */
     click: (pt: { x: number; y: number } | null) => routeClick(pt),
     orbit,
+    /** the navigation, the map's roads and footprints, and the renderer — for probes */
+    nav: orbit,
+    roads,
+    footprints,
+    renderer,
     groundAtPixel: (clientX: number, clientY: number) =>
       groundAt({ clientX, clientY } as PointerEvent),
   } // probes
@@ -286,7 +340,8 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
   ;(window as unknown as { corridor: { races: unknown } }).corridor.races = races
   ;(window as unknown as { corridor: { points: unknown } }).corridor.points = points
   applyLayers()
-  toTop()
+  // where you were in this world, across a reload (trailworks' PoseKeeper); the whole world if new
+  if (!orbit.restorePose(slug)) toTop()
   refresh()
   status('')
   return slug
@@ -299,6 +354,7 @@ function applyLayers() {
   const state = ui.layers()
   const on = (n: string) => state[n] ?? false
   site.setImagery(on('imagery'))
+  groundImagery = on('imagery')
   if (site.layers.trees) { site.layers.trees.userData.layerOn = on('trees'); site.layers.trees.visible = on('trees') }
   site.layers.structures.visible = on('structures')
   site.layers.spine.visible = on('spine')
@@ -314,11 +370,14 @@ function applyLayers() {
   // gates are authoring marks, so they are shown only in their own mode
   races.group.visible = inCourses()
   points.group.visible = mode === 'points'
+  roads.roadsOn = on('roads')
+  roads.labelsOn = on('labels')
+  footprints.on = on('buildings')
 }
 
-/** Straight down, high enough that the whole baked corridor is in frame — both extents, not just
- *  the long one: some sites are wider than they are long. */
-function toTop() {
+/** Straight down, north up, high enough that the whole baked corridor is in frame — both extents,
+ *  not just the long one: some sites are wider than they are long. `animate` eases there (`T`). */
+function toTop(animate = false) {
   if (!site) return
   const [x0, y0, x1, y1] = site.manifest.bbox
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2
@@ -326,9 +385,10 @@ function toTop() {
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect)
   const h = Math.max(600, 1.08 * Math.max((y1 - y0) / 2 / Math.tan(vfov / 2), (x1 - x0) / 2 / Math.tan(hfov / 2)))
   const z = site.groundAt(cx, -cy) ?? site.heightAt(cx, cy)
-  orbit.target.set(cx, z, -cy)
-  camera.position.set(cx, z + h, -cy + 1)
-  orbit.update()
+  const t = new THREE.Vector3(cx, z, -cy)
+  const eye = new THREE.Vector3(cx, z + h, -cy)
+  if (animate) orbit.flyTo(t, eye)
+  else orbit.jumpTo(t, eye)
 }
 
 /** Frame a polygon or a point from above, close enough to nudge its vertices. */
@@ -341,9 +401,8 @@ function flyTo(pts: [number, number][]) {
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2
   const span = Math.max(60, Math.hypot(x1 - x0, y1 - y0))
   const t = new THREE.Vector3(cx, site.groundAt(cx, -cy) ?? site.heightAt(cx, cy), -cy)
-  orbit.target.copy(t)
-  camera.position.copy(t).add(new THREE.Vector3(0, span * 1.1, span * 0.35))
-  orbit.update()
+  // eased, and cancelled by any input — trailworks' FlyTo
+  orbit.flyTo(t, t.clone().add(new THREE.Vector3(0, span * 1.1, span * 0.35)))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -550,9 +609,10 @@ canvas.addEventListener('dblclick', (e) => {
 })
 
 canvas.addEventListener('wheel', (e) => {
-  // shift+wheel rotates the selected placement; everything else is the orbit's zoom
+  // shift+wheel rotates the selected placement; everything else is the navigation's zoom. CAPTURE
+  // phase, so this runs before the navigation's own listener, which leaves a prevented wheel alone.
   if (mode === 'place' && e.shiftKey && place.wheel(e)) e.preventDefault()
-}, { passive: false })
+}, { passive: false, capture: true })
 
 addEventListener('keydown', (e) => {
   // Not our keys when we are not the mode being looked at: the world editor's map is using them.
@@ -566,13 +626,13 @@ addEventListener('keydown', (e) => {
     return
   }
   /*
-   * FLIGHT FIRST, and before every mode's own keys.
+   * NAVIGATION FIRST, and before every mode's own keys.
    *
-   * W/A/S/D/Q/E belong to the camera in every mode now — which is why rotating a placement, a
-   * bridge and a stunt fixture all moved to Z and X. Ctrl+S is handled above so the flight keys
-   * cannot eat a save.
+   * W/A/S/D/Q/E/R/F, the arrows, +/− and Home belong to the camera in every mode — which is why
+   * rotating a placement, a bridge and a stunt fixture all moved to Z and X. Ctrl+S is handled above
+   * so the navigation keys cannot eat a save.
    */
-  if (fly.down(e)) {
+  if (orbit.keyDown(e)) {
     e.preventDefault()
     return
   }
@@ -598,7 +658,7 @@ addEventListener('keydown', (e) => {
       if (mode === 'areas') areas.startDraw() // startDraw calls onChange, which is refresh
       else if (mode === 'traffic') traffic.startDraw()
       break
-    case 't': toTop(); break
+    case 't': toTop(true); break
     case 'v': void openPreview(); break
     // C CENTRES ON THE SELECTION. It was F, and F is now "drop" on the flown camera — a key that
     // both flies you down and jumps you somewhere else is a key that does neither reliably.
@@ -736,21 +796,10 @@ function worldPanel(root: HTMLElement) {
 // the same handle the viewer exposes as window.corridor, so probes can drive the editor too
 ;(window as unknown as { __ed: unknown }).__ed = { scene, camera, orbit, tune: TUNE_TABS, get site() { return site } }
 
-/*
- * W/A/S/D across, Q/E down and up — Rich, 2026-09-29. It moves the orbit rather than replacing it,
- * so a drag afterwards continues from where you flew to; see the note in `flycam.ts`.
- */
-const fly = new FlyCam({
-  camera,
-  target: orbit.target,
-  // not while the preview owns the keyboard, not while a text field has it, and not while this
-  // editor is the hidden half of the world editor
-  active: () => active && !preview.open && !typingInAField(),
-  onMove: () => { /* the orbit reads camera.position and target directly */ },
-})
-addEventListener('keyup', (e) => fly.up_(e))
+// Held keys, not key repeat: the navigation integrates them on the frame (view/nav.ts).
+addEventListener('keyup', (e) => orbit.keyUp(e))
 // A window that loses focus mid-flight never sees the keyup, and the camera flies away for ever.
-addEventListener('blur', () => fly.release())
+addEventListener('blur', () => orbit.release())
 
 function typingInAField(): boolean {
   const t = document.activeElement as HTMLElement | null
@@ -869,6 +918,7 @@ async function openPreview() {
   }
   if (!site) return
   orbit.enabled = false
+  gameGround()
   /*
    * A WORLD WITH STUNTS GETS A PHYSICS PREVIEW. The fixtures come from the TOOL rather than from
    * the file, so a loop you have just dropped is solid the first time you look at it — the save
@@ -1059,20 +1109,123 @@ function frame() {
   // mode had to restart it, and a loop that can be started twice eventually is.
   if (!active) {
     clock.getDelta()
+    roads.setShown(false)
+    rail.update(false)
     requestAnimationFrame(frame)
     return
   }
   if (preview.open) {
+    roads.setShown(false)
+    rail.update(false)
     preview.tick(dt, clock.elapsedTime)
     preview.render(renderer)
   } else {
-    // FLY BEFORE THE ORBIT UPDATES: the fly moves the camera and its target together, and the
-    // orbit's own `update` is what re-derives the transform from them and applies its damping.
-    fly.tick(dt)
-    orbit.update()
+    const t0 = performance.now()
+    orbit.tick(dt)
+    mapFrame()
+    const t1 = performance.now()
     renderer.render(scene, camera)
+    const i = mapPerf.n++ % MAP_PERF_N
+    mapPerf.nav[i] = t1 - t0
+    mapPerf.render[i] = performance.now() - t1
+    mapPerf.calls[i] = renderer.info.render.calls
   }
   requestAnimationFrame(frame)
+}
+/**
+ * What the navigation and the map cost, frame by frame: the camera and map work on this thread,
+ * the render call, and the draw calls it issued. For probes (`corridor.mapPerf()`): "it is fast" is
+ * a percentile, not an impression.
+ */
+const MAP_PERF_N = 600
+const mapPerf = { n: 0, nav: new Float32Array(MAP_PERF_N), render: new Float32Array(MAP_PERF_N), calls: new Float32Array(MAP_PERF_N) }
+;(window as unknown as { __mapPerf: unknown }).__mapPerf = () => {
+  const k = Math.min(mapPerf.n, MAP_PERF_N)
+  return { n: mapPerf.n, nav: [...mapPerf.nav.slice(0, k)], render: [...mapPerf.render.slice(0, k)], calls: [...mapPerf.calls.slice(0, k)] }
+}
+
+const _look = new THREE.Vector3()
+/**
+ * What the map needs each frame from where the camera is.
+ *
+ * THE GROUND FOLLOWS THE CAMERA. The pyramid streams finer tiles toward the eye — but only when
+ * somebody tells it where the eye is, and the editor never did (the game does, from `updateNear`):
+ * it primed once at the start and the rest of a 40 km world stayed at the overview's 11.7 m a
+ * pixel however close you came. The same call the game makes, with the look-at point as the focus.
+ *
+ * THE HAZE FOLLOWS THE DISTANCE. The season's fog is right for a driver; from 40 km up it is a
+ * 70 % veil over the map (summer's 1.8e-5 at that range). It thins with the look distance and is
+ * back at full strength from 2.5 km in, where it was always negligible anyway. The preview sets its
+ * own and puts this back when it closes.
+ */
+/**
+ * THE GROUND, AS A MAP SHOWS IT: the overview photograph underneath, a pyramid tile over it only
+ * where that tile has a photograph of its own.
+ *
+ * The game hides the overview mesh once a pyramid tile covers the eye, because from a car the tile
+ * under you is all that matters. The editor sees forty kilometres at once, with tiles of every
+ * level resident across it — and the two surfaces, the overview's 8 m DEM and a tile's 2 m one,
+ * were both drawn. This renderer runs a logarithmic depth buffer, which writes gl_FragDepth, so
+ * the polygon offset that is meant to let the finer tile win does nothing: the two interleaved
+ * by whichever was a few centimetres higher (dc-metro's Rock Creek came out camouflage). And a
+ * tile the bake has no NAIP for (`naip: false` — parts of the District) is bare turf for good,
+ * covering an overview that does have a picture of the place.
+ *
+ * So, here and only while the editor is drawing: the overview is drawn FIRST and writes no depth,
+ * an underlay every tile simply paints over; and a tile is shown only once it wears a photograph
+ * (with imagery off every tile shows, bare, as before). Nothing about the site changes — the
+ * preview, which is the game's view, puts the overview's depth back (`openPreview`).
+ */
+function editorGround() {
+  if (!site) return
+  const ov = site.terrain
+  const m = ov.material as THREE.Material
+  if (m.depthWrite) {
+    m.depthWrite = false
+    // before EVERY tile: the pyramid gives its levels negative orders of their own (−11 … −9 were
+    // resident here), and a tile drawn ahead of the underlay let the underlay win the depth test
+    // wherever its coarser surface stood higher — the same camouflage by another route
+    ov.renderOrder = -1000
+  }
+  ov.visible = true
+  // every frame, not every few: a tile drawn even once before its photo compiles its bare program
+  // (see the note at `mat.needsUpdate` in lod/pyramidstream.ts), and it is a few dozen children
+  const imageryOn = groundImagery
+  const pyr = site.group.children.find((o) => o.type === 'Group' && o.name === 'terrain')
+  for (const t of pyr?.children ?? []) {
+    const mm = (t as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
+    t.visible = !imageryOn || !!mm?.map
+  }
+}
+/** the imagery layer's state, read once per toggle rather than per frame */
+let groundImagery = true
+/** the game's view: the overview occludes again */
+function gameGround() {
+  if (!site) return
+  ;(site.terrain.material as THREE.Material).depthWrite = true
+  site.terrain.renderOrder = 0
+  const pyr = site.group.children.find((o) => o.type === 'Group' && o.name === 'terrain')
+  for (const t of pyr?.children ?? []) t.visible = true
+}
+
+function mapFrame() {
+  if (!site) return
+  const eye = camera.position
+  const pyr = site.pyramidStream
+  if (pyr) {
+    const g = site.heightAt(eye.x, -eye.z)
+    camera.getWorldDirection(_look)
+    pyr.update(eye.x, -eye.z, false, { agl: Number.isFinite(g) ? Math.max(0, eye.y - g) : 0, fx: _look.x, fy: _look.y, fz: _look.z, focusX: orbit.target.x, focusNorth: -orbit.target.z })
+  }
+  editorGround()
+  const fog = scene.fog as THREE.FogExp2 | null
+  if (fog) fog.density = LOOK[season].fog * Math.min(1, 2500 / Math.max(1, orbit.distance))
+  const mpp = orbit.metresPerPixel
+  const focus = { x: orbit.target.x, y: -orbit.target.z }
+  roads.setShown(true)
+  roads.update(mpp, focus, orbit.moving)
+  footprints.update(mpp, focus, mpp * Math.max(canvas.clientWidth, canvas.clientHeight) * 0.75)
+  rail.update(true)
 }
 // EMBEDDED, THE HOST SAYS WHICH WORLD. On its own page the editor opens the hash's site or the
 // first one; inside the world editor that first site loaded UNDER whatever the host asked for,

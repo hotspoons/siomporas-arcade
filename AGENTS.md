@@ -40,3 +40,10 @@ change against the same rig run before and after, and report the percentiles, no
 **Before a change to the start-up path reaches a live tab**, boot the page headlessly (playwright,
 `--use-gl=swiftshader`) and make sure it reaches `window.corridor.site` with no page errors. Vite
 reloads every attached tab the moment the file is saved.
+
+## Before a push
+
+`npx vitest run` from the repository root is the whole CI test gate: the apps' and packages'
+suites, the services' `node --test` suites (`tools/worldeditor`, `tools/assetsvc`, `scripts`) and
+`oxlint`, the last two through the `checks` project in `tools/ci/`. Run it, and gate on its exit
+status, before every push; CI runs the same command plus `tsc -b` and the build.

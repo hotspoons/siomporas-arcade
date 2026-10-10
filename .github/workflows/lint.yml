@@ -28,29 +28,19 @@ jobs:
           npm ci
           npm run check:lockfile
 
-      - id: lint
-        name: Lint
-        shell: bash
-        run: npm run lint 2>&1 | tee ci-lint.log
-
       - id: tsc
         name: Typecheck
         shell: bash
         run: npx tsc -b 2>&1 | tee ci-tsc.log
 
+      # vitest also runs the services' node:test suites and oxlint (the `checks` project,
+      # tools/ci/), so the run on a laptop before a push is the same run as this one. They were
+      # their own steps here and nobody ran them locally, so they went red after every push
+      # (Rich, 2026-10-10, the third time of asking: "add them so they are caught locally").
       - id: vitest
-        name: vitest
+        name: vitest (apps, packages, service suites, lint)
         shell: bash
         run: npx vitest run 2>&1 | tee ci-vitest.log
-
-      # THE SERVICES' OWN TESTS. vitest's projects are apps/* and packages/*, so nothing under
-      # tools/ was ever run by CI — the world editor had three suites and has four, and none of
-      # them had ever gone red anywhere but on somebody's laptop. A test CI does not run is a
-      # test that rots.
-      - id: node
-        name: Service tests (node --test)
-        shell: bash
-        run: node --test tools/worldeditor/*.test.mjs tools/assetsvc/*.test.mjs scripts/*.test.mjs 2>&1 | tee ci-node.log
 
       - id: build
         name: Build
@@ -61,7 +51,7 @@ jobs:
         if: failure()
         shell: bash
         env:
-          OUTCOMES: "lint=${{ steps.lint.outcome }} tsc=${{ steps.tsc.outcome }} vitest=${{ steps.vitest.outcome }} node=${{ steps.node.outcome }} build=${{ steps.build.outcome }}"
+          OUTCOMES: "tsc=${{ steps.tsc.outcome }} vitest=${{ steps.vitest.outcome }} build=${{ steps.build.outcome }}"
         run: |
           for pair in $OUTCOMES; do
             id=${pair%%=*}; outcome=${pair#*=}

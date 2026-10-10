@@ -1,0 +1,33 @@
+# The North America Overpass instance on gh200-1 — the WHOLE input to this release (helm upgrade
+# overpass-na tools/overpass/chart -n default -f deploy/gh200-1/overpass-na.yaml). Recorded from the
+# live release's values on 2026-10-10; tools/overpass/values-na.yaml is the template it came from.
+#
+# regions.primary MUST be north-america: the chart default is Maryland, and the sidecar's delete
+# filter keys off the primary outline.
+compression: "no"
+diffUrl: https://download.geofabrik.de/north-america-updates/
+flushSize: 4
+fullnameOverride: overpass-na
+ingress:
+  enabled: false
+planetUrl: https://download.geofabrik.de/north-america-latest.osm.pbf
+preprocess: apt-get update -qq && apt-get install -y -qq lbzip2 && mv /db/planet.osm.bz2
+  /db/planet.osm.pbf && osmium cat -o - -f osm /db/planet.osm.pbf | lbzip2 -c -n 8
+  > /db/planet.osm.bz2 && rm -f /db/planet.osm.pbf
+resources:
+  limits:
+    cpu: "16"
+    memory: 32Gi
+  requests:
+    cpu: "4"
+    memory: 8Gi
+rulesLoad: 0
+storage:
+  className: ceph-filesystem
+  size: 2Ti
+useAreas: false
+regions:
+  enabled: true
+  primary:
+    id: north-america
+    poly: https://download.geofabrik.de/north-america.poly

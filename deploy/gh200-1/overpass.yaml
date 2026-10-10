@@ -1,0 +1,10 @@
+# The Maryland Overpass instance on gh200-1 — the WHOLE input to this release (helm upgrade overpass
+# tools/overpass/chart -n default -f deploy/gh200-1/overpass.yaml). The chart's defaults ARE Maryland
+# (values.yaml: planetUrl, diffUrl, regions.primary), so this only states what differs.
+#
+# regions: the osm-import sidecar (tools/overpass/README.md, "Adding a region to an instance").
+# Turned on 2026-10-10 with the OSM coverage work; the same upgrade turned the areas step off
+# (OVERPASS_USE_AREAS=false), which this release had been missing since before the value existed.
+replicas: 1
+regions:
+  enabled: true

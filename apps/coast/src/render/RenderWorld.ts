@@ -3,7 +3,8 @@
 // far → near, then sprites far → near with hill clipping, then the player car
 // or the cockpit. The sim is never touched.
 
-import { Color, Group, LinearFilter, NearestFilter, OrthographicCamera, Scene, WebGLRenderer } from 'three'
+import { Color, Group, LinearFilter, NearestFilter, OrthographicCamera, Scene, type WebGLRenderer } from 'three'
+import { createRenderer, depthRequestFromURL, type RendererDepth } from '@apex/engine/render/depth'
 import { expApproach } from '@apex/engine/math/scalar'
 import type { RenderStats } from '@apex/engine/render/RenderStats'
 import type { Style, StyleFrameInfo } from '@apex/engine/render/styles/Style'
@@ -66,6 +67,8 @@ const SCENE_FADE = 60
 
 export class RenderWorld {
   readonly renderer: WebGLRenderer
+  /** which depth buffer the renderer was built with */
+  readonly depth: RendererDepth
   readonly scene = new Scene()
   // The z range is wide because the 3D-models layer stacks real geometry through it; everything
   // else in this scene sits at z ~ 0 and is painted in order.
@@ -151,7 +154,13 @@ export class RenderWorld {
   private lastZ = 0
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
+    // Reversed float depth where the browser has EXT_clip_control, the plain buffer otherwise;
+    // `?depth=standard|reversed|log` for an A/B (@apex/engine/render/depth). The solid pass's
+    // depth-only road proxy (ModelLayer, renderOrder −1) relies on the engine's render-list sorts
+    // to still draw first under a reversed buffer.
+    const built = createRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false, depthMode: depthRequestFromURL() ?? 'auto', label: 'coast' })
+    this.renderer = built.renderer
+    this.depth = built.depth
     this.renderer.info.autoReset = false
     this.renderer.setClearColor(new Color(0x000000), 1)
     this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.flames.mesh, this.sprites.mesh)

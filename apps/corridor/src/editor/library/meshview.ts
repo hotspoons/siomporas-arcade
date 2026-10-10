@@ -21,6 +21,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { createRenderer } from '@apex/engine/render/depth'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 /*
  * THE OTHER THINGS BLENDER WRITES.
@@ -226,7 +227,7 @@ export class MeshView {
     }
     this.spin = this.prefs.spin ?? o.spin ?? true
     this.wire = this.prefs.wire ?? false
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true })
+    this.renderer = createRenderer({ canvas: this.canvas, antialias: true, alpha: true, depthMode: 'standard', label: null }).renderer
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
 

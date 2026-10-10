@@ -58,6 +58,7 @@ import type { ZoneDoc } from './game/world/zones'
 import { defaultShow, formatAmount } from './game/session/finish'
 import { FinishView, type FinishButton } from './ui/finishscreen'
 import { loadGameModule } from './game/session/programload'
+import { composerTarget, createRenderer, depthRequestFromURL } from '@apex/engine/render/depth'
 import { PROFILES, profile as driveProfile, type DriveProfile } from '@apex/engine/physics/profiles'
 import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './world/placements'
 import { timeControls } from './ui/timecontrols'
@@ -129,46 +130,27 @@ const antialias = antialiasFor(bootSlug())
  * their own buffers. THE DEFAULT since 2026-10-09 (Rich played a level through on it: GPU p50
  * 18 → 7.6 ms at Ultra, nothing wrong on screen); `?depth=log` is the old path, for an A/B.
  *
- * Where EXT_clip_control is missing (swiftshader, an old driver) three would quietly draw with a
+ * Where EXT_clip_control is missing (an old driver, some software GL) three would quietly draw with a
  * plain forward 24-bit buffer — 60 km of z-fighting — so the extension is asked for FIRST, on a
  * throwaway context, and the logarithmic path is kept where it is not there.
+ *
+ * All of that now lives in the engine (@apex/engine/render/depth, 2026-10-10: Rich, "make sure these
+ * make it into the main game engine used by the other games"): the probe, the choice, the sorts.
  */
-const depthParam = new URLSearchParams(location.search).get('depth')
-const clipControl = (() => {
-  if (depthParam === 'log') return false
-  try {
-    const gl = document.createElement('canvas').getContext('webgl2')
-    return !!gl?.getExtension('EXT_clip_control')
-  } catch {
-    return false
-  }
-})()
-const reversedDepth = depthParam === 'reversed' || (depthParam !== 'log' && clipControl)
-const renderer = new THREE.WebGLRenderer({ canvas, antialias, logarithmicDepthBuffer: !reversedDepth, reversedDepthBuffer: reversedDepth })
-if (reversedDepth && !renderer.capabilities.reversedDepthBuffer) console.warn('corridor: reversed depth asked for, but EXT_clip_control is missing; a plain 24-bit depth buffer is drawing this')
-if (!reversedDepth) console.info(`corridor: logarithmic depth (${depthParam === 'log' ? '?depth=log' : 'no EXT_clip_control here'}) — early-Z is off`)
-if (renderer.capabilities.reversedDepthBuffer) {
-  /*
-   * THREE REVERSES THE WHOLE RENDER LIST under a reversed depth buffer — renderOrder and all — so
-   * the sky dome's renderOrder −1000 drew LAST and, depth test off, painted over the world (the
-   * sky-only frame, 2026-10-08). These comparators sort every key the opposite way, so three's
-   * reverse() lands the list in the order it should have been: renderOrder ascending, opaque
-   * front-to-back (a larger reversed z is nearer), transparent back-to-front.
-   */
-  type Item = { groupOrder: number; renderOrder: number; material: { id: number }; materialVariant?: number; z: number; id: number }
-  renderer.setOpaqueSort((a: Item, b: Item) =>
-    a.groupOrder !== b.groupOrder ? b.groupOrder - a.groupOrder
-    : a.renderOrder !== b.renderOrder ? b.renderOrder - a.renderOrder
-    : a.material.id !== b.material.id ? b.material.id - a.material.id
-    : (a.materialVariant ?? 0) !== (b.materialVariant ?? 0) ? (b.materialVariant ?? 0) - (a.materialVariant ?? 0)
-    : a.z !== b.z ? a.z - b.z
-    : b.id - a.id)
-  renderer.setTransparentSort((a: Item, b: Item) =>
-    a.groupOrder !== b.groupOrder ? b.groupOrder - a.groupOrder
-    : a.renderOrder !== b.renderOrder ? b.renderOrder - a.renderOrder
-    : a.z !== b.z ? b.z - a.z
-    : b.id - a.id)
-}
+const { renderer } = createRenderer({
+  canvas,
+  antialias,
+  // ?depth=log (or reversed, standard) for an A/B; anything else is auto
+  depthMode: depthRequestFromURL() ?? 'auto',
+  fallback: 'log',
+  label: 'corridor',
+})
+/*
+ * THREE REVERSES THE WHOLE RENDER LIST under a reversed depth buffer — renderOrder and all — so
+ * the sky dome's renderOrder −1000 drew LAST and, depth test off, painted over the world (the
+ * sky-only frame, 2026-10-08). `createRenderer` installs the comparators that sort every key the
+ * opposite way, so three's reverse() lands the list in the order it should have been.
+ */
 renderer.setPixelRatio(Math.min(2, devicePixelRatio))
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0xbfd2ea)
@@ -987,9 +969,7 @@ function buildPostAA(mode: 'fxaa' | 'smaa' | null) {
   composer = null
   if (!mode) return
   // with the reversed depth buffer the scene target needs float depth (see the renderer's note)
-  const target = renderer.capabilities.reversedDepthBuffer
-    ? new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, depthTexture: new THREE.DepthTexture(innerWidth, innerHeight, THREE.FloatType) })
-    : undefined
+  const target = composerTarget(renderer, innerWidth, innerHeight)
   const c = new EffectComposer(renderer, target)
   c.addPass(new RenderPass(scene, camera))
   c.addPass(mode === 'smaa' ? new SMAAPass() : new FXAAPass())

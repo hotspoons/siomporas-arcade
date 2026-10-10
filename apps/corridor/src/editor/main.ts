@@ -9,6 +9,7 @@
 // looking at exactly what the game looks at, or it is correcting something else.
 import { fixturesExtension } from './library/fixtures'
 import { buildingsExtension } from './library/buildingclasses'
+import { createRenderer } from '@apex/engine/render/depth'
 import { loadFixtures, saveFixtures } from '../game/world/fixtures'
 import { DROP_TYPE } from './author/ui'
 import * as THREE from 'three'
@@ -55,7 +56,8 @@ const mounts = document.querySelector('#se-rail')
   : null
 
 const canvas = $<HTMLCanvasElement>('#gl')
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true })
+// the engine's renderer (@apex/engine/render/depth), on the logarithmic buffer the editor has always had
+const { renderer } = createRenderer({ canvas, antialias: true, depthMode: 'log', label: null })
 renderer.setPixelRatio(Math.min(2, devicePixelRatio))
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x8fa6c2)

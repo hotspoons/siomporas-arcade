@@ -7,6 +7,8 @@
     // An integration probe against a real bake on disk, so it reads node:fs. The engine is
     // browser code and must not gain node types just to typecheck one test; vitest collects
     // this file regardless of what tsc is told to compile.
-    "test/pyrprobe.test.ts"
+    "test/pyrprobe.test.ts",
+    // reads three's own source to pin what its reversed-depth polygon offset does; node:fs again
+    "test/three-canary.test.ts"
   ]
 }

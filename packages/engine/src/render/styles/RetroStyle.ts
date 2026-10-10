@@ -22,6 +22,7 @@ import {
   type WebGLRenderer,
 } from 'three'
 import type { RetroOptions, Style, StyleFrameInfo } from './Style'
+import { useFloatDepth } from '../depth'
 
 const FRAG = /* glsl */ `
 precision highp float;
@@ -165,6 +166,9 @@ export class RetroStyle implements Style {
       colorSpace: SRGBColorSpace,
       depthBuffer: true,
     })
+    // a float depth buffer when depth is reversed (render/depth.ts); the renderer is null on a
+    // rebuild before attach, which attach's own rebuild then covers
+    if (this.renderer) useFloatDepth(this.target, this.renderer)
     this.material.uniforms.tFrame.value = this.target.texture
     this.material.uniforms.uRes.value.set(this.bufW, this.bufH)
   }

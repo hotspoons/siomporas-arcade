@@ -29,6 +29,7 @@
 // assembling the visible set is a typed-array copy of cached prefixes. Only tiles entering the
 // ring cost anything, and no more than GRASS_TILES_PER_FRAME of them per frame.
 import * as THREE from 'three'
+import { shadowBias } from '@apex/engine/render/depth'
 import { LAMPS, LAMP_PARS, retro } from '../visuals/retro'
 import { SPLAT_MASK_PARS, splatMaskUniforms } from '../visuals/splatmask'
 import type { SeasonLook } from '../visuals/season'
@@ -920,7 +921,7 @@ export class Grass {
           u.uSunShadowSize.value.set(shadow.mapSize.x, shadow.mapSize.y)
           // the bias moves the receiver away from the light in window depth; a reversed depth
           // buffer (three marks the shadow camera) counts the other way
-          u.uSunShadowBias.value = (shadow.camera as unknown as { _reversedDepth?: boolean })._reversedDepth ? -shadow.bias : shadow.bias
+          u.uSunShadowBias.value = shadowBias(shadow)
           u.uSunShadowRadius.value = 1
           u.uSunShadowIntensity.value = intensity
         }

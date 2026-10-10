@@ -6,6 +6,7 @@
 // Query: ?mode= &site=<slug> &look=<preset> &line=<id>
 import * as THREE from 'three'
 import { buildWater } from './world/water'
+import { createRenderer } from '@apex/engine/render/depth'
 import { WATER_LOOK_NAMES, WATER_PRESETS } from './world/waterShader'
 
 const err = document.getElementById('err')!
@@ -44,7 +45,7 @@ async function main() {
   const wantLook = q.get('look')
   const wantLine = q.get('line')
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true })
+  const { renderer } = createRenderer({ antialias: true, depthMode: 'log', label: null })
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.setPixelRatio(1)
   renderer.outputColorSpace = THREE.SRGBColorSpace

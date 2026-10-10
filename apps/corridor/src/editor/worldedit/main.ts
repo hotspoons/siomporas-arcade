@@ -13,6 +13,7 @@
 // authored files and the placement catalog are all on the service's volume, so closing the tab,
 // reloading, or the pod restarting loses a scroll position and nothing else.
 import { fixturesExtension } from '../library/fixtures'
+import { buildingsExtension } from '../library/buildingclasses'
 import { loadFixtures, saveFixtures } from '../../game/world/fixtures'
 import { Dialog, Drawer, Tabs, button, el, installShellKeys, status, clearStatus, toast, typing } from '../../ui/shell'
 import { empty, segmented, select } from '../../ui/controls'
@@ -574,6 +575,8 @@ const assets = new AssetCatalog({
     }),
     // the sound bank, slot by slot, with a Listen on everything (src/editor/library/sounds.ts)
     soundsExtension(),
+    // which materials each class of building is drawn from, shared or this world's (buildingclasses.ts)
+    buildingsExtension({ world: () => selected }),
   ],
   /*
    * PLACEABLE IS A TICK BOX, not a second screen.

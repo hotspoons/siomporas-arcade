@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MODES, PROFILES } from './levels.mjs'
+import { builtinFacades } from './facades.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 /** the engine-sound catalog, committed with the wasm it belongs to */
@@ -38,6 +39,8 @@ export const SETTING_CONTROLS = [
 ]
 /** what a vehicle build's `spec.drive` may be */
 export const DRIVES = ['fwd', 'rwd', 'awd']
+/** the building classes a footprint is drawn as (src/world/facades.ts FACADE_CLASS_IDS) */
+export const BUILDING_CLASSES = ['house', 'townhouse', 'apartments', 'commercial', 'skyscraper', 'industrial', 'civic', 'farm', 'shed']
 /** the vehicle template kinds vehicle_template takes */
 export const VEHICLE_KINDS = ['hero-car', 'traffic', 'van', 'truck', 'bus']
 
@@ -68,6 +71,7 @@ export async function soundSlots() {
 export async function vocab() {
   const engines = await engineSounds()
   const sounds = await soundSlots()
+  const facades = await builtinFacades().catch(() => [])
   return {
     level: {
       keys: 'see level_validate — a key outside its list is warned about',
@@ -83,6 +87,14 @@ export async function vocab() {
     sounds: {
       note: 'a vehicle or actor document may carry `sounds: { <slot>: [clips] }`; a clip is a bank clip below, `slot:<other slot>`, `asset:<id>/<file>` (PUT /assetsvc/catalog/<id>/sound/<file>) or a URL. An empty list is silence. Programs: api.audio.play(slot, { at, gain, rate }), api.audio.override(slot, clips)',
       slots: sounds,
+    },
+    buildings: {
+      note: 'every footprint is one of these classes and draws one wall and one roof from its class\u2019s pools (building_class_list / building_class_set); metalness is its reflectiveness',
+      classes: BUILDING_CLASSES.map((id) => {
+        const c = facades.find((x) => x.id === id)
+        return { id, label: c?.label ?? id, osm: c?.osm ?? [], ...(c?.min_height_m !== undefined ? { min_height_m: c.min_height_m } : {}) }
+      }),
+      fields: { walls: '[{ material, weight }]', roofs: '[{ material, weight }]', metalness: '0…1', roughness: '0…1', glass: 'boolean' },
     },
     program: {
       hideable: HIDEABLE,

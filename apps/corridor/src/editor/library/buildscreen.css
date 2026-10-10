@@ -334,3 +334,26 @@
 .asset-src.src-built-in { color: var(--warn, #e2b34a); border-color: color-mix(in srgb, var(--warn, #e2b34a) 35%, transparent); }
 .asset-src.src-world { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
 .chip.scope-builtin { color: var(--warn, #e2b34a); border-color: color-mix(in srgb, var(--warn, #e2b34a) 40%, transparent); }
+
+/* ---- the Buildings tab (buildingclasses.ts) ---------------------------------------------------- */
+.bcl-head { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s3); }
+.bcl-say { margin: 0; max-width: 90ch; }
+.bcl-class .group-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--s3) var(--s5); align-items: start; }
+.bcl-class .group-body > .group-note, .bcl-class .group-body > .panel-actions { grid-column: 1 / -1; }
+.bcl-pool { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bcl-pool-head { display: flex; align-items: center; gap: var(--s2); font-size: var(--text-sm); }
+/* the mix: each material as wide as its share of the draws */
+.bcl-strip { display: flex; height: 28px; border-radius: var(--r1); overflow: hidden; border: 1px solid var(--line-1); }
+.bcl-seg { min-width: 6px; background-size: 64px 64px; background-color: var(--bg-2); border-right: 1px solid var(--bg-0); }
+.bcl-seg:last-child { border-right: 0; }
+.bcl-seg.missing { background-image: repeating-linear-gradient(45deg, transparent 0 4px, var(--line-2) 4px 6px); }
+.bcl-entry { display: flex; align-items: center; gap: var(--s2); padding: 2px 0; }
+.bcl-entry .material-swatch { width: 32px; height: 32px; flex: none; border-radius: var(--r1); object-fit: cover; }
+.bcl-entry-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; font-size: var(--text-sm); }
+.bcl-entry-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bcl-entry-name .dim { font-size: var(--text-xs); color: var(--ink-3); }
+.bcl-weight { width: 64px; flex: none; }
+.bcl-pct { width: 3.5ch; flex: none; text-align: right; font-size: var(--text-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.bcl-none { margin: 0; font-size: var(--text-xs); }
+.bcl-surface { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.bcl-from { display: flex; align-items: center; gap: var(--s2); font-size: var(--text-xs); }

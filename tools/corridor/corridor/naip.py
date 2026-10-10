@@ -12,7 +12,7 @@ tile at a time, with a breaker so an outage is paid for once), or when it has no
 ImageServer might (it carries no Hawaii or Alaska). Forcing one source turns the other off — the
 bake then fails rather than mixing. Either way the files are the same: same names, same lattice,
 same `res_m`, cached under `<cache>/naip/` (the ImageServer's tiles as before, the Planetary
-Computer's as `pc_*.jpg` with a `.json` naming the items that fed each).
+Computer's as `pc_*_<rule>.jpg` with a `.json` naming the items that fed each).
 
 THE USGS SOURCE was ported from trailworks `fetch_naip_rgb`, with two changes: the resolution is
 the service's native 0.3 m rather than 1 m (USGSNAIPPlus reports pixelSize 0.3 — the current NAIP
@@ -209,11 +209,11 @@ class Tile:
 
     @property
     def pc(self) -> Path:
-        return self.cache / "naip" / f"pc_{self.stem}.jpg"
+        return self.cache / "naip" / f"pc_{self.stem}_{naip_pc.rule_tag()}.jpg"
 
     @property
     def pc_meta(self) -> Path:
-        return self.cache / "naip" / f"pc_{self.stem}.json"
+        return self.pc.with_suffix(".json")
 
     def params(self) -> dict:
         x0, y0, x1, y1 = self.bbox
@@ -334,6 +334,8 @@ def provenance(tiles: list[Tile], mode: str | None = None) -> dict:
                 items.setdefault(rec["id"], {**rec, "tiles": 0})["tiles"] += 1
     names = {"pc": "Planetary Computer NAIP (USDA quarter-quad COGs)", "usgs": "USGS NAIPPlus ImageServer (current mosaic)"}
     out: dict = {"source": " + ".join(names[k] for k in sorted(by_source)) or None, "tiles_by_source": by_source}
+    if by_source.get("pc"):
+        out["rule"] = naip_pc.ranking_rule()
     if items:
         recs = sorted(items.values(), key=lambda r: (-r["year"], r["gsd_m"], r["id"]))
         out["items"] = recs
@@ -525,7 +527,7 @@ def fetch_horizon_image(frame: Frame, out: Path, bbox: tuple[float, float, float
                 _atomic_write(out, buf.getvalue())
                 years = sorted({u.year for u in used}, reverse=True)
                 print(f"  horizon imagery {size}x{size} @ {res:g} m from {len(used)} Planetary Computer items ({', '.join(map(str, years))})", flush=True)
-                return {"source": "pc", "items": len(used), "years": years}
+                return {"source": "pc", "items": len(used), "years": years, "rule": naip_pc.ranking_rule()}
             if mode == "pc":
                 print("  horizon no Planetary Computer NAIP over the horizon square; no imagery", flush=True)
                 return None

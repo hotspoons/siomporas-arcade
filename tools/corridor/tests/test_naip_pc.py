@@ -45,31 +45,47 @@ AREA = (355000.0, 4318000.0, 355600.0, 4318600.0)  # 600 m at 0.6 m = 1000 px
 RED, GREEN, BLUE, YELLOW = (200, 10, 10), (10, 200, 10), (10, 10, 200), (250, 250, 0)
 
 
-def write_cog(path: Path, ubox, res: float, colour, hole=None, crs="EPSG:26918", marker=None, white=()) -> None:
+NIR = 77
+RGBN = ("red", "green", "blue", "undefined")
+
+
+def write_cog(path: Path, ubox, res: float, colour, hole=None, crs="EPSG:26918", marker=None, white=(), order=RGBN) -> None:
     """A 4-band (RGB+NIR, like NAIP) COG of one flat colour over a UTM box, with an optional
-    all-zero `hole` box (a quarter-quad's black collar) and an optional white `marker` box."""
+    all-zero `hole` box (a quarter-quad's black collar) and an optional white `marker` box. Band 4
+    is NIR with an UNDEFINED colour interpretation, exactly as the real NAIP COGs have it (not
+    alpha); `order` names the colour interpretation of each stored band ("undefined" is NIR)."""
     x0, y0, x1, y1 = ubox
     w, h = int(round((x1 - x0) / res)), int(round((y1 - y0) / res))
+    value = {"red": colour[0], "green": colour[1], "blue": colour[2], "undefined": NIR}
     a = np.empty((4, h, w), dtype=np.uint8)
-    for b, v in enumerate((*colour, 77)):
-        a[b] = v
+    for b, name in enumerate(order):
+        a[b] = value[name]
     if hole is not None:
         hx0, hy0, hx1, hy1 = hole
         a[:, int((y1 - hy1) / res) : int((y1 - hy0) / res), int((hx0 - x0) / res) : int((hx1 - x0) / res)] = 0
+    rgb = [order.index(c) for c in ("red", "green", "blue")]
     for wx0, wy0, wx1, wy1 in white:
-        a[:3, int(round((y1 - wy1) / res)) : int(round((y1 - wy0) / res)), int(round((wx0 - x0) / res)) : int(round((wx1 - x0) / res))] = 255
+        a[rgb, int(round((y1 - wy1) / res)) : int(round((y1 - wy0) / res)), int(round((wx0 - x0) / res)) : int(round((wx1 - x0) / res))] = 255
     if marker is not None:
         mx0, my0, mx1, my1 = marker
-        a[:3, int(round((y1 - my1) / res)) : int(round((y1 - my0) / res)), int(round((mx0 - x0) / res)) : int(round((mx1 - x0) / res))] = 255
+        a[rgb, int(round((y1 - my1) / res)) : int(round((y1 - my0) / res)), int(round((mx0 - x0) / res)) : int(round((mx1 - x0) / res))] = 255
     tmp = path.with_suffix(".plain.tif")
+    from rasterio.enums import ColorInterp
+
     with rasterio.open(tmp, "w", driver="GTiff", width=w, height=h, count=4, dtype="uint8", crs=crs,
-                       transform=from_origin(x0, y1, res, res), tiled=True, blockxsize=256, blockysize=256) as dst:
+                       transform=from_origin(x0, y1, res, res), tiled=True, blockxsize=256, blockysize=256,
+                       photometric="MINISBLACK", alpha="UNSPECIFIED") as dst:
         dst.write(a)
+        dst.colorinterp = [getattr(ColorInterp, n) for n in order]
     rasterio.shutil.copy(tmp, path, driver="COG", OVERVIEWS="AUTO", OVERVIEW_RESAMPLING="AVERAGE", BLOCKSIZE=256)
     tmp.unlink()
 
 
-def feature(fid: str, href: Path, ubox, year: int, gsd: float, state: str, date: str | None = None) -> dict:
+EO_RGBN = [{"name": "Red", "common_name": "red"}, {"name": "Green", "common_name": "green"},
+           {"name": "Blue", "common_name": "blue"}, {"name": "NIR", "common_name": "nir"}]
+
+
+def feature(fid: str, href: Path, ubox, year: int, gsd: float, state: str, date: str | None = None, eo_bands=EO_RGBN) -> dict:
     lon, lat = FRAME.to_wgs(np.array([ubox[0], ubox[2], ubox[2], ubox[0]]), np.array([ubox[1], ubox[1], ubox[3], ubox[3]]))
     ring = [[float(x), float(y)] for x, y in zip(lon, lat)] + [[float(lon[0]), float(lat[0])]]
     return {
@@ -77,7 +93,7 @@ def feature(fid: str, href: Path, ubox, year: int, gsd: float, state: str, date:
         "geometry": {"type": "Polygon", "coordinates": [ring]},
         "bbox": [float(lon.min()), float(lat.min()), float(lon.max()), float(lat.max())],
         "properties": {"datetime": f"{date or f'{year}-07-01'}T16:00:00Z", "naip:year": str(year), "naip:state": state, "gsd": gsd},
-        "assets": {"image": {"href": str(href)}},
+        "assets": {"image": {"href": str(href), **({"eo:bands": eo_bands} if eo_bands is not None else {})}},
     }
 
 
@@ -195,6 +211,18 @@ class ItemChoiceTest(_Base):
         self.assertEqual(meta["tiles_by_source"], {"pc": 4})
         self.assertEqual([r["id"] for r in meta["items"]], ["md_2023", "va_2023", "md_2021"])
 
+    def test_a_changed_rule_does_not_reuse_old_pieces(self):
+        self.bake()
+        (self.dir / "naip_1m.tif").unlink()
+        naip_pc._SEARCHED.clear()
+        reads: list[str] = []
+        real = naip_pc.warp_item
+        with mock.patch.dict(os.environ, {"CORRIDOR_NAIP_LEAF_ON_YEARS": "0"}), \
+                mock.patch.object(naip_pc, "warp_item", lambda it, *a, **k: reads.append(it.id) or real(it, *a, **k)):
+            _out, meta = self.bake()
+        self.assertTrue(reads, "pieces composed under the old rule were reused")
+        self.assertIn("0 years newer", meta["rule"])
+
     def test_the_2018_item_is_never_opened(self):
         opened: list[str] = []
         real = naip_pc.warp_item
@@ -232,6 +260,74 @@ class RedactionTest(_Base):
         self.assertEqual(px(355456, 4318194), (255, 255, 255))  # the roof is kept
         self.assertEqual(px(355400, 4318500), GREEN)
         self.assertEqual([u.id for u in used], ["new", "old"])
+
+
+class BandLayoutTest(_Base):
+    """The bands are NAMED, never assumed to be 1, 2, 3 (coordinator review, 2026-10-10)."""
+
+    def _read(self, order, eo_bands):
+        write_cog(self.dir / "b.tif", (354900, 4317900, 355700, 4318700), 0.6, RED, order=order)
+        item = naip_pc.item_from_feature(feature("b", self.dir / "b.tif", (354900, 4317900, 355700, 4318700), 2023, 0.6, "md", eo_bands=eo_bands))
+        arr, used = naip_pc.compose(FRAME, AREA, 0.6, [item])
+        return tuple(int(v) for v in arr[:, 500, 500]), [u.id for u in used]
+
+    def test_a_nir_first_layout_is_read_by_name(self):
+        nir_first = [EO_RGBN[3], *EO_RGBN[:3]]
+        self.assertEqual(naip_pc.rgb_bands({"eo:bands": nir_first}), (2, 3, 4))
+        px, used = self._read(("undefined", "red", "green", "blue"), nir_first)
+        self.assertEqual(px, RED)  # read as bands 1-3 this is (NIR, R, G) = (77, 200, 10): false colour
+        self.assertEqual(used, ["b"])
+
+    def test_the_file_alone_can_name_the_bands(self):
+        px, used = self._read(("blue", "green", "red", "undefined"), None)
+        self.assertEqual(px, RED)
+
+    def test_catalogue_and_file_disagreeing_is_never_painted(self):
+        px, used = self._read(("blue", "green", "red", "undefined"), EO_RGBN)
+        self.assertEqual(px, (0, 0, 0))  # a hole the tile report names, not swapped colours
+        self.assertEqual(used, [])
+
+    def test_a_cir_product_is_not_a_candidate(self):
+        cir = [{"common_name": "nir"}, {"common_name": "red"}, {"common_name": "green"}]
+        with self.assertRaises(naip_pc.BandLayoutError):
+            naip_pc.rgb_bands({"eo:bands": cir})
+        write_cog(self.dir / "c.tif", (354900, 4317900, 355700, 4318700), 0.6, RED)
+        cat = FakeCatalogue([feature("cir", self.dir / "c.tif", (354900, 4317900, 355700, 4318700), 2023, 0.6, "md", eo_bands=cir)])
+        with mock.patch.object(naip_pc, "_http_json", cat):
+            self.assertEqual(naip_pc.search(FRAME.bbox_wgs(*AREA)), [])
+
+
+class LeafOnTest(unittest.TestCase):
+    """Virginia 2023 was flown Oct-Nov; 2021 on 09-10. Rich cares how it looks (2026-10-10)."""
+
+    def item(self, iid, date, gsd=0.6):
+        return naip_pc.Item(iid, f"/x/{iid}.tif", date, int(date[:4]), iid[:2], gsd, box(0, 0, 1, 1))
+
+    def order(self, *items):
+        return [i.id for i in sorted(items, key=naip_pc.Item.rank_key)]
+
+    def test_leaf_on_two_years_older_beats_a_november_flight(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CORRIDOR_NAIP_LEAF_ON", None)
+            os.environ.pop("CORRIDOR_NAIP_LEAF_ON_YEARS", None)
+            va23 = self.item("va_2023_nov", "2023-11-13")
+            va21 = self.item("va_2021_sep", "2021-09-10")
+            md23 = self.item("md_2023_sep", "2023-09-01", 0.3)
+            md21 = self.item("md_2021_jun", "2021-06-17")
+            self.assertEqual(self.order(va23, va21, md23, md21), ["md_2023_sep", "va_2021_sep", "md_2021_jun", "va_2023_nov"])
+            # three years is past the window: the newer leaf-off flight wins again
+            self.assertEqual(self.order(va23, self.item("va_2020_jul", "2020-07-01")), ["va_2023_nov", "va_2020_jul"])
+            self.assertTrue(va21.record()["leaf_on"])
+            self.assertFalse(va23.record()["leaf_on"])
+
+    def test_the_rule_is_configurable(self):
+        va23 = self.item("va_2023_nov", "2023-11-13")
+        va21 = self.item("va_2021_sep", "2021-09-10")
+        with mock.patch.dict(os.environ, {"CORRIDOR_NAIP_LEAF_ON_YEARS": "0"}):
+            self.assertEqual(self.order(va23, va21), ["va_2023_nov", "va_2021_sep"])
+        with mock.patch.dict(os.environ, {"CORRIDOR_NAIP_LEAF_ON": "5-11"}):
+            self.assertEqual(self.order(va23, va21), ["va_2023_nov", "va_2021_sep"])  # November counts as leaf-on
+            self.assertIn("months 5-11", naip_pc.ranking_rule())
 
 
 class RegistrationTest(_Base):

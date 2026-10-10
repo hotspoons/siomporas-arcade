@@ -179,12 +179,18 @@ after USGSNAIPPlus answered 504 for an hour and killed two dc-metro bakes). The 
 holds the USDA's own quarter-quad COGs (RGB+NIR, 0.3 m in Maryland's 2023 cycle, 0.6 m in
 Virginia's), found by a STAC search and read with HTTP range requests over GDAL's `/vsicurl/` with a
 free SAS token — no account, no credentials; it is refreshed when it nears `msft:expiry`. The AWS
-Open Data NAIP buckets were measured too and are requester-pays, so they are not used. Per area the
-newest year wins, the finer item within a year, and older items fill only the pixels the newer ones
-leave black (a state line, a quarter-quad's collar, a missing quarter-quad); each item is read at
+Open Data NAIP buckets were measured too and are requester-pays, so they are not used. Per pixel a
+LEAF-ON flight (`CORRIDOR_NAIP_LEAF_ON`, months, default `6-9`) beats a leaf-off one up to
+`CORRIDOR_NAIP_LEAF_ON_YEARS` (default 2) years newer — Virginia flew 2023 in October and November,
+red maples beside Maryland's September, so Arlington takes VA 2021-09-10 instead — then the newest
+year wins, the finer item, the later date, and older items fill only the pixels the ones before
+leave black (a state line, a quarter-quad's collar, a missing quarter-quad, NAIP's white redaction
+rectangles). The rule is recorded in the manifest's `naip.rule` and keys the cached pieces. Red,
+green and blue are read by NAME — the asset's `eo:bands` and the COG's colour interpretation must
+agree, an item where they do not (or a CIR product) is skipped, never painted. Each item is read at
 the coarsest overview no coarser than the lattice, then warped onto it — the lattice and the file
 names do not change (`naip.tif` at 0.3 m, `naip_1m.tif` at `NAIP_RES_M`, the 60 m horizon JPEG).
-Pieces cache under `data/cache/naip/` as `pc_<tile>.jpg` beside a `.json` naming the items that fed
+Pieces cache under `data/cache/naip/` as `pc_<tile>_<rule>.jpg` beside a `.json` naming the items that fed
 them, and the manifest's `naip` records the source, the items, their years and resolutions.
 `CORRIDOR_NAIP_SOURCE=auto|pc|usgs` (default `auto`): `auto` turns to the ImageServer when the
 Planetary Computer cannot answer (about two minutes of 5xx, then a breaker sends every remaining
@@ -196,7 +202,10 @@ override the endpoints, `CORRIDOR_NAIP_JOBS` (default 6) the tiles fetched at on
 Registration: the Planetary Computer path matches `gdalwarp` of the COG to 0.003 px; the ImageServer,
 asked for the site's WGS84 UTM, shifts the same photograph 0.6-1 m north (it matches the COG exactly
 in the COG's own NAD83 UTM), so imagery moves that much south against older bakes — onto the DEM and
-lidar, which PROJ reprojects the same way this path does.
+lidar, which PROJ reprojects the same way this path does. Measured: ImageServer rasters sit exactly
+one row (0.6 m) north at the 0.6 m lattice, 0.96 m at 0.3 m. Caveat: in `auto`, a bake whose
+tiles came from both sources shows that step as a seam at the tile edges; `tiles_by_source` in the
+manifest says when that happened.
 
 **LANDFIRE's class at the centre of a corridor is always `Developed-Roads`.** The site point is on
 the pavement by construction, and LANDFIRE has a 30 m class for pavement. Vegetation is read as AREA

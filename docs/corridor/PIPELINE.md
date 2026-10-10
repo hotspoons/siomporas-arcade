@@ -129,9 +129,14 @@ either way — 4000 px tiles at the caller's lattice (`RES = 0.3` m → `naip.ti
 
 - **Planetary Computer** (`naip_pc.py`, primary since 2026-10-10): STAC search of the `naip`
   collection, the USDA's quarter-quad COGs read over `/vsicurl/` with a free SAS token (refreshed
-  near `msft:expiry`). Per pixel the newest year wins, the finer item within a year, and older items
-  fill only what is still black (state lines, collars, a missing quarter-quad); an item that adds
-  nothing is never opened. Each item is read at its coarsest overview no coarser than the lattice
+  near `msft:expiry`). Per pixel a leaf-on flight (`CORRIDOR_NAIP_LEAF_ON`, default months 6-9)
+  beats a leaf-off one up to `CORRIDOR_NAIP_LEAF_ON_YEARS` (default 2) newer, then the newest year,
+  the finer item, the later date; older items fill only what is still black (state lines, collars,
+  a missing quarter-quad, white redaction rectangles); an item that adds nothing is never opened.
+  The rule is in the manifest (`naip.rule`). R, G and B are read by name from `eo:bands`, checked
+  against the COG's colour interpretation; an item that disagrees, or a CIR product, is skipped.
+  Registration: matches `gdalwarp` of the COG to 0.003 px; the ImageServer's EPSG:326xx exports sit
+  exactly one 0.6 m row north (its own datum shift), so a mixed-source raster shows a seam. Each item is read at its coarsest overview no coarser than the lattice
   (0.3 m Maryland 2023 → its 0.6 m overview), then warped. The manifest's `naip` names the items,
   years and source resolutions (`items`, `years`, `source_res_m`, `tiles_by_source`).
 - **USGS** `USGSNAIPPlus/ImageServer/exportImage`, `bandIds=0,1,2` (the service carries NIR as a

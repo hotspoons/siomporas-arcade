@@ -113,12 +113,18 @@ def _backoff(attempt: int) -> float:
     return float(min(60, 10 * 2**attempt))
 
 
+class BandLayoutError(ValueError):
+    """An item whose bands cannot be shown to be red, green and blue. Not transient: never retried."""
+
+
 def retry(fn, what: str, tries: int = TRIES):
     """Call `fn()` until it returns, sleeping 10/20/40/60 s between tries; raise naming `what`."""
     last: Exception | None = None
     for attempt in range(tries):
         try:
             return fn()
+        except BandLayoutError:
+            raise
         except Exception as exc:  # noqa: BLE001 — every failure here is a transient until proven otherwise
             last = exc
         if attempt + 1 < tries:
@@ -183,11 +189,31 @@ class Item:
     state: str
     gsd: float         # metres
     footprint: object  # shapely geometry, WGS84
+    #: 1-based (red, green, blue) band indexes from the asset's `eo:bands` common names, or None
+    #: when the catalogue does not say (then the COG's own colour interpretation must)
+    bands: tuple[int, int, int] | None = None
     _utm: dict = field(default_factory=dict, repr=False, compare=False)
 
+    @property
+    def month(self) -> int:
+        return int(self.date[5:7])
+
+    def leaf_on(self) -> bool:
+        lo, hi = leaf_on_months()
+        return lo <= self.month <= hi
+
     def rank_key(self):
-        # newest year first, the finer resolution within a year, then the later flight
-        return (-self.year, self.gsd, tuple(-int(p) for p in self.date.split("-")))
+        """LEAF-ON within LEAF_ON_YEARS of a newer flight first, then the newest year, the finer
+        resolution, the later date.
+
+        Rich cares how the world looks. Virginia flew NAIP 2023 in October and November: over
+        Arlington it is red maples and bare branches beside Maryland's September 2023, a seam at
+        every quarter-quad (dc-metro-take-2's western block, 2026-10-10). Virginia also flew
+        2021-09-10, leaf-on. So a leaf-on item counts as LEAF_ON_YEARS (+ a half, to win the tie)
+        newer than it is: it beats a leaf-off item up to that many years newer, and loses to one
+        newer still. Two leaf-on items, or two leaf-off ones, compare by year as before."""
+        bonus = leaf_on_years() + 0.5 if self.leaf_on() else 0.0
+        return (-(self.year + bonus), -self.year, self.gsd, tuple(-int(p) for p in self.date.split("-")))
 
     def footprint_in(self, frame):
         g = self._utm.get(frame.epsg)
@@ -197,21 +223,86 @@ class Item:
         return g
 
     def record(self) -> dict:
-        return {"id": self.id, "state": self.state, "year": self.year, "date": self.date, "gsd_m": self.gsd}
+        return {"id": self.id, "state": self.state, "year": self.year, "date": self.date, "gsd_m": self.gsd, "leaf_on": self.leaf_on()}
+
+
+def leaf_on_months() -> tuple[int, int]:
+    """CORRIDOR_NAIP_LEAF_ON: the leaf-on months, inclusive, as `6-9` (June to September, the default)."""
+    v = os.environ.get("CORRIDOR_NAIP_LEAF_ON", "6-9").strip()
+    try:
+        lo, hi = (int(x) for x in v.split("-", 1))
+        if 1 <= lo <= hi <= 12:
+            return lo, hi
+    except ValueError:
+        pass
+    return 6, 9
+
+
+def leaf_on_years() -> int:
+    """CORRIDOR_NAIP_LEAF_ON_YEARS: how many years older a leaf-on item may be and still beat a
+    leaf-off one (default 2; 0 turns the preference off except within one year)."""
+    try:
+        return max(0, int(os.environ.get("CORRIDOR_NAIP_LEAF_ON_YEARS", "2")))
+    except ValueError:
+        return 2
+
+
+def ranking_rule() -> str:
+    lo, hi = leaf_on_months()
+    return (f"per pixel: leaf-on (months {lo}-{hi}) over a leaf-off item up to {leaf_on_years()} years newer, "
+            "then the newest year, the finer resolution, the later date; older items only fill holes")
+
+
+def rule_tag() -> str:
+    """The ranking knobs as a cache-name suffix: a piece composed under one rule is never reused
+    under another (changing CORRIDOR_NAIP_LEAF_ON* re-reads, it does not silently keep old pieces)."""
+    lo, hi = leaf_on_months()
+    return f"lo{lo}-{hi}y{leaf_on_years()}"
+
+
+def rgb_bands(asset: dict) -> tuple[int, int, int] | None:
+    """The asset's red, green and blue band indexes (1-based) from its `eo:bands` (or
+    `raster:bands`) common names. None when the catalogue lists no bands at all; BandLayoutError
+    when it lists bands and red, green or blue is not among them (a CIR or NIR-only product)."""
+    listed = asset.get("eo:bands") or asset.get("raster:bands")
+    if not listed:
+        return None
+    names = [str(b.get("common_name") or b.get("name") or "").lower() for b in listed]
+    try:
+        return tuple(names.index(c) + 1 for c in ("red", "green", "blue"))  # type: ignore[return-value]
+    except ValueError:
+        raise BandLayoutError(f"{asset.get('href', '?')}: bands {names} have no red/green/blue") from None
 
 
 def item_from_feature(f: dict) -> Item:
     p = f["properties"]
     date = (p.get("datetime") or p.get("start_datetime") or "1900-01-01")[:10]
+    asset = f["assets"]["image"]
     return Item(
         id=f["id"],
-        href=f["assets"]["image"]["href"],
+        href=asset["href"],
         date=date,
         year=int(p.get("naip:year") or date[:4]),
         state=str(p.get("naip:state") or ""),
         gsd=float(p.get("gsd") or 1.0),
         footprint=shape(f["geometry"]),
+        bands=rgb_bands(asset),
     )
+
+
+def resolve_bands(item: Item, colorinterp) -> tuple[int, int, int]:
+    """The (red, green, blue) bands to read, NEVER assumed: the catalogue's `eo:bands` and the COG's
+    own colour interpretation must agree where both speak, and at least one of them must."""
+    names = [getattr(ci, "name", str(ci)).lower() for ci in colorinterp]
+    from_file = None
+    if all(c in names for c in ("red", "green", "blue")):
+        from_file = tuple(names.index(c) + 1 for c in ("red", "green", "blue"))
+    if item.bands is not None and from_file is not None and item.bands != from_file:
+        raise BandLayoutError(f"{item.id}: the catalogue says RGB is bands {item.bands}, the file says {from_file} ({names})")
+    bands = item.bands or from_file
+    if bands is None:
+        raise BandLayoutError(f"{item.id}: neither the catalogue nor the file says which bands are red, green and blue ({names})")
+    return bands
 
 
 def search_features(bbox_wgs, limit: int = 250, max_pages: int = 40, tries: int = TRIES) -> list[dict]:
@@ -245,7 +336,14 @@ def search(bbox_wgs, tries: int = TRIES) -> list[Item]:
         hit = _SEARCHED.get(key)
     if hit is not None:
         return hit
-    items = sorted((item_from_feature(f) for f in search_features(bbox_wgs, tries=tries)), key=Item.rank_key)
+    items = []
+    for f in search_features(bbox_wgs, tries=tries):
+        try:
+            items.append(item_from_feature(f))
+        except BandLayoutError as exc:
+            # a product that is not natural colour (CIR, NIR-only) is never a candidate
+            print(f"  naip    SKIPPED {f.get('id')}: {exc}", flush=True)
+    items.sort(key=Item.rank_key)
     with _SEARCH_LOCK:
         _SEARCHED[key] = items
     return items
@@ -306,10 +404,11 @@ def warp_item(item: Item, frame, x0: float, y1: float, res: float, w: int, h: in
             with rasterio.open(path) as src0:
                 lvl = overview_level(float(src0.res[0]), src0.overviews(1), res)
             with rasterio.open(path, **({"overview_level": lvl} if lvl is not None else {})) as src:
+                bands = resolve_bands(item, src.colorinterp)
                 dst = np.zeros((3, h, w), dtype=np.uint8)
                 down = res / float(src.res[0])
                 reproject(
-                    source=rasterio.band(src, (1, 2, 3)),
+                    source=rasterio.band(src, bands),
                     destination=dst,
                     src_nodata=0,
                     dst_transform=from_origin(x0, y1, res, res),
@@ -397,7 +496,12 @@ def compose(frame, bbox, res: float, items: list[Item], jobs: int = 1, tries: in
         r0, r1, c0, c1 = _window(bounds, xmin, ymax, res, w, h)
         if r1 <= r0 or c1 <= c0:
             return it, (r0, r1, c0, c1), None
-        return it, (r0, r1, c0, c1), warp_item(it, frame, xmin + c0 * res, ymax - r0 * res, res, c1 - c0, r1 - r0, tries)
+        try:
+            return it, (r0, r1, c0, c1), warp_item(it, frame, xmin + c0 * res, ymax - r0 * res, res, c1 - c0, r1 - r0, tries)
+        except BandLayoutError as exc:
+            # never paint a band we cannot name as colour; the next item fills, a hole is reported
+            print(f"  naip    SKIPPED {it.id}: {exc}", flush=True)
+            return it, (r0, r1, c0, c1), None
 
     def paste(it: Item, win, sub) -> None:
         if sub is None:

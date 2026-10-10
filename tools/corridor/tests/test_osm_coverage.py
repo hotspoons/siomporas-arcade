@@ -170,6 +170,42 @@ class RuntimeErrorIsNotAnAnswer(unittest.TestCase):
             osm.session.post, osm.time.sleep, osm._OURS, osm.OVERPASS, osm._COVERAGE_FILE, osm._coverage_cache = saved
 
 
+class NonJsonIsNotAnAnswer(unittest.TestCase):
+    """2026-10-10: 25 dc-metro shards asked overpass-na for the whole network at once; one got
+    HTTP 200 with a body that was not JSON, and `resp.json()` killed the shard. A busy server is
+    asked again, and what it said is never cached."""
+
+    def test_a_non_json_200_is_retried_and_never_cached(self):
+        bodies = ["<html><body>The server is probably too busy to handle your request.</body></html>", {"elements": [{"type": "way", "id": 9}]}]
+        posted = []
+
+        class R:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+                self.text = body if isinstance(body, str) else json.dumps(body)
+
+            def json(self):
+                if isinstance(self.body, str):
+                    raise ValueError("Expecting value: line 1 column 1 (char 0)")
+                return self.body
+
+        saved = (osm.session.post, osm.time.sleep, osm._OURS, osm.OVERPASS, osm._COVERAGE_FILE, osm._coverage_cache)
+        osm.session.post = lambda url, data, timeout: (posted.append(url), R(bodies.pop(0)))[1]
+        osm.time.sleep = lambda s: None
+        osm._OURS, osm.OVERPASS, osm._COVERAGE_FILE, osm._coverage_cache = [MD], [MD], "", None
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                out = osm.overpass("way(39.0,-76.7,39.01,-76.69)[highway];out;", Path(d))
+                self.assertEqual(out["elements"][0]["id"], 9)
+                self.assertEqual(len(posted), 2)
+                cached = json.loads(next(Path(d).glob("*.json")).read_text())
+                self.assertEqual(cached["elements"][0]["id"], 9)
+        finally:
+            osm.session.post, osm.time.sleep, osm._OURS, osm.OVERPASS, osm._COVERAGE_FILE, osm._coverage_cache = saved
+
+
 if __name__ == "__main__":
     unittest.main()
 

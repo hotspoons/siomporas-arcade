@@ -221,7 +221,18 @@ def overpass(query: str, cache_dir: Path) -> dict:
             last = exc
             continue
         if resp.status_code == 200:
-            data = resp.json()
+            # NOT ALWAYS JSON. An instance under load (2026-10-10: 25 dc-metro shards asking
+            # overpass-na for the whole network at once) answers 200 with an HTML or XML error page;
+            # `resp.json()` raised and the shard died. That is a busy server, not an answer: wait
+            # longer each time and ask again, and never cache it.
+            try:
+                data = resp.json()
+            except ValueError:
+                body = " ".join(resp.text[:200].split())
+                print(f"  overpass {url.split('/')[2]}: HTTP 200 but not JSON ({body!r}); asking again", flush=True)
+                last = RuntimeError(f"non-JSON 200 from {url.split('/')[2]}: {body}")
+                time.sleep(min(60, 10 * (attempt + 1)))
+                continue
             # A RUNTIME ERROR ARRIVES AS A 200. Overpass has already sent its header when a query
             # times out, runs out of memory, or — measured on an instance taking an import, about 1
             # query in 100 — finds "Data file size does not match block size"; the body is valid

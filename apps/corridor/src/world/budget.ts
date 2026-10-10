@@ -19,6 +19,7 @@
 // adding those on top of a builder that cannot be interrupted.
 
 import { streamScale } from './streamscale'
+import { isBackgrounded } from './pageactive'
 
 /**
  * Main-thread time the budgeted builders spent since the frame loop last read this. A slice yields
@@ -107,7 +108,9 @@ export class Budget {
     // build never finishes — measured crawling 1 -> 46 of 427 in a minute before this check, and
     // stopped dead before that when the yield was rAF alone. The whole point of the budget is to
     // let the browser paint between slices; where it is not painting, just get on with it.
-    if (typeof document !== 'undefined' && document.hidden) {
+    // (and a page that reports "visible" but paints nothing — reloaded into a background window —
+    // is the same: pageactive.ts watches for frames that stopped coming, every couple of seconds)
+    if (isBackgrounded()) {
       this.sliceStart = now
       return
     }

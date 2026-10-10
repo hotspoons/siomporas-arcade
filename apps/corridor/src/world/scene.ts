@@ -46,6 +46,7 @@ import { siteProjector } from '../game/move/minimap'
 import { injectShade } from '../visuals/shading'
 import { reliefManifest } from '../visuals/relief'
 import { TreeShadowCasters } from '../lod/treeshadows'
+import { isBackgrounded } from './pageactive'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
 
@@ -1818,7 +1819,8 @@ if (uLodOn > 0.5) {
   const pump = async () => {
     if (gradePumping) return
     gradePumping = true
-    const visible = () => typeof document === 'undefined' || !document.hidden
+    // backgrounded by the frame heartbeat as well as by document.hidden (pageactive.ts)
+    const visible = () => !isBackgrounded()
     try {
       if (visible()) await new Promise<void>((r) => setTimeout(r, 0))
       for (;;) {

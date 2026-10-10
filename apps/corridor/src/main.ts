@@ -102,6 +102,7 @@ import { GameHud } from './ui/gamehud'
 import { GameMenu } from './ui/gamemenu'
 import { UiSound } from './ui/uisound'
 import { Sfx } from './game/audio/sfx'
+import { checkPage, isUnattended, onPageState } from './world/pageactive'
 import type { WeaponDoc } from './game/combat/weapons'
 import { crashSlot, type SoundOverrides } from './game/audio/soundbank'
 import { downloadJSON, readJSONFile } from './ui/files'
@@ -1047,7 +1048,7 @@ addEventListener('visibilitychange', () => { if (document.visibilityState === 'h
  * `document.hasFocus()` rather than a flag we keep ourselves — a page loaded in a background tab
  * never fires `blur`, so a flag that starts false would be wrong from the first frame.
  */
-const listening = () => document.visibilityState === 'visible' && document.hasFocus() && !paused
+const listening = () => !isUnattended() && !paused
 const syncAudible = () => { const off = !listening(); engineSound.setMuted(off); sfx.setMuted(off) }
 for (const ev of ['visibilitychange', 'blur', 'focus'] as const) {
   addEventListener(ev, syncAudible, ev === 'visibilitychange' ? undefined : true)
@@ -1058,6 +1059,9 @@ for (const ev of ['visibilitychange', 'blur', 'focus'] as const) {
  * the events' braces — `applyMute` returns at once when the state has not moved, so this is cheap.
  */
 setInterval(syncAudible, 1000)
+// and the page-state poll (pageactive.ts), which also notices a page that paints nothing while it
+// says it is visible — Rich, 2026-10-10: "when the tab reloads it doesn't detect if it is backgrounded"
+onPageState(() => syncAudible())
 resize()
 
 // ---------------------------------------------------------------------------------------------
@@ -5105,6 +5109,8 @@ registerBridgeContext({
   get rig() {
     return rig
   },
+  /** is the page backgrounded or unfocused, read now (pageactive.ts): `{ backgrounded, unfocused, hidden, sinceFrameMs }` */
+  page: () => checkPage(),
   /** the sampled effects: `sfx.stats()`, `sfx.play('crash.heavy')`, `sfx.bank?.slots()` */
   get sfx() {
     return sfx

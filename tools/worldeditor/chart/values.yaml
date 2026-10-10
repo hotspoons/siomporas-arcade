@@ -64,6 +64,19 @@ data:
 # site outside our extract still bakes.
 overpassUrl: https://overpass.richard-siomporas.basedweights.com/api/interpreter
 
+# WHAT EACH INSTANCE ABOVE HOLDS, by Geofabrik region id: `overpass=us/maryland,
+# overpass-na=north-america` (several on one: `overpass=us/maryland+us/virginia`). Routing is by the
+# extract's own outline, read from the Geofabrik index (tools/worldeditor/coverage.mjs). An instance
+# left out here, with no `#s/w/n/e` box on its URL either, is treated as holding the whole planet —
+# right for a planet instance, and the silent empty for a regional one. Regions added by an
+# osm-import are kept on the volume whatever this says.
+overpassRegions: ""
+
+# The image an osm-import Job runs in: the Overpass instances' own (it carries curl, osmium and
+# pyosmium). Empty uses the editor's default, wiktorn/overpass-api:latest; pin the digest the
+# instances run.
+osmImportImage: ""
+
 # The asset backend, in-cluster. The BROWSER never sees this: the service reverse-proxies it at
 # /assetsvc so the page knows one origin. Empty means the asset panels report "no service", which
 # is a normal state — generation is off by default (tools/assetsvc/chart).

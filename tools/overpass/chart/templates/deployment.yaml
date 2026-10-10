@@ -41,10 +41,20 @@ spec:
             # back through the same O_DIRECT path that throws EINVAL here. O_DIRECT itself is
             # not at fault — see values.yaml — so the block layout is the remaining variable.
             - { name: OVERPASS_COMPRESSION, value: "{{ .Values.compression }}" }
+            {{- if .Values.regions.enabled }}
+            # The instance's own daily diff goes through the delete filter too: once this instance
+            # holds an imported region, a delete in its own stream of an object that only left the
+            # ORIGINAL extract may be an object the imported region still has (defer_deletes.py).
+            # With no region imported the filter finds no other polygon and changes nothing.
+            - { name: OVERPASS_DIFF_PREPROCESS, value: "/app/venv/bin/python /opt/regions/defer_deletes.py /db/diffs/changes.osc --self _primary --regions /db/regions" }
+            {{- end }}
           ports: [{ containerPort: 80, name: http }]
           volumeMounts:
             - { name: db, mountPath: /db }
             - { name: shm, mountPath: /dev/shm }
+            {{- if .Values.regions.enabled }}
+            - { name: regions, mountPath: /opt/regions, readOnly: true }
+            {{- end }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
           # the init clone runs for tens of minutes with no listener; a liveness probe would
           # restart it forever, so only readiness gates traffic
@@ -53,11 +63,38 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 120
+        {{- if .Values.regions.enabled }}
+        # ADDING A REGION TO THIS INSTANCE, and keeping it current (tools/overpass/README.md).
+        #
+        # A SIDECAR because the write has to go through the dispatcher, and the dispatcher's shared
+        # memory is this pod's /dev/shm: only a container in this pod can reach it. Same image, so
+        # the same update_from_dir, osmium and pyosmium the instance itself uses. It applies what
+        # the world editor's osm-import Job stages in /db/regions/<id>/ and then follows each
+        # imported region's own diff stream; nothing here runs until a region has been imported.
+        - name: regions
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/bash", "/opt/regions/regions-agent.sh"]
+          env:
+            - { name: OVERPASS_FLUSH_SIZE, value: "{{ .Values.flushSize }}" }
+            - { name: OVERPASS_UPDATE_SLEEP, value: "{{ .Values.updateSleep }}" }
+            - { name: PRIMARY_ID, value: {{ .Values.regions.primary.id | quote }} }
+            - { name: PRIMARY_POLY_URL, value: {{ .Values.regions.primary.poly | quote }} }
+          volumeMounts:
+            - { name: db, mountPath: /db }
+            - { name: shm, mountPath: /dev/shm }
+            - { name: regions, mountPath: /opt/regions, readOnly: true }
+          resources: {{- toYaml .Values.regions.resources | nindent 12 }}
+        {{- end }}
       volumes:
         - name: db
           persistentVolumeClaim: { claimName: {{ .Values.fullnameOverride }}-db }
         - name: shm
           emptyDir: { medium: Memory, sizeLimit: {{ .Values.shmSize }} }
+        {{- if .Values.regions.enabled }}
+        - name: regions
+          configMap: { name: {{ .Values.fullnameOverride }}-regions, defaultMode: 0755 }
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

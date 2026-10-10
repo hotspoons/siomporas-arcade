@@ -89,6 +89,22 @@ ingress:
   tls:
     secretName: overpass-tls
 
+# MORE THAN ONE REGION ON ONE INSTANCE (Rich, 2026-10-10: "Why new instances, why can't we add the
+# data to existing instances?"). Off by default because turning it on restarts the pod (Recreate).
+# On, it adds the `regions` sidecar and the delete filter (templates/deployment.yaml) and the
+# ConfigMap the world editor's osm-import Job runs from. `primary` is the Geofabrik region this
+# instance was BUILT from: its outline is what the delete filter defers to when an imported
+# region's diff deletes something on the shared border. See tools/overpass/README.md.
+regions:
+  enabled: false
+  primary:
+    id: us/maryland
+    poly: https://download.geofabrik.de/north-america/us/maryland.poly
+  resources:
+    requests: { cpu: "1", memory: 1Gi }
+    # an apply of a US state peaked at 1.4 GB measured; a country is more
+    limits: { cpu: "8", memory: 8Gi }
+
 # The road not taken, again (see tools/recon-service/README.md): the platform's
 # pai-managed-ext-gateway at 172.16.10.157 is the intended external front door. This chart uses
 # ingress-nginx because that is what recon proved on this cluster.

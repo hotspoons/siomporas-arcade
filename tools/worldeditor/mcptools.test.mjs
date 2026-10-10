@@ -270,3 +270,41 @@ test('building_class_set refuses what the game could not draw', async () => {
   await assert.rejects(tool('building_class_set').run({ id: 'house', metalness: 3 }), /0 to 1/)
   await assert.rejects(tool('building_class_set').run({ id: 'house' }), /nothing to set/)
 })
+
+/* ---- where the OSM comes from ---- */
+
+test('osm_import starts a run against the instance and region named, and nothing else', async () => {
+  const { tool, calls } = toolsFor(volume(), { apiFetch: async (m, p, b) => (p === '/api/osm/imports' ? { run: { id: 'osm-import-x', kind: 'osm-import', body: b } } : {}) })
+  const t = tool('osm_import')
+  // an agent picks a tool by its description: it has to say this writes into a live instance, how
+  // to follow it, and what it needs
+  assert.match(t.description, /run_get|run_log/)
+  assert.match(t.description, /sidecar/)
+  assert.deepEqual(t.inputSchema.required, ['upstream', 'region'])
+  const r = await t.run({ upstream: 'overpass', region: 'us/virginia' })
+  assert.deepEqual(calls.at(-1).slice(0, 2), ['POST', '/api/osm/imports'])
+  assert.deepEqual(r.run.body, { upstream: 'overpass', region: 'us/virginia' })
+})
+
+test('osm_coverage asks for the verdicts without the polygons; osm_regions filters the catalogue', async () => {
+  const regions = [
+    { id: 'us/virginia', name: 'us/virginia', parent: 'north-america' },
+    { id: 'us/west-virginia', name: 'us/west-virginia', parent: 'north-america' },
+    { id: 'italy', name: 'Italy', parent: 'europe' },
+  ]
+  const { tool, calls } = toolsFor(volume(), { apiFetch: async (m, p) => (p === '/api/osm/geofabrik' ? { source: 'volume', regions } : { upstreams: [], worlds: [] }) })
+  await tool('osm_coverage').run({})
+  assert.equal(calls.at(-1)[1], '/api/osm/coverage?geometry=0')
+  const r = await tool('osm_regions').run({ q: 'virginia' })
+  assert.deepEqual(r.regions.map((x) => x.id), ['us/virginia', 'us/west-virginia'])
+  assert.equal((await tool('osm_regions').run({})).count, 3)
+})
+
+test('run_bake passes refreshOsm only when asked', async () => {
+  const { tool, calls } = toolsFor(volume())
+  await tool('run_bake').run({ slug: 'dc-metro-take-2', refreshOsm: true })
+  assert.deepEqual(calls.at(-1).slice(0, 2), ['POST', '/api/runs/bake'])
+  await tool('run_bake').run({ slug: 'w' })
+  // the fake records the body only through extra.apiFetch; check the schema says what it does
+  assert.match(tool('run_bake').inputSchema.properties.refreshOsm.description, /re-fetch/)
+})

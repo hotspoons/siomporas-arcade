@@ -44,6 +44,14 @@ spec:
               value: {{ .Values.corsOrigin | quote }}
             - name: WORLDEDITOR_OVERPASS_URL
               value: {{ .Values.overpassUrl | quote }}
+            # what each instance holds, by Geofabrik region (coverage.mjs); routing reads the
+            # extracts' real outlines from this, not boxes on the URLs
+            - name: WORLDEDITOR_OVERPASS_REGIONS
+              value: {{ .Values.overpassRegions | default "" | quote }}
+            {{- with .Values.osmImportImage }}
+            - name: WORLDEDITOR_OSM_IMPORT_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
             - name: WORLDEDITOR_ASSETSVC
               value: {{ .Values.assetsvcUrl | quote }}
             - name: WORLDEDITOR_NAMESPACE

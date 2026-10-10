@@ -44,7 +44,9 @@ import { McpBridge } from './mcpbridge.mjs'
 import * as mcp from './mcp.mjs'
 import * as programs from './programs.mjs'
 import * as training from './training.mjs'
-import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
+import { Overpass, PUBLIC_MIRRORS, mirrorsFor } from './overpass.mjs'
+import { Coverage, bakeArea, bboxOfGeom, parseUpstream } from './coverage.mjs'
+import { Geofabrik } from './geofabrik.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
 import { Geocoder } from './geocode.mjs'
@@ -156,10 +158,35 @@ for (const u of configured) {
     console.warn(`overpass: ${u.split('#')[0]} has no coverage box. If it is regional, add #south/west/north/east or it will answer HTTP 200 with nothing outside its extent and that answer looks exactly like "no roads here".`)
   }
 }
+/*
+ * WHAT EACH INSTANCE ACTUALLY HOLDS, by its extract's own polygon (coverage.mjs). Read at start-up
+ * from the volume and the Geofabrik copy on it (or the vendored seed) — never from the network, so a
+ * pod with no route out still routes its own instances from the first request — and refreshed in
+ * the background once the live index has been read.
+ */
+const geofabrik = new Geofabrik(DATA)
+const coverage = new Coverage(DATA, {
+  urls: overpassUpstreams,
+  regions: () => settings.get('overpass.regions'),
+  lookup: (id) => geofabrik.region(id, { offline: true }),
+})
+await coverage.load()
+for (const p of coverage.problems) console.warn(`overpass coverage: ${p}`)
+void geofabrik.index().then(() => {
+  coverage.lookup = (id) => geofabrik.region(id)
+  return coverage.load()
+}).catch((e) => console.warn(`geofabrik index: ${e.message ?? e} — routing from the copy on the volume or the seed`))
+/** an upstream's geometries for the map's client: null claims everywhere (a public mirror) */
+const coverageOf = (url) => {
+  const u = coverage.upstreams().find((x) => x.url === url)
+  return u ? u.geoms : null
+}
+
 const overpass = new Overpass(
   store,
   [...configured, ...PUBLIC_MIRRORS],
   {
+    coverageOf,
     // Tunable because the right answer depends on the extract: ours on a warm database answers a
     // county in seconds, a public mirror under load took 79 s for the same query, and a laptop
     // testing the fallback wants neither.
@@ -189,6 +216,14 @@ const runs = new Runs(store, k8s, {
   region: env.WORLDEDITOR_S3_REGION ?? 'auto',
   prefix: env.WORLDEDITOR_S3_PREFIX ?? 'corridor',
   overpassUrl: settings.get('overpass.url'),
+  coverage,
+  osmImportImage: settings.get('osm.importImage'),
+  // an import that succeeded: the instance holds the region now, so route to it
+  onImported: async (run) => {
+    const f = await geofabrik.region(run.osm.region)
+    if (!f) throw new Error(`${run.osm.region} is not in the Geofabrik index`)
+    await coverage.addRegion(run.osm.upstream, f, { run: run.id })
+  },
   horizonM: Number(env.WORLDEDITOR_HORIZON_M ?? 30000),
   // Auto-shard a world when its half-width exceeds this, in blocks of at most `shardSideM` a side.
   // ON BY DEFAULT since 2026-10-10 (Rich: "We should be defaulting to sharded, at least per 10 x 10
@@ -248,6 +283,10 @@ settings.onChange((changed) => {
     overpass.setUpstreams([...overpassUpstreams(), ...PUBLIC_MIRRORS])
     runs.cfg.overpassUrl = settings.get('overpass.url')
   }
+  if (changed.includes('overpass.url') || changed.includes('overpass.regions')) {
+    void coverage.load().then(() => { for (const p of coverage.problems) console.warn(`overpass coverage: ${p}`) })
+  }
+  if (changed.includes('osm.importImage')) runs.cfg.osmImportImage = settings.get('osm.importImage')
   if (changed.includes('nominatim.url')) geocoder.url = settings.get('nominatim.url').replace(/\/$/, '')
   if (changed.includes('bake.image')) runs.cfg.image = settings.get('bake.image')
   if (changed.length) console.log(`settings: ${changed.join(', ')} changed`)
@@ -679,6 +718,129 @@ async function api(req, res, seg, q) {
     const probes = await overpass.probe()
     return json(res, 200, { ours: overpass.ours, upstreams: probes, using: probes.find((p) => p.ok)?.host ?? null, cache: store.overpassCache })
   }
+  /* ---- where the OSM comes from: coverage, health, the Geofabrik catalogue, imports ---- */
+
+  /**
+   * Every instance's coverage, and every world's routing against it.
+   *
+   * `fences` is the OLD rule's answer, given only while a `#s/w/n/e` box is still on a URL: the
+   * upstream the fences would have picked and how much of the world lies outside that upstream's
+   * TRUE coverage. That is the number that was 35.3% for dc-metro-take-2 and nobody could see.
+   * `?geometry=0` leaves the polygons out (an agent wants the verdicts, not 600 vertices).
+   */
+  if (seg[0] === 'osm' && seg[1] === 'coverage' && req.method === 'GET') {
+    const withGeom = q.get('geometry') !== '0'
+    const raw = settings.get('overpass.url')
+    const fenced = overpassUpstreams().some((u) => parseUpstream(u).fence)
+    const worldsOut = []
+    const names = new Map(coverage.upstreams().map((u) => [u.url, u.name]))
+    for (const w of await store.listWorlds()) {
+      const box = bakeArea(w)
+      if (!box) { worldsOut.push({ slug: w.slug, name: w.name ?? w.slug, placed: false }); continue }
+      const r = coverage.route(box)
+      // by the instance's NAME (`name=url` or its host), never the bare URL's host: through a
+      // port-forward every URL is localhost
+      const host = (u) => names.get(u) ?? parseUpstream(u).name
+      let fences = null
+      if (fenced) {
+        const old = mirrorsFor(raw, box)[0] ?? null
+        const v = old ? r.verdicts.find((x) => x.url === old) : null
+        fences = { upstream: old ? host(old) : null, outside: v ? v.outside : null }
+      }
+      worldsOut.push({
+        slug: w.slug,
+        name: w.name ?? w.slug,
+        placed: true,
+        box,
+        ring: Array.isArray(w.boundary) ? w.boundary : null,
+        centre: { lat: w.lat, lon: w.lon },
+        radius_m: w.radius_m ?? null,
+        upstream: r.urls[0] ? host(r.urls[0]) : null,
+        route: r.urls.map(host),
+        verdicts: r.verdicts.map(({ name, covered, outside, exact, claims }) => ({ name, covered, outside, exact, claims })),
+        fences,
+      })
+    }
+    return json(res, 200, {
+      file: coverage.file,
+      problems: coverage.problems,
+      upstreams: coverage.upstreams().map((u) => ({
+        name: u.name,
+        url: u.url,
+        claims: u.geoms == null ? 'everywhere' : u.geoms.length ? 'regions' : 'nothing',
+        regions: u.regions.map(({ geometry, ...r }) => (withGeom ? { ...r, geometry } : r)),
+      })),
+      worlds: worldsOut,
+    })
+  }
+
+  /**
+   * Each instance's health and freshness: does it answer (`/api/status`), and how old is its data
+   * (`/api/timestamp`, the replication timestamp of the last diff applied). In parallel, ten seconds
+   * each; an instance that does not answer is a row that says so, never a failed page.
+   */
+  if (seg[0] === 'osm' && seg[1] === 'upstreams' && req.method === 'GET') {
+    const ups = coverage.upstreams()
+    const health = await Promise.all(ups.map(async (u) => {
+      const base = u.url.replace(/\/api\/interpreter\/?$/, '')
+      const ask = async (p) => {
+        const t0 = Date.now()
+        try {
+          const r = await fetch(`${base}${p}`, { signal: AbortSignal.timeout(10000) })
+          const text = (await r.text()).trim()
+          return { ok: r.ok, status: r.status, ms: Date.now() - t0, text: text.slice(0, 400) }
+        } catch (e) {
+          return { ok: false, ms: Date.now() - t0, text: String(e.message ?? e).slice(0, 200) }
+        }
+      }
+      const [status, ts] = await Promise.all([ask('/api/status'), ask('/api/timestamp')])
+      const stamp = ts.ok && /^\d{4}-\d\d-\d\dT/.test(ts.text) ? ts.text : null
+      return {
+        name: u.name,
+        url: u.url,
+        ok: status.ok,
+        ms: status.ms,
+        status: status.ok ? status.text.split('\n').slice(0, 2).join(' · ') : status.text,
+        timestamp: stamp,
+        ageHours: stamp ? +((Date.now() - Date.parse(stamp)) / 3600e3).toFixed(1) : null,
+        // what keeps each region current: the instance's own updater follows the first (the
+        // extract it was built from); the regions sidecar follows every imported one
+        diffs: u.regions.filter((r) => r.updates).map((r) => ({ region: r.id, updates: r.updates, source: r.source })),
+      }
+    }))
+    return json(res, 200, { upstreams: health })
+  }
+
+  /** The Geofabrik catalogue, without geometry: what the region picker lists. */
+  if (seg[0] === 'osm' && seg[1] === 'geofabrik' && seg.length === 2 && req.method === 'GET') {
+    return json(res, 200, await geofabrik.list())
+  }
+  /** One region: its outline, for the map, and its .pbf size, for the person deciding. */
+  if (seg[0] === 'osm' && seg[1] === 'geofabrik' && seg[2] === 'region' && req.method === 'GET') {
+    const id = q.get('id') ?? ''
+    const f = await geofabrik.region(id)
+    if (!f) return json(res, 404, { error: `no Geofabrik region "${id}"` })
+    // which instances already hold all of it (by its bounding box, which is the stricter test),
+    // so the dialog can say "North America already holds Virginia" before anybody imports it
+    const v = coverage.route(bboxOfGeom(f.geometry)).verdicts
+    return json(res, 200, {
+      region: f,
+      pbf: await geofabrik.pbfBytes(id),
+      held: v.filter((x) => x.covered && x.claims === 'regions').map((x) => x.name),
+      touches: v.filter((x) => x.claims === 'regions' && x.outside < 1).map((x) => ({ name: x.name, outside: x.outside })),
+    })
+  }
+  /** Add a region to an instance: an `osm-import` run (runs.mjs). */
+  if (seg[0] === 'osm' && seg[1] === 'imports' && req.method === 'POST') {
+    const body = await readJson(req)
+    const up = coverage.configured().find((u) => u.name === body.upstream)
+    if (!up) return json(res, 404, { error: `no Overpass instance "${body.upstream}" — one of ${coverage.configured().map((u) => u.name).join(', ') || '(none configured)'}` })
+    const f = await geofabrik.region(String(body.region ?? ''))
+    if (!f) return json(res, 404, { error: `no Geofabrik region "${body.region}" — osm_regions lists them` })
+    if (!f.properties?.urls?.pbf) return json(res, 400, { error: `${body.region} has no .pbf to import` })
+    return json(res, 202, { run: await runs.osmImport({ upstream: up.name, region: f }) })
+  }
+
   /**
    * Global search. Nominatim, not Overpass.
    *

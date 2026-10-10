@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
 import { open, readFile, rm, stat } from 'node:fs/promises'
-import { bboxOf } from './geo.mjs'
+import { bakeArea, regionLabel } from './coverage.mjs'
 import { mirrorsFor } from './overpass.mjs'
 
 const now = () => new Date().toISOString()
@@ -97,13 +97,17 @@ export class Runs {
     // note on `#shouldShard`). `sharded: true` forces it on any world, which is how the
     // plan -> shard -> finalize path is exercised before a real large world.
     const sharded = opts.sharded ?? (await this.#shouldShard(slug))
+    // `refreshOsm`: ask Overpass again rather than trusting the cache. The cache is keyed on the
+    // query alone, so an answer that came from the WRONG upstream — dc-metro-take-2's Maryland-only
+    // roads, 2026-10-10 — is a hit for ever after, however the routing changes. See osm.py.
+    const refreshOsm = !!opts.refreshOsm
     if (sharded) {
-      return this.#start({ kind: 'bake', slug, args: [], label: `bake ${slug} (sharded)`, sharded: true, phaseArgs: opts })
+      return this.#start({ kind: 'bake', slug, args: [], label: `bake ${slug} (sharded)${refreshOsm ? ' · fresh OSM' : ''}`, sharded: true, phaseArgs: opts, refreshOsm })
     }
     const args = ['fetch', slug]
     if (opts.skip) args.push('--skip', opts.skip)
     if (opts.halfWidth) args.push('--half-width', String(opts.halfWidth))
-    return this.#start({ kind: 'bake', slug, args, label: `bake ${slug}` })
+    return this.#start({ kind: 'bake', slug, args, label: `bake ${slug}${refreshOsm ? ' · fresh OSM' : ''}`, refreshOsm })
   }
 
   /** A world large enough that one Job's bbox is the problem: > `shardAboveM` half-width.
@@ -124,7 +128,7 @@ export class Runs {
   }
 
   /**
-   * The Overpass upstreams that can answer for this world, fences stripped.
+   * The Overpass upstreams that hold ALL of this world, fences stripped, and why.
    *
    * THE BAKE DOES NOT UNDERSTAND FENCES. `osm.py` splits `CORRIDOR_OVERPASS_URL` on commas and
    * posts to the first entry, and a `#south/west/north/east` fragment is never sent on the wire —
@@ -132,23 +136,46 @@ export class Runs {
    * which answered 200 with no elements and the bake raised "no ways for roads [] within 1219 m".
    * Working mirror, correct query, silent empty.
    *
-   * The fence logic stays in one place (overpass.mjs, where it is tested) and the Job is given a
-   * list it can use blindly. An empty result is not an error: it means nothing we run covers this
-   * place, and the bake's own public mirrors are the right answer — so the variable is left unset
-   * and `osm.py` falls through to them.
+   * AND FENCES WERE NOT ENOUGH. A box drawn around the mid-Atlantic sent dc-metro-take-2 to the
+   * Maryland extract, which holds 64.7% of it; Washington and Virginia came back with no roads at
+   * all (2026-10-10). So routing is by the extract's real polygon now (coverage.mjs), over the area
+   * the bake will actually ask about (`bakeArea`: the UTM square's geodetic box, padded).
+   *
+   * An empty result is not an error: nothing we run holds this place, the variable is left unset,
+   * and `osm.py` falls through to the public mirrors. The decision is written into the run's log,
+   * because "which Overpass did this bake read" is the first question when a world looks thin.
    */
-  async #overpassFor(slug) {
-    if (!this.cfg.overpassUrl) return null
+  async #overpassFor(slug, runId = null) {
+    if (!this.cfg.overpassUrl && !this.cfg.coverage) return null
     const world = await this.store.getWorld(slug).catch(() => null)
-    if (!world || !Number.isFinite(world.lat) || !Number.isFinite(world.lon)) {
-      // a world with no centre cannot be placed, so every mirror is a candidate
-      return this.cfg.overpassUrl.split(',').map((u) => u.split('#')[0].trim()).filter(Boolean).join(',') || null
+    const box = world ? bakeArea(world) : null
+    if (this.cfg.coverage) {
+      if (!box) {
+        // a world with no centre cannot be placed, and an upstream that holds only a region cannot
+        // be trusted with it: leave it to the mirrors, which hold everywhere
+        if (runId) await this.#append(runId, `[worldeditor] OSM: ${slug} has no centre to route by; the bake uses the public mirrors\n`)
+        return null
+      }
+      const { urls, verdicts } = this.cfg.coverage.route(box)
+      const names = new Map(this.cfg.coverage.upstreams().map((u) => [u.url, u.name]))
+      if (runId) {
+        const why = verdicts
+          .filter((v) => v.claims !== 'everywhere')
+          .map((v) => `${v.name} ${v.covered ? 'holds it' : `${(100 * v.outside).toFixed(1)}% outside`}`)
+          .join(', ')
+        await this.#append(runId, `[worldeditor] OSM for ${slug}: ${urls.length ? urls.map((u) => names.get(u) ?? hostOf(u)).join(' → ') : 'no instance of ours holds all of it — public mirrors'}${why ? ` (${why})` : ''}\n`)
+      }
+      return urls.length ? urls.join(',') : null
     }
-    // `radius_m` is a HALF-WIDTH (see worlds.mjs), so the square is the centre plus and minus it
-    const r = Number.isFinite(world.radius_m) ? world.radius_m : 1000
-    const bbox = bboxOf([{ lat: world.lat, lon: world.lon }], r)
-    const urls = mirrorsFor(this.cfg.overpassUrl, bbox)
+    // no coverage configured: the old fence rule, for a laptop pointed at one instance
+    if (!box) return this.cfg.overpassUrl.split(',').map((u) => u.split('#')[0].trim().replace(/^[A-Za-z0-9_.-]+=(?=https?:\/\/)/, '')).filter(Boolean).join(',') || null
+    const urls = mirrorsFor(this.cfg.overpassUrl, box)
     return urls.length ? urls.join(',') : null
+  }
+
+  /** Where the bake reads coverage from: the same file on the same volume, at the Job's mount. */
+  #coverageEnv(root) {
+    return this.cfg.coverage ? `${root}/overpass/coverage.json` : null
   }
 
   /** Mirror a baked world into the bucket. Needs the credentials Secret; see the chart. */
@@ -157,6 +184,82 @@ export class Runs {
     if (opts.prefix) args.push('--prefix', opts.prefix)
     if (opts.dryRun) args.push('--dry-run')
     return this.#start({ kind: 'publish', slug, args, label: `publish ${slug}`, needsBucket: true })
+  }
+
+  /**
+   * Add a Geofabrik region's data to an Overpass instance that is already serving — an `osm-import`.
+   *
+   * Rich, 2026-10-10: "Why new instances, why can't we add the data to existing instances? We could
+   * have a job viewer kind of deal like we have for bakes." So it is a run like a bake: a record and
+   * a log on the volume, one Job, the same viewer, the same cancel.
+   *
+   * THE JOB DOES THE HEAVY HALF AND THE INSTANCE DOES THE WRITE. Measured on a local copy of the
+   * instance's own image (docs in tools/overpass/README.md, "Adding a region"): `update_from_dir`
+   * applied Maryland as one osmChange of creates into a LIVE Washington database through its
+   * dispatcher in 279 s, while queries kept answering (217 of them, p95 180 ms). But it has to go
+   * THROUGH the dispatcher, and the dispatcher's shared memory is the overpass pod's own /dev/shm
+   * (an emptyDir), which no other pod can see. Writing the database files from outside it, behind
+   * a dispatcher that is serving readers off them, is how a database gets corrupted. So:
+   *
+   *   this Job        on the instance's NODE (its volume is ReadWriteOnce), with the instance's
+   *                   volume at /db: download the .pbf, check it, convert it to an osmChange,
+   *                   stage it in /db/regions/<id>/, then wait and stream the apply log;
+   *   the instance    a `regions` sidecar in the overpass pod (tools/overpass/chart, values
+   *                   `regions.enabled`), sharing /db AND /dev/shm with the dispatcher, applies the
+   *                   staged change through it — the same call the instance's own daily diffs make —
+   *                   and from then on follows the region's own diff stream too.
+   *
+   * The Job's spec is `osmImportJob` below, and tools/overpass/osm-import-job.yaml is the same
+   * thing written out for review; a test holds the two together. It needs NO RBAC this editor does
+   * not already have: it creates a Job, and reads the instance's pod to learn its node.
+   */
+  async osmImport({ upstream, region }) {
+    if (this.runner !== 'kubernetes') {
+      throw Object.assign(new Error('an import writes into an Overpass instance in the cluster, and this editor is not running in one'), { status: 409 })
+    }
+    const pods = await this.k8s.podsByLabel(`app=${upstream}`).catch(() => [])
+    const pod = pods.find((p) => p.status?.phase === 'Running' && p.spec?.nodeName)
+    if (!pod) throw Object.assign(new Error(`${upstream} has no running pod — an import is staged on its volume, on its node, and applied by it`), { status: 409 })
+    const p = { ...(region.properties ?? {}) }
+    p.name = regionLabel(p)
+    const live = (await this.store.listRuns(200)).find((r) => r.kind === 'osm-import' && r.osm?.upstream === upstream && r.state !== 'done' && r.state !== 'failed')
+    if (live) throw Object.assign(new Error(`${upstream} already has an import running (${live.label}); one at a time — they share one disk and one dispatcher`), { status: 409 })
+    const slug = `${upstream}-${String(p.id).replace(/[^a-z0-9]+/gi, '-')}`
+    const id = `osm-import-${short(slug)}-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}-${randomUUID().slice(0, 4)}`
+    const run = {
+      id,
+      kind: 'osm-import',
+      slug,
+      label: `add ${p.name ?? p.id} to ${upstream}`,
+      args: [],
+      runner: 'kubernetes',
+      state: 'starting',
+      started: now(),
+      finished: null,
+      detail: null,
+      job: null,
+      pod: null,
+      lastStamp: null,
+      exit: null,
+      osm: { upstream, region: p.id, name: p.name ?? p.id, pbf: p.urls?.pbf ?? null, updates: p.urls?.updates ?? null, node: pod.spec.nodeName },
+    }
+    await this.store.writeAtomic(this.store.runFile(id), Buffer.from(JSON.stringify(run, null, 1)))
+    await this.store.writeAtomic(this.store.logFile(id), Buffer.from(`=== ${run.label} (kubernetes) ${run.started}\n`))
+    const spec = osmImportJob({
+      name: `osm-import-${short(upstream)}-${short(String(p.id).replace(/\//g, '-'))}-${Date.now().toString(36)}`.slice(0, 60).replace(/-+$/, ''),
+      runId: id,
+      upstream,
+      region: run.osm,
+      node: pod.spec.nodeName,
+      image: this.cfg.osmImportImage ?? 'wiktorn/overpass-api:latest',
+      ttlSeconds: this.cfg.ttlSeconds ?? 604800,
+    })
+    const made = await this.k8s.createJob(spec)
+    run.job = made.metadata.name
+    run.state = 'queued'
+    await this.#save(run)
+    this.#watchJob(run)
+    return run
   }
 
   /**
@@ -200,7 +303,7 @@ export class Runs {
     this.finishedHooks.set(id, fn)
   }
 
-  async #start({ kind, slug, args, label, needsBucket = false, sharded = false, phaseArgs = {} }) {
+  async #start({ kind, slug, args, label, needsBucket = false, sharded = false, phaseArgs = {}, refreshOsm = false }) {
     if (needsBucket && !this.cfg.bucket) {
       throw Object.assign(new Error('no bucket configured — set WORLDEDITOR_S3_BUCKET and mount the credentials Secret'), { status: 400 })
     }
@@ -220,10 +323,14 @@ export class Runs {
       pod: null,
       lastStamp: null,
       exit: null,
+      ...(refreshOsm ? { refreshOsm: true } : {}),
       ...(sharded ? { sharded: true, phase: 'plan', phaseArgs, jobs: [], stamps: {} } : {}),
     }
     await this.store.writeAtomic(this.store.runFile(id), Buffer.from(JSON.stringify(run, null, 1)))
     await this.store.writeAtomic(this.store.logFile(id), Buffer.from(`=== ${label} (${run.runner}) ${run.started}\n`))
+    // decided ONCE per run and kept on the record, so every Job of a sharded bake reads the same
+    // upstream — and so the log says which, before the first Job starts
+    if (kind === 'bake') run.overpass = await this.#overpassFor(slug, id)
     // The world list the bake will read has to be on the volume BEFORE the Job starts.
     await this.store.materialise()
     if (this.runner === 'kubernetes' && sharded) await this.#startPhase(run)
@@ -270,7 +377,7 @@ export class Runs {
    */
   async #jobSpec(run, args, { spread = false, tag = '' } = {}) {
     const name = `corridor-${run.kind}-${tag ? `${tag}-` : ''}${short(run.slug)}-${Date.now().toString(36)}-${randomUUID().slice(0, 4)}`.slice(0, 60).replace(/-+$/, '')
-    const overpass = await this.#overpassFor(run.slug)
+    const overpass = run.overpass !== undefined ? run.overpass : await this.#overpassFor(run.slug)
     const env = [
       { name: 'CORRIDOR_DATA', value: '/data' },
       { name: 'CORRIDOR_SITES', value: '/data/sites.json' },
@@ -288,6 +395,10 @@ export class Runs {
       { name: 'GDAL_NUM_THREADS', value: '1' },
     ]
     if (overpass) env.push({ name: 'CORRIDOR_OVERPASS_URL', value: overpass })
+    // the control: osm.py refuses a query whose area its upstream does not hold (BakeFault)
+    const cov = this.#coverageEnv('/data')
+    if (overpass && cov) env.push({ name: 'CORRIDOR_OVERPASS_COVERAGE', value: cov })
+    if (run.refreshOsm) env.push({ name: 'CORRIDOR_OSM_REFRESH', value: '1' })
     if (this.cfg.bucket) {
       env.push(
         { name: 'CORRIDOR_S3_BUCKET', value: this.cfg.bucket },
@@ -655,7 +766,8 @@ export class Runs {
    */
   async #startLocal(run) {
     const sink = createWriteStream(this.store.logFile(run.id), { flags: 'a' })
-    const overpass = await this.#overpassFor(run.slug)
+    const overpass = run.overpass !== undefined ? run.overpass : await this.#overpassFor(run.slug)
+    const cov = this.#coverageEnv(this.store.root)
     const env = {
       ...process.env,
       CORRIDOR_DATA: this.store.root,
@@ -664,6 +776,8 @@ export class Runs {
       CORRIDOR_PYRAMID: '1',
       PYTHONUNBUFFERED: '1',
       ...(overpass ? { CORRIDOR_OVERPASS_URL: overpass } : {}),
+      ...(overpass && cov ? { CORRIDOR_OVERPASS_COVERAGE: cov } : {}),
+      ...(run.refreshOsm ? { CORRIDOR_OSM_REFRESH: '1' } : {}),
       ...(this.cfg.bucket
         ? {
             CORRIDOR_S3_BUCKET: this.cfg.bucket,
@@ -747,6 +861,16 @@ export class Runs {
         if (world) await this.store.applyLook(world)
       } catch (e) {
         await this.#append(run.id, `(look not applied: ${e.message ?? e})\n`)
+      }
+    }
+    if (state === 'done' && run.kind === 'osm-import') {
+      // the instance now holds the region: route to it (coverage.mjs). A failure here is said in
+      // the log and does not unmake the import — the region is there, only the map does not know.
+      try {
+        await this.cfg.onImported?.(run)
+        await this.#append(run.id, `(coverage: ${run.osm?.upstream} now holds ${run.osm?.region})\n`)
+      } catch (e) {
+        await this.#append(run.id, `(coverage NOT updated: ${e.message ?? e} — add ${run.osm?.region} to ${run.osm?.upstream} in Settings → OSM data)\n`)
       }
     }
     // Returns the run: `cancel` hands this straight back to the caller, and without the return it
@@ -862,4 +986,77 @@ export class Runs {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const hostOf = (u) => {
+  try {
+    return new URL(u).host
+  } catch {
+    return u
+  }
+}
 const short = (s) => String(s).replace(/[^a-z0-9-]/g, '').slice(0, 24)
+
+/**
+ * The Job an `osm-import` creates. PURE, and exported so the reviewed manifest
+ * (tools/overpass/osm-import-job.yaml) can be held against it by a test.
+ *
+ * What an admin should check, line by line:
+ *   * it runs the INSTANCE's own image, which already carries curl, osmium and pyosmium — nothing
+ *     new is pulled onto the node;
+ *   * it is pinned to the instance's node, because the instance's volume is ReadWriteOnce;
+ *   * it mounts that volume at /db and writes ONLY under /db/regions/<id>/ (import.sh); the
+ *     database itself is written by the instance's `regions` sidecar through its dispatcher;
+ *   * the script is the chart's ConfigMap `<upstream>-regions`, read-only, not a string from here;
+ *   * `backoffLimit: 0` and a 48 h deadline: a failed import is a failure a person reads, not a
+ *     retry that downloads a continent twice.
+ */
+export function osmImportJob({ name, runId, upstream, region, node, image, ttlSeconds = 604800 }) {
+  const labels = { 'app.kubernetes.io/name': 'worldeditor-run', 'worldeditor/run': runId, 'worldeditor/kind': 'osm-import', 'worldeditor/upstream': upstream }
+  return {
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: { name, labels },
+    spec: {
+      backoffLimit: 0,
+      activeDeadlineSeconds: 172800,
+      ttlSecondsAfterFinished: ttlSeconds,
+      template: {
+        metadata: { labels: { 'app.kubernetes.io/name': 'worldeditor-run', 'worldeditor/run': runId } },
+        spec: {
+          restartPolicy: 'Never',
+          affinity: {
+            nodeAffinity: {
+              requiredDuringSchedulingIgnoredDuringExecution: {
+                nodeSelectorTerms: [{ matchExpressions: [{ key: 'kubernetes.io/hostname', operator: 'In', values: [node] }] }],
+              },
+            },
+          },
+          containers: [
+            {
+              name: 'import',
+              image,
+              imagePullPolicy: 'IfNotPresent',
+              command: ['/bin/bash', '/opt/regions/import.sh'],
+              env: [
+                { name: 'UPSTREAM', value: upstream },
+                { name: 'REGION_ID', value: region.region },
+                { name: 'REGION_NAME', value: region.name ?? region.region },
+                { name: 'PBF_URL', value: region.pbf ?? '' },
+                { name: 'UPDATES_URL', value: region.updates ?? '' },
+                { name: 'INTERPRETER', value: `http://${upstream}/api/interpreter` },
+              ],
+              resources: { requests: { cpu: '2', memory: '2Gi' }, limits: { cpu: '8', memory: '8Gi' } },
+              volumeMounts: [
+                { name: 'db', mountPath: '/db' },
+                { name: 'scripts', mountPath: '/opt/regions', readOnly: true },
+              ],
+            },
+          ],
+          volumes: [
+            { name: 'db', persistentVolumeClaim: { claimName: `${upstream}-db` } },
+            { name: 'scripts', configMap: { name: `${upstream}-regions`, defaultMode: 0o755 } },
+          ],
+        },
+      },
+    },
+  }
+}

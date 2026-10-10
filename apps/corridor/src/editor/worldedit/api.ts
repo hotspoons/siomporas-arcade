@@ -137,7 +137,7 @@ export interface Preview {
 
 export interface Run {
   id: string
-  kind: 'bake' | 'publish' | 'deploy'
+  kind: 'bake' | 'publish' | 'deploy' | 'osm-import'
   slug: string
   label: string
   runner: 'kubernetes' | 'local'
@@ -148,6 +148,55 @@ export interface Run {
   job: string | null
   pod: string | null
   exit: number | null
+  /** an osm-import's instance and region */
+  osm?: { upstream: string; region: string; name: string; node?: string }
+}
+
+/* ---- where the OSM comes from (Settings → OSM data) ---- */
+
+export type GeoJsonPolygonal = { type: 'Polygon'; coordinates: number[][][] } | { type: 'MultiPolygon'; coordinates: number[][][][] }
+
+export interface CoverageRegion {
+  id: string
+  name: string
+  source: 'deploy' | 'import' | 'fence'
+  added?: string
+  run?: string
+  pbf?: string | null
+  updates?: string | null
+  geometry?: GeoJsonPolygonal
+}
+
+export interface CoverageUpstream {
+  name: string
+  url: string
+  claims: 'everywhere' | 'regions' | 'nothing'
+  regions: CoverageRegion[]
+}
+
+export interface CoverageWorld {
+  slug: string
+  name: string
+  placed: boolean
+  box?: Box
+  ring?: [number, number][] | null
+  centre?: { lat: number; lon: number }
+  radius_m?: number | null
+  upstream?: string | null
+  route?: string[]
+  verdicts?: { name: string; covered: boolean; outside: number; exact: boolean; claims: string }[]
+  fences?: { upstream: string | null; outside: number | null } | null
+}
+
+export interface UpstreamHealth {
+  name: string
+  url: string
+  ok: boolean
+  ms: number
+  status: string
+  timestamp: string | null
+  ageHours: number | null
+  diffs: { region: string; updates: string; source: string }[]
 }
 
 export interface Config {
@@ -547,6 +596,20 @@ export const api = {
       xhr.onerror = () => reject(new Error('the upload failed before it reached the service'))
       xhr.send(file)
     }),
+
+  osmCoverage: () => call<{ upstreams: CoverageUpstream[]; worlds: CoverageWorld[]; problems: string[]; file: string }>('/api/osm/coverage'),
+  osmUpstreams: () => call<{ upstreams: UpstreamHealth[] }>('/api/osm/upstreams'),
+  geofabrik: () => call<{ source: string; regions: { id: string; name: string; parent: string | null; pbf: string | null; updates: string | null }[] }>('/api/osm/geofabrik'),
+  geofabrikRegion: (id: string) =>
+    call<{
+      region: { properties: { id: string; name: string }; geometry: GeoJsonPolygonal }
+      pbf: { bytes: number; url: string } | null
+      /** instances that already hold all of it */
+      held: string[]
+      /** instances whose coverage overlaps it, and how much of it they leave out */
+      touches: { name: string; outside: number }[]
+    }>(`/api/osm/geofabrik/region?id=${encodeURIComponent(id)}`),
+  osmImport: (upstream: string, region: string) => call<{ run: Run }>('/api/osm/imports', { method: 'POST', body: JSON.stringify({ upstream, region }) }),
 
   runs: () => call<{ runs: Run[]; runner: string }>('/api/runs'),
   run: (id: string) => call<{ run: Run }>(`/api/runs/${id}`),

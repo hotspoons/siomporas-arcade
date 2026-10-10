@@ -72,6 +72,16 @@ ENU frame, because gaussworks' worlds are ENU and a UTM tile is re-based by subt
 Three Overpass queries, each cached by SHA-1 of the query text under `data/cache/overpass/`, tried
 across four public mirrors with back-off (the main instance 504s under load).
 
+**Where the OSM comes from.** Our own Overpass instances first (`CORRIDOR_OVERPASS_URL`, set per
+bake by the world editor), the public mirrors after. Each of ours holds one or more Geofabrik
+regions (`overpass-eu` Europe, `overpass` Maryland, `overpass-na` North America), and a world is
+routed to the instance whose extract — its real polygon, not a box — holds all of it; the bake
+re-checks every query against the same polygons (`CORRIDOR_OVERPASS_COVERAGE`) and stops with a
+`BakeFault` rather than send one to an instance that does not hold it. A regional instance asked
+about ground it does not hold answers HTTP 200 with nothing: that is how dc-metro-take-2 baked
+without Washington or Virginia on 2026-10-10. Coverage, routing, the control, adding a region to a
+running instance and keeping it current: `tools/overpass/README.md`, "Where the OSM comes from".
+
 1. **`nearest_road`** — drivable ways (`DRIVABLE` regex: motorway … primary_link) within 300 m of
    the fix, widened to 800 m if empty. Scored by distance **plus** a class penalty
    (`CLASS_PENALTY`: motorway 0, trunk 40, primary 120, secondary 220, tertiary 320, else 420),

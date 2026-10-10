@@ -81,7 +81,8 @@ the world editor"* rather than "no such tool", which would send an agent hunting
 | `catalog_*`, `model_list` | what is placeable |
 | `asset_*` | the generation catalog: describe, draw (2D), mesh (3D), choose a view, fork, job status, services, sync to S3 |
 | `material_*` | generate a texture set as a **draft**, inspect it, save or discard — a wrong texture must not replace a working one before anyone looks |
-| `run_*` | bake and publish, with logs and cancel. A bake is hours |
+| `run_*` | bake and publish, with logs and cancel. A bake is hours. `run_bake { refreshOsm }` re-asks Overpass instead of trusting the cache |
+| `osm_coverage`, `osm_regions`, `osm_import` | which Overpass instance holds which Geofabrik regions and which one each world reads; the Geofabrik catalogue; add a region to a running instance, as a run (tools/overpass/README.md) |
 | `splat_*` | gaussian training: plan, gpus, runs, start, delete, and the manifest a run *would* submit |
 | `capture_*` | the video a splat is trained from |
 | `place_*` | search the earth, and the saved place index |

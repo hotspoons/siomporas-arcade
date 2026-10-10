@@ -40,3 +40,12 @@ resources:
 # tools/overpass/verify.sh passes against it.
 ingress:
   enabled: false
+
+# Adding regions to this instance (tools/overpass/README.md, "Adding a region to an instance").
+# Off until somebody wants it: turning it on restarts the pod. `primary` is the region this instance
+# was built from, which the delete filter defers to.
+regions:
+  enabled: false
+  primary:
+    id: europe
+    poly: https://download.geofabrik.de/europe.poly

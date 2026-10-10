@@ -422,6 +422,13 @@ export class PyramidStream {
             if (compressed) this.compressed++
             mat.map = tex
             mat.color.setRGB(1, 1, 1)
+            // A MAP ARRIVING IS A NEW PROGRAM, and three does not notice by itself: `USE_MAP` is
+            // compile-time, and r185's renderer re-checks fog, env map, clipping, skinning … but
+            // not whether a map appeared. A tile that drew once bare (it is in the scene from the
+            // moment its pack lands, the photo comes after) kept its bare program and stayed pale
+            // with the photo bound to it — measured on dc-metro in the place editor, 2026-10-10:
+            // 26 of 27 held tiles had `map` set and drew bare until `needsUpdate` was raised.
+            mat.needsUpdate = true
             this.paint(held)
           })
         }

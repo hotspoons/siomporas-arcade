@@ -64,11 +64,16 @@ export const EDITOR_LAYERS: { title: string; layers: { id: string; label: string
 /** Per-mode keyboard reference. The old footer carried all of it at once, for every mode. */
 const KEYS: Record<Mode | 'general', [string, string][]> = {
   general: [
-    ['drag', 'orbit · wheel zooms'],
-    ['W A S D', 'fly the camera · shift sprints'],
+    ['drag', 'grab the ground and slide it'],
+    ['wheel', 'zoom toward the cursor'],
+    ['right-drag', 'zoom about the point pressed'],
+    ['middle-drag', 'orbit and tilt about the point · or shift+drag'],
+    ['W A S D', 'slide the view · shift faster'],
     ['Q E', 'turn left and right'],
     ['R F', 'rise and drop'],
-    ['T', 'top down'],
+    ['+ −', 'zoom about the centre'],
+    ['Home', 'north up, straight down'],
+    ['T', 'frame the whole world'],
     ['C', 'centre on the selection'],
     ['V', 'preview — saves everything and rebuilds'],
     ['Ctrl S', 'save this mode’s file'],

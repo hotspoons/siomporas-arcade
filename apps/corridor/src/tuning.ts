@@ -1150,6 +1150,12 @@ export let TREE_DENSITY = 1
  * reaches the trunk. Rich, 2026-10-03: the tree line was back on the white line.
  */
 export let TREE_ROAD_CLEAR_M = 4.5
+/**
+ * Metres a trunk stays out of a building footprint. The canopy model reads some roofs as trees —
+ * high-rises on dc-metro's Belcrest Road grew trees through their floors (Rich, 2026-10-10) — so
+ * the planter asks the OSM footprints as well as the canopy. Negative turns the mask off.
+ */
+export let TREE_BUILDING_CLEAR_M = 1
 // --- shape: multipliers over the ez-tree preset each archetype starts from (species.ts
 // optionsFor). A change regrows the variants, which is ~100 ms, so the panel debounces it.
 export let TREE_LEAF_COUNT = 1
@@ -2595,6 +2601,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TREE_HEIGHT_SCALE', () => TREE_HEIGHT_SCALE, (v) => (TREE_HEIGHT_SCALE = v), [0.3, 2.5], 0.05, 'multiplies every measured height'),
           tune('TREE_DENSITY', () => TREE_DENSITY, (v) => (TREE_DENSITY = v), [0.05, 1], 0.05, '1 = every candidate; below that a stable hash thins them'),
           tune('TREE_ROAD_CLEAR_M', () => TREE_ROAD_CLEAR_M, (v) => (TREE_ROAD_CLEAR_M = v), [1, 15], 0.5, 'metres a trunk stays back from the pavement edge, so it does not stand in the lane'),
+          tune('TREE_BUILDING_CLEAR_M', () => TREE_BUILDING_CLEAR_M, (v) => (TREE_BUILDING_CLEAR_M = v), [-1, 10], 0.5, 'metres a trunk stays out of a building footprint; negative lets trees stand inside buildings again'),
           tune('TREE_PLANT_RADIUS_M', () => TREE_PLANT_RADIUS_M, (v) => (TREE_PLANT_RADIUS_M = v), [200, 3000], 50, 'how far around the eye cards are drawn'),
           tune('TREE_REPLANT_M', () => TREE_REPLANT_M, (v) => (TREE_REPLANT_M = v), [50, 1200], 25, 'replant once the eye is this far from where it last planted'),
           tune('TREE_PLANT_BUDGET_MS', () => TREE_PLANT_BUDGET_MS, (v) => (TREE_PLANT_BUDGET_MS = v), [0.5, 12], 0.5, 'ms per frame spent measuring trees that just entered the ring'),

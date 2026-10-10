@@ -68,6 +68,8 @@ export interface PyramidStreamOpts {
    * be passed to `strideFor` at the `geometryFor` call site.
    */
   maxVerts?: number
+  /** a tile was added to the set — the tree planter asks the canopy it brought */
+  onTile?: (t: PyrTile) => void
 }
 
 /** A tile that has left the wanted set stays this many metres of travel, so the boundary does not flap. */
@@ -110,7 +112,7 @@ interface Held {
 }
 
 export class PyramidStream {
-  private readonly o: Required<Omit<PyramidStreamOpts, 'index' | 'anchor' | 'set' | 'group' | 'geometryFor' | 'materialFor' | 'base' | 'textureFor' | 'renderer'>> & PyramidStreamOpts
+  private readonly o: Required<Omit<PyramidStreamOpts, 'index' | 'anchor' | 'set' | 'group' | 'geometryFor' | 'materialFor' | 'base' | 'textureFor' | 'renderer' | 'onTile'>> & PyramidStreamOpts
   private readonly entries = new Map<string, PyrEntry>()
   private readonly roots: TileId[] = []
   private readonly held = new Map<string, Held>()
@@ -383,6 +385,7 @@ export class PyramidStream {
         mesh.renderOrder = -tile.z
         this.o.group.add(mesh)
         this.o.set.add(tile)
+        this.o.onTile?.(tile)
         const held: Held = { tile, mesh, geo, mat, photo: null, compressed: false, mask: 0, drop: -1, basePos: null }
         this.held.set(k, held)
         this.loads++

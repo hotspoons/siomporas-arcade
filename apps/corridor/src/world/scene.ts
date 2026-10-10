@@ -40,7 +40,8 @@ import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './
 import { buildBlades, buildCrosswalks, buildLaneArrows, buildSignals, buildStopBars, junctionPaintCut, loadJunctionFacts, type ArrowsResult, type BarsResult, type CrosswalksResult } from './intersections'
 import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
-import { isKerbed, loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, roadMeshPaced, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
+import { isKerbed, loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, roadMeshPaced, stations, taperedLanes, treesFromCanopy, type SurfaceSet, type TreeDiagnosis } from './props'
+import { FootprintMask } from './footprintmask'
 import { STYLE, styled, type Style } from '../visuals/style'
 import { buildRocks, type RocksResult } from './rocks'
 import { buildWater } from './water'
@@ -135,6 +136,11 @@ export interface Site {
   treeSpecies: (legacy?: boolean) => Record<string, number>
   /** how the trees were planted and replanted: cell, radius, centre, count, and whether the budget capped it */
   treePlanting: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number; pending: number }
+  /**
+   * Why the ground within `r` metres of site (x, y north) has the trees it has: cells with canopy,
+   * planted, and the rest by reason — the perf panel's tree lines. Null on a site with no trees.
+   */
+  treeDiagnose: (x: number, y: number, r: number) => (TreeDiagnosis & { footprints: number }) | null
   /**
    * The far-field invariant, read straight off the instance matrices: a tree the near set is
    * drawing as a MODEL must not also be drawing a CARD, unless it is inside the dissolve band.
@@ -903,6 +909,12 @@ if (uLodOn > 0.5) {
   }
 
   // --- fine terrain, streamed: the LOD pyramid ------------------------------------------------
+  /**
+   * A canopy tile arrived: ask the bare cells under it again. Set once the trees exist; declared
+   * HERE, before the stream, because the first tiles land during the awaits between this and the
+   * planter, and a `let` further down would be in its temporal dead zone when they do.
+   */
+  let canopyArrived: (box: [number, number, number, number]) => void = () => {}
   let pyr: PyramidStream | null = null
   if (pyrSet && L.pyramid && anchor) {
     const grp = new THREE.Group()
@@ -949,6 +961,8 @@ if (uLodOn > 0.5) {
       viewportH: renderer?.domElement.height ?? 1080,
       budgetBytes: lite ? 96 * 1024 * 1024 : 256 * 1024 * 1024,
       maxVerts: lite ? 4_000 : 14_000,
+      // canopy the planter may have measured from a coarser tile: its bare cells are asked again
+      onTile: (t) => { if (t.chm) canopyArrived(t.bounds) },
     })
     // Prime under the car, not the ENU origin. Trailworks holds the stream on the foreground
     // until the ground under the view resolves; the origin of a geodesic frame is not the spawn.
@@ -1948,6 +1962,11 @@ if (uLodOn > 0.5) {
   let replantNow: () => void = () => {}
   /** a branch arrived under the planted trees: the frame replants once, on its next look (adoptArriving) */
   let replantDue = false
+  /** where the buildings stand, as their tiles stream in — no tree grows inside one */
+  const footprints = new FootprintMask()
+  /** a footprint tile arrived: free the trees already standing in it (set once the trees exist) */
+  let cullTrees: (box: [number, number, number, number]) => void = () => {}
+  let treeDiagnoseRef: (x: number, y: number, r: number) => TreeDiagnosis | null = () => null
   const clearedAt = (x: number, y: number): boolean => {
     for (const poly of clearPolys) if (inside(poly, x, y)) return true
     return false
@@ -3039,14 +3058,17 @@ if (uLodOn > 0.5) {
     const photo0 = local && focus ? new THREE.Vector3(focus.x, 0, focus.z) : spineAt(photoS).pos
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
     const treeBudget = lite ? 25_000 : coarse ? Math.max(400, Math.round(T.MOBILE_TREE_BUDGET)) : 120_000
+    // the reason is what F6 → perf → trees prints for a cell that grew nothing
     const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, T.TREE_MIN_H, (x, y) => {
-      if (withinPavement(x, -y, T.TREE_ROAD_CLEAR_M)) return true
+      if (withinPavement(x, -y, T.TREE_ROAD_CLEAR_M)) return 'road'
+      // the canopy model reads some roofs as crowns; the footprint says where a building is
+      if (T.TREE_BUILDING_CLEAR_M >= 0 && footprints.inside(x, y, T.TREE_BUILDING_CLEAR_M)) return 'building'
       // nothing grows through a stunt fixture
-      if (clearPolys.length && clearedAt(x, y)) return true
+      if (clearPolys.length && clearedAt(x, y)) return 'fixture'
       if (!adjustments.active) return false
       const a = adjustments.at(x, y, treeAdj)
       // thin (or thicken, up to the canopy cells available) by a stable hash of position
-      return a.tree_density < 1 && hash2(x, y) > a.tree_density
+      return a.tree_density < 1 && hash2(x, y) > a.tree_density ? 'adjust' : false
     }, adjustments.active ? (x, y) => adjustments.at(x, y, treeAdj).species : undefined, {
       canopyAt: (x, y) => canopyOf(x, y),
       cellM: opts.plantWhole ? Math.max(T.TREE_CELL_M, 12) : T.TREE_CELL_M,
@@ -3330,6 +3352,15 @@ if (uLodOn > 0.5) {
     }
     const lastEye = new THREE.Vector3()
     forgetCanopy = () => t.forget()
+    cullTrees = (box) => {
+      if (T.TREE_BUILDING_CLEAR_M < 0) return
+      const pad = T.TREE_BUILDING_CLEAR_M
+      const n = t.cull(box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad, (x, y) => footprints.inside(x, y, pad))
+      // the slots go out with the next plant's patch, which drops them from the grids too
+      if (n) replantDue = true
+    }
+    canopyArrived = (box) => t.recheck(box[0], box[1], box[2], box[3])
+    treeDiagnoseRef = (x, y, r) => t.diagnose(x, y, r)
     replantAt = replantTrees
     replantNow = () => replantTrees(lastEye)
     const replantIfMoved = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
@@ -3969,6 +4000,9 @@ if (uLodOn > 0.5) {
     // one index for the whole site, not one per cell: the cells slice the BUILDINGS, and a house
     // in the last cell still needs to know about the road in the first
     const build = async (list: NonNullable<Manifest['buildings']>, cx: number, cy: number, budget: Budget) => {
+      // the footprints first: a tree planted here before the tile arrived is standing in a lobby
+      const box = footprints.add(list)
+      if (box) cullTrees(box)
       const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, T.STREAM_BUDGET_MS, { roads, pool: poolOf(surfacesDoc), facades, budget })
       b.group.userData.enuX = cx
       b.group.userData.enuY = cy
@@ -4497,6 +4531,10 @@ if (uLodOn > 0.5) {
     adjustments,
     treeCount,
     treePlanting: () => ({ ...treePlantingRef() }),
+    treeDiagnose: (x, y, r) => {
+      const d = treeDiagnoseRef(x, y, r)
+      return d ? { ...d, footprints: footprints.count } : null
+    },
     treeCards: () => treeCardsRef(),
     grass: grassRef,
     buildProfile,

@@ -574,6 +574,31 @@ export interface TreePatch {
   /** slots that fell into the spare ring and should hide */
   hidden: number[]
 }
+/** `diagnose`: the cells within `r` of a point, by what the planter decided there */
+export interface TreeDiagnosis {
+  r: number
+  cellM: number
+  /** the canopy height a cell needs */
+  minH: number
+  cells: number
+  /** cells whose canopy reaches minH now */
+  canopy: number
+  planted: number
+  /** the rest, by reason: 'low', 'stale' (cached low, canopy now tall), 'road', 'building', 'fixture', 'adjust', 'thinned', 'outside', 'unplanted' (a tree the budget had no slot for) */
+  why: Record<string, number>
+  stale: number
+  /** cells nothing has asked yet — the cursor has not reached them, or the cache trim dropped the answer */
+  unmeasured: number
+  unmeasuredCanopy: number
+  /** canopy boxes still waiting to be rechecked, how many were queued, cells they regrew, trees footprints removed */
+  redo: number
+  rechecks: number
+  staleFixed: number
+  culled: number
+  capped: boolean
+  /** the crescent cursor is still walking */
+  pending: boolean
+}
 export function treesFromCanopy(
   chm: Float32Array,
   size: [number, number],
@@ -582,7 +607,8 @@ export function treesFromCanopy(
   groundAt: (x: number, y: number) => number,
   budget: number,
   minH = 3,
-  exclude: (x: number, y: number) => boolean = () => false,
+  /** true, or a reason ('road', 'building', …), when nothing may grow at site (x, y); the reason is what `diagnose` reports */
+  exclude: (x: number, y: number) => boolean | string = () => false,
   speciesAt?: (x: number, y: number) => string | null,
   opts: {
     /** canopy height at site (x, y); the default reads the raster passed in. A tiled site should
@@ -600,7 +626,7 @@ export function treesFromCanopy(
      */
     seedM?: number
   } = {},
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number; walked: number; movedMs: number; blocks: number; records: number; pump: { cells: number; measured: number; placed: number; measureMaxMs: number; nextMs: number; ms: number } } } {
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; recheck: (x0: number, y0: number, x1: number, y1: number) => void; cull: (x0: number, y0: number, x1: number, y1: number, pred: (x: number, y: number) => boolean) => number; diagnose: (x: number, y: number, r: number) => TreeDiagnosis; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number; walked: number; movedMs: number; blocks: number; records: number; rechecks: number; staleFixed: number; culled: number; pump: { cells: number; measured: number; placed: number; measureMaxMs: number; nextMs: number; ms: number } } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
@@ -696,7 +722,9 @@ export function treesFromCanopy(
   let cellsKnown = false
   /** what the last plantMoved took, ms — the replant's own walk, apart from whatever shares its frame */
   let lastMovedMs = 0
-  const cellCache = new Map<string, { x: number; y: number; rec: Rec | null }>()
+  /** what a cell grew, and why when it grew nothing: 'tree', 'low' (canopy under TREE_MIN_H), 'thinned', 'outside', or the exclude reason */
+  type Cached = { x: number; y: number; rec: Rec | null; why: string }
+  const cellCache = new Map<string, Cached>()
   let cacheStamp = ''
   let centre: [number, number] = opts.centre ?? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
   /** the cell and radius are read live at every plant, so F6 → trees → planting just replants */
@@ -734,6 +762,26 @@ export function treesFromCanopy(
     span: number
     i: number
   } | null = null
+  /**
+   * Slots freed OUTSIDE a plant — a road arrived (`invalidateRegion`), a footprint arrived
+   * (`cull`) — reported with the next plant's patch, so the collision grid and the near set drop
+   * them too instead of keeping a trunk nobody can see. `pendingRebuild`: everything went.
+   */
+  const pendingRemoved: number[] = []
+  const pendingRemovedAt: number[] = []
+  let pendingRebuild = false
+  /**
+   * CELLS TO ASK AGAIN. A cell measured while only a coarse canopy tile answered there is cached
+   * as bare ('low'), and the cache is only dropped when the level under the EYE changes — so a
+   * finer tile arriving beside the eye left a swath of 'low' cells under real woods until the car
+   * drove onto it (Rich, 2026-10-10: "you drive one tile over and the trees are there"). A canopy
+   * tile arriving queues its box here; `pump` walks it and re-measures each 'low' cell whose
+   * canopy now reaches TREE_MIN_H.
+   */
+  const redo: { i0: number; i1: number; j0: number; j1: number; i: number; j: number }[] = []
+  let rechecks = 0
+  let staleFixed = 0
+  let culled = 0
   /** a tree cell that did not fit in the budget; tried again before the cursor moves on */
   let hold: { i: number; j: number; x0: number; y0: number } | null = null
   /** what the last `pump` did: cells walked, cells measured, trees placed, the slowest measure, ms */
@@ -744,6 +792,8 @@ export function treesFromCanopy(
     for (const r of records) if (Number.isFinite(r.x)) { liveCount++; if (r.spare) spareCount++ }
   }
   /** the tree a cell grows, or null. Cached while patching so the next ring does not resample the woods already seen. */
+  /** the canopy height a cell must reach to grow a tree */
+  const threshold = () => Math.max(0.2, T.TREE_MIN_H || minH)
   const measure = (i: number, j: number, cellM: number, x0: number, y0: number, useCache: boolean): Rec | null => {
     if (x0 < bbox[0] || x0 > bbox[2] || y0 < bbox[1] || y0 > bbox[3]) return null
     const key = `${i},${j}`
@@ -753,18 +803,25 @@ export function treesFromCanopy(
     }
     const hgt = sample(x0, y0)
     let rec: Rec | null = null
-    if (hgt >= Math.max(0.2, T.TREE_MIN_H || minH) && !(T.TREE_DENSITY < 1 && hash(i, j, 9) > T.TREE_DENSITY)) {
-      const jitter = cellM * 0.45
-      const x = x0 + (hash(i, j, 1) - 0.5) * 2 * jitter
-      const y = y0 + (hash(i, j, 2) - 0.5) * 2 * jitter
-      const H = hgt * (0.9 + hash(i, j, 3) * 0.2) * T.TREE_HEIGHT_SCALE
-      const rad = Math.min(7, Math.max(1.2, H * 0.28 * (0.8 + hash(i, j, 4) * 0.4)))
-      if (!exclude(x, y)) {
-        const sp = speciesAt?.(x, y) ?? undefined
-        rec = { x, z: -y, y: groundAt(x, y), h: H, rad, hue: 0.27 + (hash(i, j, 5) - 0.5) * 0.05, species: sp as TreeRecord['species'], ci: i, cj: j, spare: false }
+    let why = 'low'
+    if (hgt >= threshold()) {
+      if (T.TREE_DENSITY < 1 && hash(i, j, 9) > T.TREE_DENSITY) why = 'thinned'
+      else {
+        const jitter = cellM * 0.45
+        const x = x0 + (hash(i, j, 1) - 0.5) * 2 * jitter
+        const y = y0 + (hash(i, j, 2) - 0.5) * 2 * jitter
+        const H = hgt * (0.9 + hash(i, j, 3) * 0.2) * T.TREE_HEIGHT_SCALE
+        const rad = Math.min(7, Math.max(1.2, H * 0.28 * (0.8 + hash(i, j, 4) * 0.4)))
+        const ex = exclude(x, y)
+        if (ex) why = typeof ex === 'string' ? ex : 'excluded'
+        else {
+          why = 'tree'
+          const sp = speciesAt?.(x, y) ?? undefined
+          rec = { x, z: -y, y: groundAt(x, y), h: H, rad, hue: 0.27 + (hash(i, j, 5) - 0.5) * 0.05, species: sp as TreeRecord['species'], ci: i, cj: j, spare: false }
+        }
       }
     }
-    if (useCache) cellCache.set(key, { x: x0, y: y0, rec })
+    if (useCache) cellCache.set(key, { x: x0, y: y0, rec, why })
     return rec
   }
   const adopt = (cx: number, cy: number, cellM: number, contextR: number, drawR: number) => {
@@ -793,7 +850,7 @@ export function treesFromCanopy(
    * while entries are deleted from it, so the walk is resumed across pump calls and the eye's
    * position is read fresh each time.
    */
-  let trimIter: Iterator<[string, { x: number; y: number; rec: Rec | null }]> | null = null
+  let trimIter: Iterator<[string, Cached]> | null = null
   const trimCache = (cx: number, cy: number, contextR: number, cellM: number) => {
     if (!trimIter && cellCache.size <= 350000) return
     const lim = contextR + Math.max(50, T.TREE_REPLANT_M) + cellM
@@ -813,8 +870,10 @@ export function treesFromCanopy(
    * Measuring it happens in `pump`, a few milliseconds a frame.
    */
   const plantMoved = (cx: number, cy: number, cellM: number, drawR: number, contextR: number): number => {
-    const removed: number[] = []
-    const removedAt: number[] = []
+    const removed: number[] = pendingRemoved.splice(0)
+    const removedAt: number[] = pendingRemovedAt.splice(0)
+    const rebuilt = pendingRebuild
+    pendingRebuild = false
     const shown: number[] = []
     const hidden: number[] = []
     const ox = settled![0], oy = settled![1]
@@ -872,7 +931,7 @@ export function treesFromCanopy(
       row: 0, y0: 0, dy2: 0, spans: [], span: 0, i: 0,
     }
     hold = null
-    patchNote = { rebuilt: false, changed: [], removed, removedAt, shown, hidden }
+    patchNote = { rebuilt, changed: [], removed, removedAt, shown, hidden }
     lastChanged = 0
     lastEvicted = removed.length
     return liveCount
@@ -939,14 +998,51 @@ export function treesFromCanopy(
    * while the ring fills would be its own hitch. A cell that does not fit stays on the cursor
    * until a slot is freed, rather than sorting every tree in the disk.
    */
+  /**
+   * The next queued cell whose cached 'low' answer the canopy now contradicts, with its cache
+   * entry dropped so `measure` asks again. Walks at most `limit` cells; `undefined` means it
+   * stopped there with more to walk, `null` that the queue is empty.
+   */
+  const nextRedo = (cellM: number, cx: number, cy: number, context2: number, limit: number): { i: number; j: number; x0: number; y0: number } | null | undefined => {
+    const th = threshold()
+    for (let n = 0; n < limit; n++) {
+      const b = redo[0]
+      if (!b) return null
+      if (b.j > b.j1) { redo.shift(); continue }
+      const i = b.i, j = b.j
+      if (++b.i > b.i1) { b.i = b.i0; b.j++ }
+      const key = `${i},${j}`
+      if (liveKeys.has(key)) continue
+      const hit = cellCache.get(key)
+      if (!hit || hit.why !== 'low') continue
+      const dx = hit.x - cx, dy = hit.y - cy
+      if (dx * dx + dy * dy > context2) continue
+      if (!(sample(hit.x, hit.y) >= th)) continue
+      cellCache.delete(key)
+      staleFixed++
+      return { i, j, x0: (i + 0.5) * cellM, y0: (j + 0.5) * cellM }
+    }
+    return redo.length ? undefined : null
+  }
+  /** the draw radius and the ring trees are kept out to, from the live knobs */
+  const rings = () => {
+    const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
+    const drawR = T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+    const contextR = drawR + (T.TREE_PATCH > 0.5 ? Math.max(0, T.TREE_SPARE_M) : 0)
+    return { cellM, drawR, contextR }
+  }
   const pump = (budgetMs: number): boolean => {
-    if (!scan || !settled) return false
+    if ((!scan && !hold && !redo.length) || !settled) return false
     const drawR = T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
     const deadline = performance.now() + Math.max(0.25, budgetMs)
-    const cellM = scan.cellM
-    const scx = scan.cx
-    const scy = scan.cy
-    const context2 = scan.context2
+    // a call that only walked the recheck queue must not mark the disc settled: an
+    // `invalidateRegion` may be waiting on the next plant to walk the whole disc again
+    const walking = !!scan || !!hold
+    const rg = rings()
+    const cellM = scan ? scan.cellM : rg.cellM
+    const scx = scan ? scan.cx : centre[0]
+    const scy = scan ? scan.cy : centre[1]
+    const context2 = scan ? scan.context2 : rg.contextR * rg.contextR
     const changed: number[] = []
     let n = 0
     let placed = 0
@@ -954,17 +1050,27 @@ export function treesFromCanopy(
     let measureMax = 0
     let nextMs = 0
     const pumpT0 = performance.now()
-    while ((hold || scan) && placed < 480) {
+    while ((hold || scan || redo.length) && placed < 480) {
       // every fourth cell, not every thirty-second: a cell asks the canopy, the road field, the
       // species raster and the ground, ~150 µs together, and thirty-two of them pushed a 0.75 ms
       // share to 6 ms (2026-10-08)
       if ((n & 3) === 0 && performance.now() >= deadline) break
       const c0 = performance.now()
-      const c = hold ?? nextCell()
+      let c = hold
+      if (!c && redo.length) {
+        // the stale cells first: they are woods the driver can already see are missing
+        const r = nextRedo(cellM, scx, scy, context2, 256)
+        if (r === undefined) { n++; nextMs += performance.now() - c0; continue }
+        c = r
+      }
+      c ??= nextCell()
       nextMs += performance.now() - c0
       hold = null
       n++
-      if (!c) break
+      if (!c) {
+        if (redo.length) continue
+        break
+      }
       const key = `${c.i},${c.j}`
       if (liveKeys.has(key)) continue
       const dx = c.x0 - scx, dy = c.y0 - scy
@@ -1003,7 +1109,7 @@ export function treesFromCanopy(
     pumpStats.measureMaxMs = measureMax
     pumpStats.nextMs = nextMs
     pumpStats.ms = performance.now() - pumpT0
-    if (!scan && !hold && settled) {
+    if (walking && !scan && !hold && settled) {
       settled = [centre[0], centre[1]]
       const spareM = T.TREE_PATCH > 0.5 ? Math.max(0, T.TREE_SPARE_M) : 0
       const contextR = drawR + spareM
@@ -1032,6 +1138,7 @@ export function treesFromCanopy(
       cacheStamp = stamp
       records.length = 0
       free.length = 0
+      redo.length = 0
       blocks.clear()
       liveKeys.clear()
       scan = null
@@ -1088,6 +1195,9 @@ export function treesFromCanopy(
     }
     records.length = 0
     free.length = 0
+    pendingRemoved.length = 0
+    pendingRemovedAt.length = 0
+    pendingRebuild = false
     for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: cand[k].spare })
     patchNote = { rebuilt: true, changed: [], removed: [], removedAt: [], shown: [], hidden: [] }
     lastChanged = records.length
@@ -1175,6 +1285,8 @@ export function treesFromCanopy(
       unblock(r, i, cellM)
       if (r.spare) spareCount--
       liveCount--
+      pendingRemoved.push(i)
+      pendingRemovedAt.push(r.x, r.z)
       r.x = NaN
       free.push(i)
     }
@@ -1187,6 +1299,10 @@ export function treesFromCanopy(
     cellCache.clear()
     trimIter = null
     blocks.clear()
+    redo.length = 0
+    pendingRemoved.length = 0
+    pendingRemovedAt.length = 0
+    pendingRebuild = true
     for (let i = 0; i < records.length; i++) {
       const r = records[i]
       if (!Number.isFinite(r.x)) continue
@@ -1200,7 +1316,89 @@ export function treesFromCanopy(
     scan = null
     hold = null
   }
-  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0), walked: lastWalked, movedMs: +lastMovedMs.toFixed(2), blocks: blocks.size, records: records.length, pump: { ...pumpStats } }) }
+  /** A canopy tile arrived over this box (site x, y north): ask its bare cells again, a few a frame. */
+  const recheck = (x0: number, y0: number, x1: number, y1: number) => {
+    const { cellM, contextR } = rings()
+    const [cx, cy] = centre
+    const ax0 = Math.max(Math.min(x0, x1), cx - contextR), ax1 = Math.min(Math.max(x0, x1), cx + contextR)
+    const ay0 = Math.max(Math.min(y0, y1), cy - contextR), ay1 = Math.min(Math.max(y0, y1), cy + contextR)
+    if (ax1 < ax0 || ay1 < ay0) return
+    const i0 = Math.floor(ax0 / cellM), i1 = Math.floor(ax1 / cellM)
+    const j0 = Math.floor(ay0 / cellM), j1 = Math.floor(ay1 / cellM)
+    // a box already waiting that holds this one is enough
+    for (const b of redo) if (b.i0 <= i0 && b.i1 >= i1 && b.j0 <= j0 && b.j1 >= j1 && b.j === b.j0 && b.i === b.i0) return
+    redo.push({ i0, i1, j0, j1, i: i0, j: j0 })
+    rechecks++
+  }
+  /**
+   * Free the standing trees in this box (site x, y north) for which `pred` says no — a building
+   * footprint that streamed in after the woods around it were planted. The cells are cached as
+   * excluded so the cursor does not grow them again, and the slots go out with the next plant's
+   * patch. Returns how many trees left.
+   */
+  const cull = (x0: number, y0: number, x1: number, y1: number, pred: (x: number, y: number) => boolean): number => {
+    const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
+    const bx0 = Math.floor(Math.min(x0, x1) / BLOCK_M) - 1, bx1 = Math.floor(Math.max(x0, x1) / BLOCK_M) + 1
+    const by0 = Math.floor(Math.min(y0, y1) / BLOCK_M) - 1, by1 = Math.floor(Math.max(y0, y1) / BLOCK_M) + 1
+    let n = 0
+    for (let bj = by0; bj <= by1; bj++) for (let bi = bx0; bi <= bx1; bi++) {
+      const b = blocks.get(`${bi},${bj}`)
+      if (!b) continue
+      for (const i of [...b.slots]) {
+        const r = records[i]
+        if (!Number.isFinite(r.x)) continue
+        const y = -r.z
+        if (r.x < x0 || r.x > x1 || y < y0 || y > y1 || !pred(r.x, y)) continue
+        const key = `${r.ci},${r.cj}`
+        cellCache.set(key, { x: (r.ci + 0.5) * cellM, y: (r.cj + 0.5) * cellM, rec: null, why: 'building' })
+        liveKeys.delete(key)
+        unblock(r, i, cellM)
+        if (r.spare) spareCount--
+        liveCount--
+        pendingRemoved.push(i)
+        pendingRemovedAt.push(r.x, r.z)
+        r.x = NaN
+        free.push(i)
+        n++
+      }
+    }
+    culled += n
+    return n
+  }
+  /**
+   * Why the ground within `r` of site (x, y north) has the trees it has, cell by cell — what the
+   * perf panel prints. Read-only: it measures nothing new, it reads the cache and asks the canopy.
+   */
+  const diagnose = (x: number, y: number, r: number): TreeDiagnosis => {
+    const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
+    const th = threshold()
+    const out: TreeDiagnosis = { r, cellM, minH: th, cells: 0, canopy: 0, planted: 0, why: {}, stale: 0, unmeasured: 0, unmeasuredCanopy: 0, redo: redo.length, rechecks, staleFixed, culled, capped, pending: !!scan || !!hold }
+    const r2 = r * r
+    for (let j = Math.floor((y - r) / cellM); j <= Math.floor((y + r) / cellM); j++) {
+      for (let i = Math.floor((x - r) / cellM); i <= Math.floor((x + r) / cellM); i++) {
+        const cx = (i + 0.5) * cellM, cy = (j + 0.5) * cellM
+        if ((cx - x) ** 2 + (cy - y) ** 2 > r2) continue
+        out.cells++
+        const h = sample(cx, cy)
+        const tall = h >= th
+        if (tall) out.canopy++
+        const key = `${i},${j}`
+        if (liveKeys.has(key)) { out.planted++; continue }
+        const hit = cellCache.get(key)
+        if (!hit) {
+          out.unmeasured++
+          if (tall) out.unmeasuredCanopy++
+          continue
+        }
+        // a cached 'low' under canopy that now reaches the threshold: measured before its tile arrived
+        const why = hit.why === 'low' && tall ? 'stale' : hit.why === 'tree' ? 'unplanted' : hit.why
+        if (why === 'stale') out.stale++
+        out.why[why] = (out.why[why] ?? 0) + 1
+      }
+    }
+    return out
+  }
+  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, recheck, cull, diagnose, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0), walked: lastWalked, movedMs: +lastMovedMs.toFixed(2), blocks: blocks.size, records: records.length, rechecks, staleFixed, culled, pump: { ...pumpStats } }) }
 }
 
 /**

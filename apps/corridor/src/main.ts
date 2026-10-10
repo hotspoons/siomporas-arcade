@@ -830,6 +830,34 @@ function buildLightReport(): LightReport {
   }
 }
 
+/**
+ * WHY THIS STRETCH HAS THE TREES IT HAS. Rich, 2026-10-10: swaths with no trees where the photo
+ * shows woods, and the trees there a tile over. The planter keeps a reason for every cell it asked
+ * (props.ts `diagnose`); these rows count them in a disc around the car, once a second:
+ *  canopy — cells whose canopy reaches TREE_MIN_H now; planted — cells holding a tree;
+ *  then the cells that grew nothing, by reason: road, building (footprint mask), low, thinned,
+ *  stale (cached as low before a finer canopy tile arrived — the recheck queue regrows them),
+ *  unplanted (a tree the budget had no slot for), unasked (the cursor has not reached it).
+ */
+const TREE_WHY_R = 150
+let treeWhy: { at: number; rows: string[] } = { at: 0, rows: [] }
+function treeWhyRows(): string[] {
+  const now = performance.now()
+  if (now - treeWhy.at < 1000) return treeWhy.rows
+  const p = drive.car ? drive.car.mesh.position : camera.position
+  const d = site?.treeDiagnose?.(p.x, -p.z, TREE_WHY_R)
+  if (!d) return (treeWhy = { at: now, rows: [] }).rows
+  const why = Object.entries(d.why).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`)
+  if (d.unmeasured) why.push(`unasked ${d.unmeasured}${d.unmeasuredCanopy ? ` (${d.unmeasuredCanopy} canopy)` : ''}`)
+  const rows = [
+    `trees ${TREE_WHY_R} m: canopy ${d.canopy}/${d.cells} · planted ${d.planted}${d.capped ? ' · CAPPED' : ''}${d.pending ? ' · walking' : ''}`,
+    `  bare: ${why.join(' · ') || 'none'}`,
+    `  recheck ${d.redo} queued · ${d.staleFixed} regrown · ${d.culled} out of buildings · ${short(d.footprints)} footprints`,
+  ]
+  treeWhy = { at: now, rows }
+  return rows
+}
+
 // Which pyramid tile is under the car, and how many of the finest tiles the view is holding.
 // The meter knows frames; the stream knows tiles. Read twice a second with the rest of the panel.
 perfHud.detail = () => {
@@ -855,6 +883,7 @@ perfHud.detail = () => {
   }
   const tb = TREE_BUDGET.stats()
   rows.push(`trees ${short(tb.count)} near · q ${tb.q.toFixed(2)} · med ${tb.medMs.toFixed(1)} ms`)
+  rows.push(...treeWhyRows())
   if (gpuProf?.available) {
     rows.push('gpu ' + gpuProf.read().map((s) => `${s.label} ${s.ms.toFixed(1)}`).join(' · ') + ' ms')
   }

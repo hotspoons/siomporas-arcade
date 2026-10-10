@@ -18,6 +18,7 @@ import numpy as np
 import requests
 from shapely.geometry import LineString
 
+from . import write_atomic
 from .geo import Frame
 
 API = "https://macrostrat.org/api/v2/geologic_units/map"
@@ -34,7 +35,7 @@ def _get(params: dict, cache: Path):
     r = session.get(API, params=params, timeout=90)
     r.raise_for_status()
     hit.parent.mkdir(parents=True, exist_ok=True)
-    hit.write_bytes(r.content)
+    write_atomic(hit, r.content)
     return r.json()
 
 

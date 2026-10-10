@@ -35,6 +35,7 @@ import requests
 from shapely.geometry import LineString, MultiLineString, Point, Polygon, box, mapping, shape
 from shapely.ops import linemerge, substring, unary_union
 
+from . import write_atomic
 from . import BakeFault
 from .geo import Frame
 
@@ -244,11 +245,11 @@ def overpass(query: str, cache_dir: Path) -> dict:
                 last = RuntimeError(remark)
                 time.sleep(5)
                 continue
-            hit.write_text(json.dumps(data))
+            write_atomic(hit, json.dumps(data))
             # who answered, beside the answer and never inside it: the file stays byte-compatible
             # with the world editor's cache (same key, same sidecar shape, overpass.mjs)
             try:
-                hit.with_name(hit.name + ".upstream").write_text(json.dumps({"url": url, "host": url.split("/")[2], "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "by": "bake"}))
+                write_atomic(hit.with_name(hit.name + ".upstream"), json.dumps({"url": url, "host": url.split("/")[2], "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "by": "bake"}))
             except OSError:
                 pass
             return data

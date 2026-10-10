@@ -49,6 +49,7 @@ from pyproj import CRS, Transformer
 from shapely.geometry import Polygon, box, shape
 from shapely.geometry.base import BaseGeometry
 
+from . import write_atomic
 from .geo import Frame
 
 NOAA_INDEX = "https://noaa-nos-coastal-lidar-pds.s3.us-east-1.amazonaws.com/entwine/stac/noaa_item_collection.json"
@@ -179,7 +180,7 @@ def _cached_index(cache: Path, name: str, url: str, slim_fn, what: str) -> list[
         if not entries:
             raise RuntimeError("it listed no usable datasets")
         slim.parent.mkdir(parents=True, exist_ok=True)
-        slim.write_text(json.dumps(entries))
+        write_atomic(slim, json.dumps(entries))
     except Exception as exc:
         print(f"  lidar   {what} unavailable ({exc}); {'using the old copy' if slim.exists() else 'none'}", flush=True)
         if not slim.exists():

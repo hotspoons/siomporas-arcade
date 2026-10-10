@@ -52,6 +52,7 @@ from rasterio.features import rasterize
 from rasterio.io import MemoryFile
 from shapely.geometry import LineString, Polygon
 
+from . import write_atomic
 from .geo import Frame
 
 # LANDFIRE serves its rasters from the LANDFIRE Product Service host; the three regional mosaics
@@ -92,7 +93,7 @@ def _get(url: str, params: dict | None, cache: Path, suffix: str, tries: int = 5
             if r.status_code < 500:
                 r.raise_for_status()
                 hit.parent.mkdir(parents=True, exist_ok=True)
-                hit.write_bytes(r.content)
+                write_atomic(hit, r.content)
                 return r.content
             last = RuntimeError(f"HTTP {r.status_code}")
         except Exception as exc:  # noqa: BLE001 — every failure here is retryable

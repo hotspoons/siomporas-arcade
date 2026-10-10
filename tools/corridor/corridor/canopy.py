@@ -34,6 +34,7 @@ from pathlib import Path
 
 import requests
 
+from . import write_atomic
 from .geo import Frame
 from . import rastercache
 
@@ -61,7 +62,7 @@ def index(cache: Path) -> dict:
     hit.parent.mkdir(parents=True, exist_ok=True)
     r = session.get(INDEX, timeout=300)
     r.raise_for_status()
-    hit.write_text(r.text)
+    write_atomic(hit, r.text)
     return r.json()
 
 

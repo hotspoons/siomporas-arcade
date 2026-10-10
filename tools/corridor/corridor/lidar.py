@@ -43,6 +43,7 @@ from rasterio.transform import from_origin
 from scipy import ndimage
 from shapely.geometry import LineString, Polygon
 
+from . import write_atomic
 from .geo import Frame
 
 BASE = "https://usgs-lidar-public.s3.us-west-2.amazonaws.com/{ds}/"
@@ -72,13 +73,25 @@ session.headers["User-Agent"] = "apex-conduit corridor (github.com/hotspoons)"
 
 
 def _get_json(url: str, cache: Path) -> dict:
+    """A JSON document from `url`, kept in `cache`.
+
+    THE CACHE IS SHARED BY EVERY SHARD of a sharded bake, which all ask for the same EPT hierarchy
+    files at once. On 2026-10-10 one dc-metro shard read a hierarchy file another shard was still
+    writing — empty — and died on `json.loads`. So the write is atomic (a private temp file renamed
+    into place: a reader sees the whole document or none), and a cached file that will not parse is
+    a broken cache entry, fetched again, never a fatal error.
+    """
     cache.parent.mkdir(parents=True, exist_ok=True)
     if cache.exists():
-        return json.loads(cache.read_text())
+        try:
+            return json.loads(cache.read_text())
+        except (ValueError, OSError):
+            print(f"  lidar   cached {cache.name} does not parse; fetching it again", flush=True)
     r = session.get(url, timeout=120)
     r.raise_for_status()
-    cache.write_bytes(r.content)
-    return r.json()
+    doc = r.json()
+    write_atomic(cache, r.content)
+    return doc
 
 
 def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: Path, jobs: int = 16, clip: Polygon | None = None) -> tuple[dict, dict]:

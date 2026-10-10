@@ -18,6 +18,7 @@ import json
 import os
 import re
 import time
+from . import write_atomic
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
@@ -55,7 +56,7 @@ def naip_date(slug: str, lat: float | None, lon: float | None) -> dict | None:
             ms = a.get("acquisition_date")
             out = {"tile": a.get("Name"), "year": a.get("Year"), "date": time.strftime("%Y-%m-%d", time.gmtime(ms / 1000)) if ms else None, "res_m": a.get("resolution_value"), "state": a.get("State")}
         hit.parent.mkdir(parents=True, exist_ok=True)
-        hit.write_text(json.dumps(out))
+        write_atomic(hit, json.dumps(out))
         return out
     except Exception as exc:  # the doc must still build offline
         print(f"  naip date {slug}: {exc}")

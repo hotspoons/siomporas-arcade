@@ -47,6 +47,9 @@ const PROGRAM_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.json', '.md', '.txt
 export const AUTHORED = ['adjustments', 'placements', 'structures', 'dead_ends', 'tuning', 'presets', 'zones', 'courses', 'stunts', 'fixtures', 'surfaces', 'points']
 const AUTHORED_RE = new RegExp(`^[a-z0-9-]+/(${AUTHORED.join('|')})\\.json$`)
 
+/** see writeAtomic */
+let tmpSeq = 0
+
 export class Store {
   constructor(root) {
     this.root = path.resolve(root)
@@ -67,7 +70,10 @@ export class Store {
   /** Write through a temp file in the same directory, so a reader never sees a half-written JSON. */
   async writeAtomic(file, body) {
     await mkdir(path.dirname(file), { recursive: true })
-    const tmp = `${file}.tmp-${process.pid}`
+    // UNIQUE PER WRITE, not per process: two saves of one run in the same tick (a sharded bake's
+    // pod followers each save the record) shared one tmp name, interleaved inside it, and renamed
+    // a file holding one JSON document with the tail of another after it.
+    const tmp = `${file}.tmp-${process.pid}-${++tmpSeq}`
     await writeFile(tmp, body)
     await rename(tmp, file)
     return body.length

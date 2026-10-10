@@ -10,6 +10,8 @@
 // class, which draws the mown and the rough grass, and which pools a building's walls and roof are
 // drawn from. Nothing in it is required; a class it does not mention draws as it always did.
 
+import type { FacadePatch } from '../world/facades'
+
 /** where the bake is served from (site.ts DATA_BASE), read lazily so this module loads under node for its tests */
 const dataBase = () => (typeof location === 'undefined' ? '' : (new URLSearchParams(location.search).get('data') ?? ''))
 
@@ -19,8 +21,13 @@ export interface SurfacesDoc {
   road?: Record<string, string>
   /** the verge grasses → material ids */
   ground?: { mown?: string; rough?: string }
-  /** pools a building draws its walls and roof from, by a hash of the building and `seed` */
-  buildings?: { walls?: string[]; roofs?: string[]; seed?: number }
+  /**
+   * pools a building draws its walls and roof from, by a hash of the building and `seed` — one pool
+   * for every building (the World tab's chips), and `classes`, this world's own choices per building
+   * class (Assets → Buildings; src/world/facades.ts), which win over both the single pool and the
+   * library's shared default for the fields they set
+   */
+  buildings?: { walls?: string[]; roofs?: string[]; seed?: number; classes?: Record<string, FacadePatch> }
 }
 
 export const EMPTY_SURFACES: SurfacesDoc = { version: 1 }

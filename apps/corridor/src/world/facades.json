@@ -1,0 +1,162 @@
+{
+ "_doc": "The built-in building classes and their facade pools (src/world/facades.ts). The shared default (assetsvc /facades) and a world's surfaces.json lay their choices over these. Read by the app AND by tools/worldeditor (mcptools.mjs, vocab.mjs), so there is one copy. Materials are library ids (assetsvc /materials).",
+ "classes": [
+  {
+   "id": "house",
+   "label": "Single-family home",
+   "note": "detached houses and bungalows; an untagged footprint under 300 m²",
+   "osm": ["house", "detached", "semidetached_house", "bungalow", "cabin", "farmhouse", "villa", "static_caravan"],
+   "walls": [
+    { "material": "brick_running_red", "weight": 2 },
+    { "material": "brick_colonial_red", "weight": 1 },
+    { "material": "vinyl_siding_modern", "weight": 2 },
+    { "material": "vinyl_siding_70s", "weight": 1 },
+    { "material": "clapboard_white", "weight": 1 },
+    { "material": "clapboard_craftsman", "weight": 1 }
+   ],
+   "roofs": [
+    { "material": "shingle_arch_charcoal", "weight": 2 },
+    { "material": "shingle_3tab_brown", "weight": 1 },
+    { "material": "shingle_arch_driftwood", "weight": 1 },
+    { "material": "shingle_3tab_charcoal", "weight": 1 }
+   ],
+   "metalness": 0,
+   "roughness": 0.9,
+   "glass": false
+  },
+  {
+   "id": "townhouse",
+   "label": "Townhouse",
+   "note": "terraces; a long, narrow untagged footprint under 300 m²",
+   "osm": ["terrace", "townhouse"],
+   "walls": [
+    { "material": "brick_running_red", "weight": 3 },
+    { "material": "brick_colonial_red", "weight": 1 },
+    { "material": "brick_painted_white", "weight": 1 },
+    { "material": "vinyl_siding_modern", "weight": 2 }
+   ],
+   "roofs": [
+    { "material": "shingle_arch_charcoal", "weight": 2 },
+    { "material": "shingle_3tab_charcoal", "weight": 1 }
+   ],
+   "metalness": 0,
+   "roughness": 0.9,
+   "glass": false
+  },
+  {
+   "id": "apartments",
+   "label": "Apartments",
+   "note": "apartment blocks and dormitories; an untagged footprint 9 m or taller",
+   "osm": ["apartments", "residential", "dormitory", "flats"],
+   "walls": [
+    { "material": "brick_running_red", "weight": 2 },
+    { "material": "brick_buff_commercial", "weight": 1 },
+    { "material": "cmu_painted", "weight": 2 },
+    { "material": "cmu_bare", "weight": 1 }
+   ],
+   "roofs": [],
+   "metalness": 0,
+   "roughness": 0.9,
+   "glass": false
+  },
+  {
+   "id": "commercial",
+   "label": "Commercial",
+   "note": "shops, offices, restaurants and hotels; anything a shop or an office is in",
+   "osm": ["commercial", "retail", "office", "supermarket", "kiosk", "hotel", "store", "shop", "restaurant", "bank", "mall"],
+   "walls": [
+    { "material": "cmu_painted", "weight": 2 },
+    { "material": "cmu_bare", "weight": 1 },
+    { "material": "brick_running_red", "weight": 1 },
+    { "material": "brick_buff_commercial", "weight": 2 }
+   ],
+   "roofs": [],
+   "metalness": 0.05,
+   "roughness": 0.85,
+   "glass": false
+  },
+  {
+   "id": "skyscraper",
+   "label": "Tower",
+   "note": "anything 40 m or taller, whatever it is tagged — a curtain wall reads as one",
+   "osm": ["skyscraper", "tower"],
+   "min_height_m": 40,
+   "walls": [
+    { "material": "curtain_wall_glass", "weight": 1 }
+   ],
+   "roofs": [],
+   "metalness": 0.85,
+   "roughness": 0.25,
+   "glass": true
+  },
+  {
+   "id": "industrial",
+   "label": "Industrial",
+   "note": "warehouses, factories and depots; an untagged low footprint over 4,000 m²",
+   "osm": ["industrial", "warehouse", "manufacture", "factory", "hangar", "depot", "service", "storage"],
+   "walls": [
+    { "material": "concrete_precast", "weight": 2 },
+    { "material": "cmu_bare", "weight": 2 },
+    { "material": "cmu_painted", "weight": 1 },
+    { "material": "corrugated_metal", "weight": 1 }
+   ],
+   "roofs": [
+    { "material": "corrugated_metal", "weight": 1 }
+   ],
+   "metalness": 0.1,
+   "roughness": 0.8,
+   "glass": false
+  },
+  {
+   "id": "civic",
+   "label": "Civic",
+   "note": "schools, churches, hospitals, government",
+   "osm": ["public", "civic", "government", "school", "university", "college", "kindergarten", "church", "chapel", "cathedral", "mosque", "synagogue", "temple", "hospital", "fire_station", "train_station", "transportation"],
+   "walls": [
+    { "material": "brick_colonial_red", "weight": 2 },
+    { "material": "brick_buff_commercial", "weight": 1 },
+    { "material": "stone_ashlar", "weight": 1 }
+   ],
+   "roofs": [
+    { "material": "slate_roof", "weight": 1 }
+   ],
+   "metalness": 0,
+   "roughness": 0.85,
+   "glass": false
+  },
+  {
+   "id": "farm",
+   "label": "Farm building",
+   "note": "barns, stables and farm sheds",
+   "osm": ["barn", "farm_auxiliary", "stable", "cowshed", "sty", "silo", "greenhouse"],
+   "walls": [
+    { "material": "board_batten", "weight": 1 }
+   ],
+   "roofs": [
+    { "material": "standing_seam_tin", "weight": 2 },
+    { "material": "corrugated_metal", "weight": 1 }
+   ],
+   "metalness": 0,
+   "roughness": 0.9,
+   "glass": false
+  },
+  {
+   "id": "shed",
+   "label": "Shed or garage",
+   "note": "sheds, garages and carports; an untagged footprint under 40 m²",
+   "osm": ["shed", "garage", "garages", "carport", "hut", "roof", "boathouse"],
+   "walls": [
+    { "material": "board_batten", "weight": 1 },
+    { "material": "vinyl_siding_70s", "weight": 1 },
+    { "material": "corrugated_metal", "weight": 1 }
+   ],
+   "roofs": [
+    { "material": "shingle_3tab_brown", "weight": 1 },
+    { "material": "corrugated_metal", "weight": 1 }
+   ],
+   "metalness": 0,
+   "roughness": 0.9,
+   "glass": false
+  }
+ ]
+}

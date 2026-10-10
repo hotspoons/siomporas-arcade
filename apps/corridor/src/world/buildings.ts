@@ -18,6 +18,7 @@ import { RoadIndex, type Footprint } from './dressing'
 import { BUILDING_DRESSING, DRESS_WINDOW_WALLS, STREAM_LOCAL } from '../tuning'
 import { buildMassing, type MassArrays, type MassInput, type MassPool } from './massing'
 import { dressBuilding, type DressBuild, type Ground } from './dressingdraw'
+import type { FacadeRuntime } from './facadesrt'
 
 export interface BuildingStats {
   count: number
@@ -285,7 +286,7 @@ async function dressArrays(list: { bd: Footprint; base: number; street: [number,
   return { pos: Float32Array.from(dg.pos), col: Float32Array.from(dg.col), idx: Uint32Array.from(dg.idx), dressed }
 }
 
-export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean; pool?: TexturePool | null; budget?: Budget } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
+export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean; pool?: TexturePool | null; facades?: FacadeRuntime | null; budget?: Budget } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
   const group = new THREE.Group()
   group.name = 'buildings'
   const list = manifest.buildings ?? []
@@ -323,8 +324,12 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     }
     if (!Number.isFinite(base)) continue
     base -= 0.3
-    sites.push({ ring, height: h, heightSrc: bd.height_src, area: bd.area_m2 ?? 0, rect: bd.rect ?? null, base })
-    if (dress) {
+    // the building's CLASS (facades.ts): read off its tags here, where they are, so the worker
+    // gets a number rather than every footprint's tag dictionary
+    const fslot = opts.facades ? opts.facades.slotOf(bd) : -1
+    sites.push({ ring, height: h, heightSrc: bd.height_src, area: bd.area_m2 ?? 0, rect: bd.rect ?? null, base, fslot })
+    // a curtain wall is its own windows: dressing one draws a grid of house windows over the glass
+    if (dress && !(fslot >= 0 && opts.facades!.glazed(fslot))) {
       let cx = 0, cy = 0
       for (const p of ring) { cx += p[0]; cy += p[1] }
       // the street facing, from the road index — the only other main-thread input the dressing
@@ -334,9 +339,11 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
   }
   buildTiming.massMs += performance.now() - tGround0
 
-  const pool: MassPool | null = opts.pool
-    ? { wallIds: opts.pool.walls.map((w) => w.id), roofIds: opts.pool.roofs.map((w) => w.id), seed: opts.pool.seed }
-    : null
+  const pool: MassPool | null = opts.facades
+    ? { wallIds: [], roofIds: [], seed: 1, facades: { classes: opts.facades.plan.classes } }
+    : opts.pool
+      ? { wallIds: opts.pool.walls.map((w) => w.id), roofIds: opts.pool.roofs.map((w) => w.id), seed: opts.pool.seed }
+      : null
   const mass = await massArrays(sites, pool, budget)
 
   // PASS 2 — the dressing. The worker plans and draws it; only the driveway slabs need the
@@ -367,7 +374,8 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     geo.setAttribute('normal', new THREE.BufferAttribute(mass.norm, 3))
     geo.setIndex(new THREE.BufferAttribute(mass.idx, 1))
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide })
-    if (opts.pool && mass.lay.some((l) => l >= 0)) await texturePoolMaterial(mat, opts.pool)
+    if (opts.facades && mass.lay.some((l) => l >= 0)) await opts.facades.apply(mat)
+    else if (opts.pool && mass.lay.some((l) => l >= 0)) await texturePoolMaterial(mat, opts.pool)
     const mesh = new THREE.Mesh(geo, mat)
     mesh.name = 'buildings:massing'
     group.add(mesh)

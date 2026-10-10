@@ -1853,6 +1853,15 @@ export let BRANCH_VERGE = 14
  */
 export let BUILDING_DRESSING = 1
 export let DRESS_WINDOW_WALLS = 3
+/**
+ * The building classes' facades (src/world/facades.ts): every footprint is classed — house, tower,
+ * warehouse — and draws one wall and one roof from its class's pool of library materials, with the
+ * class's reflectiveness (Assets → Buildings). 0 is the flat palette, as before 2026-10-10.
+ * FACADE_TEXTURE_PX is the size every pool texture is drawn at in the one array they share: the
+ * library's maps are 1024², and 512 is a quarter of the memory at 4–6 mm a texel. Reload to apply.
+ */
+export let BUILDING_FACADES = 1
+export let FACADE_TEXTURE_PX = 512
 
 // --- physics (docs/corridor/PLAN-PHYSICS.md) ------------------------------------------------------
 /**
@@ -2742,6 +2751,8 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('BUILDING_DRESSING', () => BUILDING_DRESSING, (v) => (BUILDING_DRESSING = v), [0, 1], 1, 'windows, doors, gutters and trim on the generated massing'),
           tune('DRESS_WINDOW_WALLS', () => DRESS_WINDOW_WALLS, (v) => (DRESS_WINDOW_WALLS = v), [1, 4], 1, 'how many elevations get glass: the street\u2019s first, then the longest'),
+          tune('BUILDING_FACADES', () => BUILDING_FACADES, (v) => (BUILDING_FACADES = v), [0, 1], 1, 'walls and roofs from each building class\u2019s texture pool (Assets \u2192 Buildings); 0 is the flat palette'),
+          tune('FACADE_TEXTURE_PX', () => FACADE_TEXTURE_PX, (v) => (FACADE_TEXTURE_PX = v), [128, 1024], 128, 'the size every facade texture is drawn at in their one shared array'),
         ],
       },
       {

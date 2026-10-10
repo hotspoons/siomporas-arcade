@@ -206,3 +206,67 @@ test('export, import and deploy go through the editor routes, and a map export s
   assert.equal(seen[4][2].url, 'https://example.com/crofton.zip')
   assert.equal(seen[6][2].dryRun, true)
 })
+
+/* ---- building classes ---------------------------------------------------------------------- */
+
+/** a fake asset service: two materials, and whatever /facades holds */
+function facadeService() {
+  const shared = new Map()
+  return {
+    shared,
+    apiFetch: async (method, p, body) => {
+      if (p === '/assetsvc/materials') return { materials: [{ id: 'brick_running_red' }, { id: 'curtain_wall_glass' }, { id: 'cmu_bare' }] }
+      if (p === '/assetsvc/facades' && method === 'GET') return { facades: [...shared.values()] }
+      const m = /^\/assetsvc\/facades\/([a-z]+)$/.exec(p)
+      if (m && method === 'PUT') { shared.set(m[1], { ...(shared.get(m[1]) ?? {}), ...body, id: m[1] }); return { facade: shared.get(m[1]) } }
+      if (m && method === 'DELETE') { shared.delete(m[1]); return { ok: true } }
+      return {}
+    },
+  }
+}
+
+test('building_class_list names every class, its rule and its pools, and says where each field comes from', async () => {
+  const svc = facadeService()
+  const { tool, tools } = toolsFor(volume(), { apiFetch: svc.apiFetch })
+  for (const n of ['building_class_list', 'building_class_get', 'building_class_set']) assert.ok(tools.find((t) => t.name === n).description.length > 80, `${n} is described`)
+  const r = await tool('building_class_list').run({})
+  const ids = r.classes.map((c) => c.id)
+  assert.deepEqual(ids, ['house', 'townhouse', 'apartments', 'commercial', 'skyscraper', 'industrial', 'civic', 'farm', 'shed'])
+  const house = r.classes.find((c) => c.id === 'house')
+  assert.ok(house.osm.includes('detached') && house.walls.length >= 4 && house.from.walls === 'built-in')
+  const sky = r.classes.find((c) => c.id === 'skyscraper')
+  assert.ok(sky.min_height_m >= 30 && sky.glass && sky.metalness > 0.5, 'the tower is tall, glazed and reflective by default')
+})
+
+test('building_class_set without a slug changes the shared default; with one, only that world', async () => {
+  const svc = facadeService()
+  const { tool, docs } = toolsFor(volume(), { apiFetch: svc.apiFetch })
+  await tool('building_class_set').run({ id: 'apartments', walls: [{ material: 'cmu_bare', weight: 2 }, { material: 'brick_running_red', weight: 1 }] })
+  assert.deepEqual(svc.shared.get('apartments').walls.map((e) => e.material), ['cmu_bare', 'brick_running_red'])
+  let g = await tool('building_class_get').run({ id: 'apartments' })
+  assert.equal(g.from.walls, 'shared')
+  // a world: reflectiveness on its towers, and the road it already had is kept
+  docs.set('crofton/surfaces.json', { version: 1, road: { asphalt_aged: 'chipseal' } })
+  await tool('building_class_set').run({ id: 'skyscraper', slug: 'crofton', metalness: 0.95, roughness: 0.1 })
+  const doc = docs.get('crofton/surfaces.json')
+  assert.equal(doc.road.asphalt_aged, 'chipseal', 'the world file keeps what else it said')
+  assert.equal(doc.buildings.classes.skyscraper.metalness, 0.95)
+  g = await tool('building_class_get').run({ id: 'skyscraper', slug: 'crofton' })
+  assert.equal(g.metalness, 0.95)
+  assert.equal(g.from.metalness, 'world')
+  assert.equal(g.from.walls, 'built-in')
+  assert.equal((await tool('building_class_get').run({ id: 'skyscraper' })).metalness < 0.95, true, 'the shared default is untouched by a world')
+  // reset drops the world's own
+  await tool('building_class_set').run({ id: 'skyscraper', slug: 'crofton', reset: true })
+  assert.equal(docs.get('crofton/surfaces.json').buildings.classes.skyscraper, undefined)
+})
+
+test('building_class_set refuses what the game could not draw', async () => {
+  const svc = facadeService()
+  const { tool } = toolsFor(volume(), { apiFetch: svc.apiFetch })
+  await assert.rejects(tool('building_class_set').run({ id: 'castle', metalness: 0.2 }), /no building class "castle"/)
+  await assert.rejects(tool('building_class_set').run({ id: 'house', walls: [{ material: 'unobtainium', weight: 1 }] }), /not in the library: unobtainium/)
+  await assert.rejects(tool('building_class_set').run({ id: 'house', walls: [{ material: 'cmu_bare', weight: 0 }] }), /weight above 0/)
+  await assert.rejects(tool('building_class_set').run({ id: 'house', metalness: 3 }), /0 to 1/)
+  await assert.rejects(tool('building_class_set').run({ id: 'house' }), /nothing to set/)
+})

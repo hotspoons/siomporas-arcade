@@ -16,6 +16,7 @@
 // pool picks) so a worker cell is identical to a main-thread one. Keep them in step.
 
 import { pickFromPool } from '../assets/surfacesdoc'
+import { buildingKey, packLayer, pickWeighted, type PlanClass } from './facades'
 
 /** site x, y (north), z (up) → three.js world; the mapping buildings.ts keeps local too */
 const WX = (x: number, _y: number, _z: number) => x
@@ -55,6 +56,8 @@ export interface MassInput {
   area: number
   rect?: MassRect | null
   base: number
+  /** the building's class slot in `MassPool.facades` (facades.ts), classified on the main thread; -1 or absent is none */
+  fslot?: number
 }
 
 /** The world's building texture pools, reduced to what the palette pick needs. */
@@ -62,6 +65,12 @@ export interface MassPool {
   wallIds: string[]
   roofIds: string[]
   seed: number
+  /**
+   * The building classes' pools, as texture layers (facades.ts `facadePlan`). When present it is
+   * the whole answer — the world's own wall/roof pool is folded into it by `resolveFacades` — and a
+   * vertex's layer is `class × 64 + texture` so the class's surface rides with it.
+   */
+  facades?: { classes: PlanClass[] } | null
 }
 
 /** The massing, as transferable typed arrays plus what the caller still has to wrap and count. */
@@ -198,8 +207,23 @@ export async function buildMassing(list: MassInput[], pool: MassPool | null, yie
     const ri = Math.floor(hash2(r[0][1], r[0][0]) * ROOFS.length) % ROOFS.length
     const wall = WALLS[wi]
     const roof = ROOFS[ri]
-    const wallLayer = pool?.wallIds.length ? pool.wallIds.findIndex((id) => id === pickFromPool(pool.wallIds, Math.floor(seed * 65536), pool.seed)) : -1
-    const roofLayer = pool?.roofIds.length ? pool.wallIds.length + pool.roofIds.findIndex((id) => id === pickFromPool(pool.roofIds, Math.floor(hash2(r[0][1], r[0][0]) * 65536), pool.seed + 7)) : -1
+    let wallLayer = -1
+    let roofLayer = -1
+    const fc = pool?.facades && bd.fslot !== undefined && bd.fslot >= 0 ? pool.facades.classes[bd.fslot] : null
+    if (pool?.facades) {
+      // ONE WALL AND ONE ROOF PER BUILDING, from its class's pools, by its own key: the same
+      // building draws the same bricks on every load and in whichever tile holds it
+      if (fc) {
+        const key = buildingKey(r)
+        const w = pickWeighted(fc.walls.map((e) => e.weight), key, 0x5bd1e995)
+        const f = pickWeighted(fc.roofs.map((e) => e.weight), key, 0x27d4eb2f)
+        if (w >= 0) wallLayer = packLayer(bd.fslot!, fc.walls[w].layer)
+        if (f >= 0) roofLayer = packLayer(bd.fslot!, fc.roofs[f].layer)
+      }
+    } else {
+      wallLayer = pool?.wallIds.length ? pool.wallIds.findIndex((id) => id === pickFromPool(pool.wallIds, Math.floor(seed * 65536), pool.seed)) : -1
+      roofLayer = pool?.roofIds.length ? pool.wallIds.length + pool.roofIds.findIndex((id) => id === pickFromPool(pool.roofIds, Math.floor(hash2(r[0][1], r[0][0]) * 65536), pool.seed + 7)) : -1
+    }
 
     // house-sized things get a gable; sheds, strip malls, warehouses and towers stay flat
     const area = bd.area ?? 0

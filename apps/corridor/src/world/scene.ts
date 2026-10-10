@@ -32,6 +32,7 @@ import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings, buildRoadIndex, buildTiming, type TexturePool } from './buildings'
+import { loadFacades, type FacadeRuntime } from './facadesrt'
 import { loadSurfacesDoc, resolveSurfaceSets, type SurfacesDoc } from '../assets/surfacesdoc'
 import { buildPower } from './power'
 import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './furniture'
@@ -165,6 +166,8 @@ export interface Site {
   setSurfaces: (doc: SurfacesDoc) => void
   /** the world's textures as loaded, for the World tab */
   surfaces: () => SurfacesDoc
+  /** the building classes' facades as this load draws them (facadesrt.ts), or null for the palette */
+  facades: () => FacadeRuntime | null
   /** recolour everything living */
   setSeason: (season: Season) => void
   /** the palette: realistic is the bake as measured; anything else is a place that is not this one */
@@ -1177,6 +1180,15 @@ if (uLodOn > 0.5) {
   bootDetail.push({ phase: 'paving: surfaces doc', ms: Math.round(performance.now() - tSurfDoc) })
   let roadSets = resolveSurfaceSets(surfaceSets, surfacesDoc)
   applyTerrainFallback(roadSets)
+  /*
+   * THE BUILDING CLASSES' FACADES (facades.ts): which class each footprint is and the pool its walls
+   * and roof draw from — built-in, then the library's shared `/facades`, then this world's
+   * `buildings.classes`. Two small fetches here; the one texture array loads with the first cell
+   * that needs it. BUILDING_FACADES 0 is the palette (and the world's single pool, if it has one).
+   */
+  const tFacades = performance.now()
+  const facades: FacadeRuntime | null = T.BUILDING_FACADES > 0 ? await loadFacades(surfacesDoc.buildings, { px: T.FACADE_TEXTURE_PX }).catch(() => null) : null
+  bootDetail.push({ phase: 'paving: building facades', ms: Math.round(performance.now() - tFacades) })
   const poolOf = (doc: SurfacesDoc): TexturePool | null => {
     const b = doc.buildings
     if (!b || (!b.walls?.length && !b.roofs?.length)) return null
@@ -3956,7 +3968,7 @@ if (uLodOn > 0.5) {
     // one index for the whole site, not one per cell: the cells slice the BUILDINGS, and a house
     // in the last cell still needs to know about the road in the first
     const build = async (list: NonNullable<Manifest['buildings']>, cx: number, cy: number, budget: Budget) => {
-      const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, T.STREAM_BUDGET_MS, { roads, pool: poolOf(surfacesDoc), budget })
+      const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, T.STREAM_BUDGET_MS, { roads, pool: poolOf(surfacesDoc), facades, budget })
       b.group.userData.enuX = cx
       b.group.userData.enuY = cy
       buildingsGroup.add(b.group)
@@ -4557,6 +4569,7 @@ if (uLodOn > 0.5) {
     retune,
     setSurfaces: (doc) => applySurfaces(doc),
     surfaces: () => surfacesDoc,
+    facades: () => facades,
     setSeason,
     groundAt: groundAtWorld,
     physGroundAt: (x, z) => physGroundAtOut(x, z),

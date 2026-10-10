@@ -383,6 +383,84 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     ),
     T('traffic_set_delete', 'Delete a traffic set.', { id: str('') }, ['id'], (a) => del(`/assetsvc/traffic/${encodeURIComponent(a.id)}`)),
 
+    /* ---- building classes: which materials each kind of building is drawn from ----------------
+     * Rich, 2026-10-10: *"random textures feed a single building type so we can get variety, e.g.
+     * brick and siding textures -> single family home … glass -> skyscraper. Need to be able to
+     * assign reflectiveness"*. Every footprint the bake found is classed (house, townhouse,
+     * apartments, commercial, skyscraper, industrial, civic, farm, shed — from its OSM tag, then its
+     * size and height) and draws ONE wall and ONE roof from its class's pools by a hash of the
+     * building, so it is the same on every load. Three layers, the last winning per field: the
+     * built-in set, the library's SHARED default (every world), and a world's own (its
+     * surfaces.json). The editor's Assets → Buildings tab edits exactly these.
+     */
+    T(
+      'building_class_list',
+      'Every building class: what puts a footprint in it (OSM building= values, and for a tower a minimum height), and the pools it draws from — walls and roofs as [{ material, weight }] (library material ids; weight is a relative share), metalness (0…1, its REFLECTIVENESS — 0.85 is a glass tower), roughness (0…1), glass (panes from the material\u2019s glass mask). With `slug`, what THAT world draws, and `from` says per field whether it is built-in, shared or the world\u2019s own. Changes nothing.',
+      { slug: str('a world, to see what it draws; omit for the shared default') },
+      [],
+      async (a) => {
+        const builtin = await builtinFacades()
+        const shared = ((await get('/assetsvc/facades').catch(() => ({ facades: [] }))) ?? {}).facades ?? []
+        const world = a.slug ? ((await siteDoc.read(a.slug, 'surfaces.json')) ?? {}).buildings ?? null : null
+        const eff = resolveFacades(builtin, shared, world)
+        return {
+          scope: a.slug ? `world ${a.slug}` : 'shared default',
+          classes: eff.map((c) => ({ ...c, from: facadeSources(c.id, shared, world) })),
+          note: 'the game reads these on the next load of a world; building_class_set changes them',
+        }
+      },
+    ),
+    T(
+      'building_class_get',
+      'One building class in full, as `building_class_list` shows it — with `slug`, as that world draws it.',
+      { id: str('house | townhouse | apartments | commercial | skyscraper | industrial | civic | farm | shed'), slug: str('optional world') },
+      ['id'],
+      async (a) => {
+        const builtin = await builtinFacades()
+        if (!builtin.some((c) => c.id === a.id)) throw new Error(`no building class "${a.id}" — one of ${builtin.map((c) => c.id).join(', ')}`)
+        const shared = ((await get('/assetsvc/facades').catch(() => ({ facades: [] }))) ?? {}).facades ?? []
+        const world = a.slug ? ((await siteDoc.read(a.slug, 'surfaces.json')) ?? {}).buildings ?? null : null
+        const c = resolveFacades(builtin, shared, world).find((x) => x.id === a.id)
+        return { ...c, from: facadeSources(a.id, shared, world) }
+      },
+    ),
+    T(
+      'building_class_set',
+      'Change what a building class is drawn from. WITHOUT `slug` it changes the SHARED default every world draws; WITH `slug` only that world (its surfaces.json), which wins over the shared default for the fields it sets. Give any of: walls / roofs ([{ material, weight }] — the WHOLE pool, so to add one, read it with building_class_get and send it back longer; material ids from material_list), metalness (reflectiveness, 0…1), roughness (0…1), glass (true: a material with a glass mask, like curtain_wall_glass, gets smooth panes). `reset: true` drops the world\u2019s own choices for the class (with slug) or the shared record (without), back to the layer under it. Takes effect on the next load of a world.',
+      {
+        id: str('the class id'), slug: str('a world; omit for the shared default'),
+        walls: { type: 'array', description: '[{ material, weight }]', items: { type: 'object' } },
+        roofs: { type: 'array', description: '[{ material, weight }] — empty keeps the palette roof colour', items: { type: 'object' } },
+        metalness: num('reflectiveness, 0…1'), roughness: num('0…1; 0.05 is a mirror'), glass: bool('panes from the material\u2019s glass mask'),
+        reset: bool('drop this layer\u2019s choices for the class'),
+      },
+      ['id'],
+      async (a) => {
+        const builtin = await builtinFacades()
+        if (!builtin.some((c) => c.id === a.id)) throw new Error(`no building class "${a.id}" — one of ${builtin.map((c) => c.id).join(', ')}`)
+        if (a.reset) {
+          if (!a.slug) { await del(`/assetsvc/facades/${encodeURIComponent(a.id)}`); return { ok: true, reset: 'shared', id: a.id } }
+          const doc = (await siteDoc.read(a.slug, 'surfaces.json')) ?? { version: 1 }
+          if (doc.buildings?.classes) delete doc.buildings.classes[a.id]
+          return { ok: true, reset: a.slug, id: a.id, wrote: await siteDoc.write(a.slug, 'surfaces.json', doc) }
+        }
+        const mats = new Set((((await get('/assetsvc/materials')) ?? {}).materials ?? []).map((m) => m.id))
+        const patch = checkPatch(a, mats.size ? mats : null)
+        if (!Object.keys(patch).length) throw new Error('nothing to set: give walls, roofs, metalness, roughness or glass (or reset)')
+        if (!a.slug) {
+          await put(`/assetsvc/facades/${encodeURIComponent(a.id)}`, patch)
+          return { ok: true, scope: 'shared', id: a.id, set: Object.keys(patch) }
+        }
+        // read, merge, write: the file carries the world's road and grass textures too
+        const doc = (await siteDoc.read(a.slug, 'surfaces.json')) ?? { version: 1 }
+        doc.version = 1
+        doc.buildings ??= {}
+        doc.buildings.classes ??= {}
+        doc.buildings.classes[a.id] = { ...(doc.buildings.classes[a.id] ?? {}), ...patch }
+        return { ok: true, scope: a.slug, id: a.id, set: Object.keys(patch), wrote: await siteDoc.write(a.slug, 'surfaces.json', doc) }
+      },
+    ),
+
     /* ---- roads, zones and races: the world as a game board ------------------------------------
      * Zones, courses and stunts are site documents (`sites/<slug>/zones.json` and so on, through
      * read_document / write_document), and these are the helpers that make writing them possible
@@ -609,6 +687,7 @@ import { siteProjector } from './geo.mjs'
 import { apiHash, declarations, modules } from './programs.mjs'
 import { programRefs } from './programrefs.mjs'
 import { POINT_KINDS, POINT_MODES, vocab } from './vocab.mjs'
+import { builtinFacades, checkPatch, facadeSources, resolveFacades } from './facades.mjs'
 
 const round = (v) => Math.round(v * 10) / 10
 const clamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0))

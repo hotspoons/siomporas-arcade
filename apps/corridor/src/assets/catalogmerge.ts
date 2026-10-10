@@ -45,6 +45,30 @@ export function shippedEntries(doc: { assets?: PlaceableEntry[] } | null | undef
 }
 
 /**
+ * THE BUILT-INS: what can be placed that is not a library item.
+ *
+ * Rich, 2026-10-10: "Catalog was supposed to show props like horse bridges and water towers, these
+ * show up in the place editor but don't show up in the catalog." The place editor reads the merge
+ * of two sources and the Catalog tab listed one of them. This is the other one, said once so both
+ * screens agree on it: every entry of the placeable list that has a model (`shippedEntries`) and
+ * is not a library item — not one by id, and not one whose model is served by the asset service
+ * (a ticked library item lives in the same file, and it is listed as the library row it is).
+ */
+export function builtinEntries(doc: { assets?: PlaceableEntry[] } | null | undefined, libraryIds: Set<string>): PlaceableEntry[] {
+  return shippedEntries(doc).filter((e) => !libraryIds.has(e.id) && !/^\/?assetsvc\//.test(e.glb ?? ''))
+}
+
+/** The placeable list as this origin serves it: the shipped kit, or a world editor's volume copy. */
+export async function loadPlaceableDoc(): Promise<{ assets?: PlaceableEntry[] } | null> {
+  try {
+    const r = await fetch('/assets/catalog.json', { cache: 'no-cache' })
+    return r.ok ? ((await r.json()) as { assets?: PlaceableEntry[] }) : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * The library's items that have a mesh: by default the PLACEABLE ones — props, buildings and
  * fixtures. `types` widens it; a program may spawn a car or a person as scenery too.
  */
@@ -89,13 +113,7 @@ export function mergeCatalog(shipped: PlaceableEntry[], library: PlaceableEntry[
 
 /** Both sources, fetched. No library (no service, or a deployed copy without one) is the kit alone. */
 export async function loadMergedCatalog(): Promise<{ assets: PlaceableEntry[] }> {
-  let shipped: PlaceableEntry[] = []
-  try {
-    const r = await fetch('/assets/catalog.json', { cache: 'no-cache' })
-    if (r.ok) shipped = shippedEntries((await r.json()) as { assets?: PlaceableEntry[] })
-  } catch {
-    /* no kit */
-  }
+  const shipped = shippedEntries(await loadPlaceableDoc())
   let library: PlaceableEntry[] = []
   try {
     library = libraryEntries(await assetsvc.list())

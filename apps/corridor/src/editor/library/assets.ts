@@ -16,11 +16,15 @@ import { KINDS, TYPES, TYPE_LABEL, typeOf, type AssetType } from '../../assets/c
 import { blenderTab } from '../agent/blenderpanel'
 import { guessWheelSlots, swapEnds, swapSides, WHEEL_SLOTS } from '../../game/vehicle/rigslots'
 import { MESH_FILE, assetsvc, type AssetItem, type AssetJob, type Material, type MeshVariant, type ModelRoster } from '../../assets/assetsvc'
+import { builtinEntries, loadPlaceableDoc, type PlaceableEntry } from '../../assets/catalogmerge'
 import { actorExtension } from './actors'
 import { weaponExtension } from './weapons'
 import { vehicleExtension } from './vehicles'
 import { trafficExtension } from './trafficsets'
 import { soundsExtension } from './sounds'
+// the panel classes every library tab scrolls by (`.lib-screen`); imported here as well as by the
+// build screens because the Materials and Service tabs below wear them too
+import './buildscreen.css'
 
 /**
  * WHAT SORT OF THING IT IS, and where the list of sorts comes from.
@@ -137,6 +141,18 @@ const warnNote = (text: string) => {
   p.append(icon('exclamation-triangle', 14), el('span', '', text))
   return p
 }
+
+/**
+ * A ROW THAT IS NOT IN THE LIBRARY: a model that ships with the game (the water tower, the covered
+ * horse bridge, the rock kit) or that a world editor's volume lists with a file of its own. It is
+ * shaped like an `AssetItem` so the filters, the search and the counts treat it as one — and it
+ * carries the placeable entry, which is everything there is to know about it.
+ */
+type KitItem = AssetItem & { builtin: PlaceableEntry }
+const isKit = (it: AssetItem): it is KitItem => !!(it as Partial<KitItem>).builtin
+
+/** Where a row comes from, in the words the list and the detail use. */
+type Source = 'built-in' | 'shared' | 'world'
 
 const STATE_LABEL: Record<AssetItem['state'], string> = {
   spec: 'described',
@@ -257,8 +273,10 @@ export class AssetCatalog {
   private klass = ''
   /** '' is everything; otherwise one of TYPES — see `typeTabs` for why this is the first filter */
   private atype: AssetType | '' = ''
-  /** shared, this world's, or both */
-  private scope: 'all' | 'shared' | 'world' = 'all'
+  /** built in, shared, this world's, or all of them */
+  private scope: 'all' | 'builtin' | 'shared' | 'world' = 'all'
+  /** the placeable things that are not library items — see `KitItem` */
+  private kit: KitItem[] = []
   /** a pinned seed per item; absent means "a new one every draw" */
   private seeds = new Map<string, number>()
   /**
@@ -388,13 +406,29 @@ export class AssetCatalog {
         this.items = []
       }
     }
+    // the built-ins come from the placeable list, not the service, so they are here even when the
+    // service is not: a deployed copy with no generation still has a water tower to look at
+    const ids = new Set(this.items.map((x) => x.id))
+    this.kit = builtinEntries(await loadPlaceableDoc(), ids).map((e) => ({
+      ...EMPTY_ITEM, id: e.id, subject: e.name || e.id, kind: e.category, state: 'finished' as const, builtin: e,
+    }))
     this.tabs.invalidate()
+  }
+
+  /** Everything the Catalog tab lists: the library, then the built-ins it does not shadow. */
+  private rows(): AssetItem[] {
+    return [...this.items, ...this.kit]
+  }
+
+  private sourceOf(it: AssetItem): Source {
+    if (isKit(it)) return 'built-in'
+    return it.world ? 'world' : 'shared'
   }
 
   // ---- catalog tab ---------------------------------------------------------------------------
 
   private buildCatalog(host: HTMLElement) {
-    if (!this.reachable) {
+    if (!this.reachable && !this.kit.length) {
       host.append(this.notConfigured())
       return
     }
@@ -454,7 +488,7 @@ export class AssetCatalog {
    */
   private classTabs(): HTMLElement {
     const counts = new Map<string, number>()
-    for (const it of this.items) {
+    for (const it of this.rows()) {
       if (!this.inScope(it)) continue
       // WITHIN THE TYPE. Offering `vegetation` while Vehicles is selected is offering a filter
       // that empties the list, which reads as the library being broken rather than as a choice.
@@ -492,7 +526,7 @@ export class AssetCatalog {
    */
   private typeTabs(): HTMLElement {
     const counts = new Map<AssetType, number>()
-    for (const it of this.items) {
+    for (const it of this.rows()) {
       if (!this.inScope(it)) continue
       const t = typeOf(it)
       counts.set(t, (counts.get(t) ?? 0) + 1)
@@ -531,13 +565,20 @@ export class AssetCatalog {
    */
   private scopeTabs(): HTMLElement | HTMLElement {
     const world = this.o.world?.() ?? null
-    if (!world) return el('span', '')
-    return segmented<'all' | 'shared' | 'world'>({
+    if (!world && !this.kit.length) return el('span', '')
+    /*
+     * BUILT-IN IS A SOURCE TOO. The water tower and the horse bridge ship with the game; they are
+     * what a level places when nobody has made anything, and a library that hides them answers
+     * "what can I place here" wrongly (Rich, 2026-10-10).
+     */
+    return segmented<'all' | 'builtin' | 'shared' | 'world'>({
       value: this.scope,
       options: [
-        { value: 'all', label: 'everything' },
+        // 'all', not 'everything': four sources and a world's slug have to fit a 280 px column
+        { value: 'all', label: 'all' },
+        ...(this.kit.length ? [{ value: 'builtin' as const, label: 'built-in' }] : []),
         { value: 'shared', label: 'shared' },
-        { value: 'world', label: world },
+        ...(world ? [{ value: 'world' as const, label: world }] : []),
       ],
       onChange: (v) => {
         this.scope = v
@@ -547,6 +588,8 @@ export class AssetCatalog {
   }
 
   private inScope(it: AssetItem): boolean {
+    if (isKit(it)) return this.scope === 'all' || this.scope === 'builtin'
+    if (this.scope === 'builtin') return false
     const world = this.o.world?.() ?? null
     const owner = it.world ?? null
     // an asset belonging to ANOTHER world is never offered here: it is not a thing this world has
@@ -559,7 +602,7 @@ export class AssetCatalog {
     const wrap = el('div', 'tree-filter')
     const i = el('input', 'input wide') as HTMLInputElement
     i.type = 'search'
-    i.placeholder = 'find a car, a class, a word'
+    i.placeholder = 'find a car, a water tower, a class, a word'
     i.value = this.find
     // `input`, not `change`: a filter you have to leave the box to apply is a filter you have to
     // be told about
@@ -580,7 +623,7 @@ export class AssetCatalog {
 
   private renderList() {
     this.listHost.replaceChildren()
-    if (!this.items.length && !this.pending) {
+    if (!this.items.length && !this.kit.length && !this.pending) {
       this.listHost.append(empty('Nothing in the catalog yet. “New item” describes one.'))
       return
     }
@@ -588,11 +631,14 @@ export class AssetCatalog {
     const rows: { id: string; node: HTMLElement }[] = []
     // the one being named always shows, whatever is in the search box: it is what you are doing
     if (this.pending) rows.push({ id: this.pending.id, node: this.pendingRow() })
-    for (const it of this.items) {
+    for (const it of this.rows()) {
       if (!this.matches(it)) continue
       const row = el('button', `asset-row${it.id === this.selected ? ' on' : ''}`)
+      row.dataset.id = it.id
       const thumb = el('div', 'asset-thumb')
-      if (it.chosen) {
+      if (isKit(it)) {
+        thumb.append(icon('cube', 18))
+      } else if (it.chosen) {
         const img = el('img')
         img.src = assetsvc.fileUrl(it.id, `views/${it.chosen}`)
         img.loading = 'lazy'
@@ -602,8 +648,15 @@ export class AssetCatalog {
       }
       const text = el('div', 'asset-row-text')
       text.append(el('span', 'asset-row-id', it.id))
-      text.append(el('span', 'asset-row-sub', it.subject))
-      row.append(thumb, text, el('span', `chip state-${it.state}`, STATE_LABEL[it.state]))
+      // WHERE IT COMES FROM, on every row: a built-in cannot be redrawn, a shared one changes every
+      // world when it is edited, and this world's own changes nothing else
+      const src = this.sourceOf(it)
+      const sub = el('span', 'asset-row-sub')
+      sub.append(el('span', `asset-src src-${src}`, src === 'world' ? 'this world' : src), document.createTextNode(` ${it.subject}`))
+      text.append(sub)
+      row.append(thumb, text, isKit(it)
+        ? el('span', 'chip state-finished', 'ready')
+        : el('span', `chip state-${it.state}`, STATE_LABEL[it.state]))
       row.onclick = async () => {
         if (it.id === this.selected) return
         if (!(await this.mayLeave(`open ${it.id}`))) return
@@ -637,6 +690,8 @@ export class AssetCatalog {
   private renderDetail() {
     this.detailHost.replaceChildren()
     if (this.selected === PENDING && this.pending) { this.renderNew(); return }
+    const kit = this.kit.find((x) => x.id === this.selected)
+    if (kit) { this.renderBuiltin(kit); return }
     const it = this.items.find((x) => x.id === this.selected)
     if (!it) {
       this.detailHost.append(empty('Pick an item.'))
@@ -1040,9 +1095,115 @@ export class AssetCatalog {
     this.detailHost.append(danger)
   }
 
+  /**
+   * A BUILT-IN, in detail: what it is, what it looks like, and the one thing that can be done to it.
+   *
+   * It cannot be described, drawn or meshed — nothing generated it, so there is no prompt to edit
+   * and no view to mesh again — and showing those three steps empty would offer buttons that
+   * cannot work. It CAN be looked at (the same preview as everything else), downloaded, and copied
+   * into the library, where it is an ordinary item: importing a new model over the copy, resizing
+   * it or forking it per world are then the library's own buttons. A copy kept under the SAME id
+   * replaces the built-in wherever it is placed, because the place editor's merge lets the library
+   * win an id clash (catalogmerge.ts); a new id is a separate thing.
+   */
+  private renderBuiltin(it: KitItem): void {
+    const e = it.builtin
+    const head = el('header', 'asset-detail-head')
+    head.append(el('h2', '', it.id), el('span', 'chip state-finished', 'ready'), el('span', 'chip scope-builtin', 'built-in'))
+    this.detailHost.append(head)
+    this.detailHost.append(hint(`Ships with the game. The Place editor offers it in its Assets palette${e.category ? ` as ${e.category.replace(/_/g, ' ')}` : ''}; it cannot be drawn or meshed again — copy it into the library to change it.`))
+
+    const g = group('Model')
+    const b = bodyOf(g)
+    const url = `/${String(e.glb).replace(/^\/+/, '')}`
+    const key = `builtin:${url}`
+    if (this.mesh3dKey !== key) {
+      this.mesh3d?.dispose()
+      this.mesh3d = new MeshView({ remember: 'catalog' })
+      this.mesh3dKey = key
+      void this.mesh3d.load(url)
+    }
+    const view = this.mesh3d!
+    ;(window as unknown as { __meshview?: MeshView }).__meshview = view
+    b.append(view.root)
+    view.start()
+    b.append(rowOf(
+      button({ label: 'Pop out', icon: 'arrows-pointing-out', title: 'the model, big', onClick: () => view.popOut(it.subject) }),
+      toggle({ label: 'spin', value: view.spinning, onChange: (v) => view.setSpin(v) }),
+      toggle({ label: 'wireframe', value: view.wireframe, onChange: (v) => view.setWireframe(v) }),
+    ))
+    const counted = readout('showing', `${url} · counting…`)
+    b.append(counted)
+    void view.loaded.then(() => {
+      if (this.mesh3d !== view) return
+      const st = view.stats
+      const value = counted.querySelector('.field-value')
+      if (st && value) value.textContent = `${url} · ${st.triangles.toLocaleString()} triangles · ${st.meshes} mesh${st.meshes === 1 ? '' : 'es'}`
+    })
+    this.detailHost.append(g)
+
+    const p = group('Placed as')
+    bodyOf(p).append(
+      readout('name', it.subject),
+      readout('category', e.category || '—'),
+      readout('footprint', `${e.footprint_m[0]} × ${e.footprint_m[1]} m`),
+      readout('height', `${e.height_m} m${e.fit === 'span' ? ' · fitted to its span' : ''}`),
+      ...(e.rock_type ? [readout('rock', e.rock_type)] : []),
+    )
+    this.detailHost.append(p)
+
+    const acts = rowOf()
+    const a = el('a', 'btn')
+    a.href = url
+    a.download = `${it.id}.glb`
+    a.append(icon('cube', 16), el('span', 'btn-label', 'Download'))
+    acts.append(a)
+    if (this.reachable) {
+      acts.append(button({
+        label: 'Copy into the library',
+        icon: 'document-plus',
+        title: 'an editable library item with this model; the same id replaces the built-in wherever it is placed',
+        onClick: () => void this.copyBuiltin(it),
+      }))
+    }
+    this.detailHost.append(acts)
+  }
+
+  /** Make a library item of a built-in: the record, sized as it is placed, and its model imported. */
+  private async copyBuiltin(it: KitItem): Promise<void> {
+    const e = it.builtin
+    const to = await ask({
+      title: `Copy ${it.id} into the library`,
+      label: 'id',
+      value: it.id,
+      icon: 'document-plus',
+      ok: 'Copy',
+      validate: (v) => (!slugOf(v) ? 'letters and digits' : this.items.some((x) => x.id === slugOf(v)) ? 'that id is taken' : null),
+    })
+    if (!to) return
+    const id = slugOf(to)
+    try {
+      const r = await fetch(`/${String(e.glb).replace(/^\/+/, '')}`)
+      if (!r.ok) throw new Error(`the model would not load (HTTP ${r.status})`)
+      const blob = await r.blob()
+      const [w, d] = e.footprint_m
+      await assetsvc.put({ id, subject: it.subject, kind: e.category || 'prop', prompt: '', negative: '', size_m: { h: e.height_m, w, d } })
+      await assetsvc.importModel(id, new File([blob], `${id}.glb`, { type: 'model/gltf-binary' }))
+      this.selected = id
+      await this.refresh()
+      toast(id === it.id ? `${id} is a library item now — it replaces the built-in wherever it is placed` : `${id} copied into the library`, 'ok', 6000)
+    } catch (err) {
+      toast(`copy: ${(err as Error).message}`, 'danger', 8000)
+    }
+  }
+
   // ---- service tab ---------------------------------------------------------------------------
 
-  private async buildService(host: HTMLElement) {
+  private async buildService(panel: HTMLElement) {
+    // a column of groups taller than a laptop's pane: it scrolls on its own (`.lib-screen`)
+    panel.classList.add('lib-screen')
+    const host = el('div', 'lib-scroll')
+    panel.replaceChildren(host)
     if (!this.reachable) {
       host.append(this.notConfigured())
       return
@@ -1135,6 +1296,9 @@ export class AssetCatalog {
    */
   private async buildMaterials(host: HTMLElement) {
     host.replaceChildren()
+    // the panel is the start of the scroll chain (buildscreen.css, `.lib-screen`): without it the
+    // right-hand column grew to its content in the world editor's pane and was clipped there
+    host.classList.add('lib-screen')
     try {
       this.materials = (await assetsvc.materials()).materials
     } catch {

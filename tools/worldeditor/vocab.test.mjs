@@ -55,3 +55,12 @@ test('the sound slots come from the bank the app ships, and the app plays every 
   const v = await V.vocab()
   assert.equal(v.sounds.slots.length, slots.length)
 })
+
+test('the building classes match the app’s list and its built-in set', async () => {
+  assert.deepEqual(V.BUILDING_CLASSES, list('world/facades.ts', 'FACADE_CLASS_IDS'))
+  const shipped = JSON.parse(read('world/facades.json')).classes.map((c) => c.id)
+  assert.deepEqual(V.BUILDING_CLASSES, shipped)
+  const v = await V.vocab()
+  assert.deepEqual(v.buildings.classes.map((c) => c.id), V.BUILDING_CLASSES)
+  assert.ok(v.buildings.classes.find((c) => c.id === 'skyscraper').min_height_m >= 30, 'the tower rule is a height')
+})

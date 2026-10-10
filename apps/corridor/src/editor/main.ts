@@ -8,6 +8,7 @@
 // The scene itself is built by the viewer's own `buildSite`, read-only — the editor must be
 // looking at exactly what the game looks at, or it is correcting something else.
 import { fixturesExtension } from './library/fixtures'
+import { buildingsExtension } from './library/buildingclasses'
 import { loadFixtures, saveFixtures } from '../game/world/fixtures'
 import { DROP_TYPE } from './author/ui'
 import * as THREE from 'three'
@@ -130,6 +131,9 @@ const assets = new AssetCatalog({
       current: () => (site ? loadFixtures(site.manifest.slug) : Promise.resolve({ version: 1 as const, choices: {} })),
       save: async (doc) => { if (!site) throw new Error('no site open'); await saveFixtures(site.manifest.slug, doc) },
     }),
+    // building classes' pools (buildingclasses.ts); a save hands the scene the new surfaces.json so
+    // the World tab, which writes the same file, starts from it
+    buildingsExtension({ world: () => site?.manifest.slug ?? null, onWorldSaved: (doc) => site?.setSurfaces(doc) }),
   ],
 })
 // A probe needs to open the library without hunting for the toolbar button; this is the one hook.
@@ -704,7 +708,7 @@ function worldPanel(root: HTMLElement) {
     }
     body.append(grass)
     const pools = el('div', 'world-group')
-    pools.append(el('h3', '', 'buildings'), el('p', 'dim', 'tick a pool; each building draws one wall and one roof from it by the seed. Nothing ticked is the flat palette.'))
+    pools.append(el('h3', '', 'buildings'), el('p', 'dim', 'one pool for EVERY building in this world; each draws one wall and one roof from it by the seed. Nothing ticked leaves each building class its own pool — Assets → Buildings.'))
     const chipsFor = (list: Material[], key: 'walls' | 'roofs') => {
       const wrap = el('div', 'palette')
       for (const m of list) {

@@ -56,8 +56,14 @@ const arg = (name, dflt) => {
  * that any of the three can be built from. One collection rather than three because a preset row
  * carries `for: vehicle | actor | weapon` and the picker filters on it; three near-identical files
  * would drift.
+ *
+ * `facades` is the SHARED DEFAULT per building class (apps/corridor/src/world/facades.ts): one
+ * record per class id — its wall and roof pools of material ids with weights, and how it takes the
+ * light. The same file shape as the builds (a dozen records, keyed by id, merged on PUT), which is
+ * why it rides this route rather than having one of its own. A world's own choices are not here:
+ * they are the world's `surfaces.json`.
  */
-const BUILD_KINDS = ['vehicles', 'actors', 'weapons', 'presets', 'traffic']
+const BUILD_KINDS = ['vehicles', 'actors', 'weapons', 'presets', 'traffic', 'facades']
 
 const PORT = Number(arg('port', process.env.ASSETSVC_PORT ?? 8770))
 const HOST = arg('host', process.env.ASSETSVC_HOST ?? '0.0.0.0')

@@ -425,3 +425,37 @@ test('deleting a deployment takes every object under its prefix and its ledger l
   await assert.rejects(removeDeployment({ cf, accountId: 'acc', bucket: 'b', prefix: 'corridor' }), /refusing/)
 })
 
+
+test('the building classes’ pools travel: the shared /facades records, and every material the three layers name', async () => {
+  const { store } = await volume()
+  const materials = [
+    { id: 'asphalt_aged', category: 'road', albedo: 'albedo.jpg' },
+    { id: 'brick_running_red', category: 'wall_house', albedo: 'albedo.jpg' }, // the built-in house pool
+    { id: 'velvet', category: 'wall_house', albedo: 'albedo.jpg' }, // the shared record's
+    { id: 'tartan', category: 'other', albedo: 'albedo.jpg' }, // nobody's
+  ]
+  const shared = [{ id: 'house', walls: [{ material: 'velvet', weight: 1 }] }]
+  const server = http.createServer((req, res) => {
+    const send = (body) => { res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }); res.end(req.method === 'HEAD' ? undefined : body) }
+    if (req.url === '/catalog') return send(JSON.stringify({ items: [] }))
+    if (req.url === '/materials') return send(JSON.stringify({ materials }))
+    if (req.url === '/facades') return send(JSON.stringify({ facades: shared }))
+    const f = req.url.match(/^\/materials\/([^/]+)\/files$/)
+    if (f) return send(JSON.stringify({ id: f[1], files: ['albedo.jpg', 'glass_mask.png', 'raw.jpg'] }))
+    if (/^\/(vehicles|actors|weapons|presets|traffic)$/.test(req.url)) return send(JSON.stringify({ [req.url.slice(1)]: [] }))
+    res.writeHead(404, { 'content-type': 'application/json' })
+    res.end('{"error":"no"}')
+  })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  try {
+    const p = await plan({ store, worlds: ['alpha'], assetsvc: `http://127.0.0.1:${server.address().port}`, transpile })
+    const keys = p.objects.map((o) => o.key)
+    assert.deepEqual(JSON.parse(p.objects.find((o) => o.key === 'assetsvc/facades').body).facades, shared)
+    const carried = JSON.parse(p.objects.find((o) => o.key === 'assetsvc/materials').body).materials.map((m) => m.id).sort()
+    assert.deepEqual(carried, ['asphalt_aged', 'brick_running_red', 'velvet'])
+    assert.ok(keys.includes('assetsvc/materials/velvet/file/glass_mask.png'), 'the pane mask goes with the albedo')
+    assert.ok(!keys.some((k) => k.includes('/tartan/')), 'a material no layer names stays home')
+  } finally {
+    server.close()
+  }
+})

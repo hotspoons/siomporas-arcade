@@ -108,13 +108,11 @@ export class Runs {
 
   /** A world large enough that one Job's bbox is the problem: > `shardAboveM` half-width.
    *
-   * OFF BY DEFAULT, and not because the sharded path is incomplete — the finalizer's `export_site`
-   * already writes the tiles, pyramid and vectors (dc-metro was baked this way; its shard dirs hold
-   * no `web/`, the parent does). It is off because shards are not yet sized to a memory budget and
-   * are not spread across nodes (docs/corridor/PLAN-SHARDED-BAKE.md Phase 2): `partition` caps at 16
-   * shards of `max_side_m` 8 km, so a world much larger than dc-metro would widen the blocks past
-   * the observed ~139 GiB shard peak instead of adding shards. Request `{"sharded":true}` to force
-   * it for the spike.
+   * ON BY DEFAULT above a 5 km half-width (server.mjs), in blocks of ≤ `shardSideM` (10 km) — and
+   * up to `maxShards` (36) of them, so a world bigger than dc-metro ADDS blocks instead of widening
+   * them past the ~139 GiB shard peak (the old cap of 16 widened them). The finalizer's
+   * `export_site` writes the tiles, pyramid and vectors; dc-metro has baked this way. A request's
+   * `{"sharded": false}` opts out, `{"sharded": true}` forces it on a small world; config 0 = off.
    */
   async #shouldShard(slug) {
     if (slug === 'all') return false
@@ -353,8 +351,11 @@ export class Runs {
     if (which === 'plan') {
       const out = ['plan', run.slug]
       if (o.halfWidth) out.push('--half-width', String(o.halfWidth))
-      if (o.maxSide) out.push('--max-side', String(o.maxSide))
-      if (o.maxShards) out.push('--max-shards', String(o.maxShards))
+      // the blocks: the request's own, else the service's (10 km, 36), else the bake's defaults
+      const side = o.maxSide ?? this.cfg.shardSideM
+      const count = o.maxShards ?? this.cfg.maxShards
+      if (side) out.push('--max-side', String(side))
+      if (count) out.push('--max-shards', String(count))
       return out
     }
     if (which === 'shard') {

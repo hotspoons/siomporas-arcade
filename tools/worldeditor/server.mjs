@@ -190,10 +190,15 @@ const runs = new Runs(store, k8s, {
   prefix: env.WORLDEDITOR_S3_PREFIX ?? 'corridor',
   overpassUrl: settings.get('overpass.url'),
   horizonM: Number(env.WORLDEDITOR_HORIZON_M ?? 30000),
-  // Auto-shard a world when its half-width exceeds this. UNSET means no auto-sharding: opt in with
-  // the request body (`{"slug":..,"sharded":true}`) or set this once the sharded export path is
-  // exercised against a real world. See docs/corridor/PLAN-SHARDED-BAKE.md.
-  shardAboveM: env.WORLDEDITOR_SHARD_ABOVE_M ? Number(env.WORLDEDITOR_SHARD_ABOVE_M) : null,
+  // Auto-shard a world when its half-width exceeds this, in blocks of at most `shardSideM` a side.
+  // ON BY DEFAULT since 2026-10-10 (Rich: "We should be defaulting to sharded, at least per 10 x 10
+  // km grid or something like that"): a world more than 10 km across is cut into ≤ 10 km blocks.
+  // dc-metro has baked this way twice. `WORLDEDITOR_SHARD_ABOVE_M=0` turns it off; a request body
+  // `{"sharded": false}` opts one bake out. See docs/corridor/PLAN-SHARDED-BAKE.md.
+  shardAboveM: env.WORLDEDITOR_SHARD_ABOVE_M !== undefined ? Number(env.WORLDEDITOR_SHARD_ABOVE_M) : 5000,
+  shardSideM: Number(env.WORLDEDITOR_SHARD_SIDE_M ?? 10000),
+  // enough blocks that the side, not the count, decides: 36 covers a 60 km square at 10 km
+  maxShards: Number(env.WORLDEDITOR_MAX_SHARDS ?? 36),
   resources: JSON.parse(env.WORLDEDITOR_BAKE_RESOURCES ?? '{"requests":{"cpu":"8","memory":"32Gi"},"limits":{"cpu":"64","memory":"384Gi"}}'),
   python: env.WORLDEDITOR_PYTHON ?? path.join(REPO, 'tools/corridor/.venv/bin/python'),
   cwd: env.WORLDEDITOR_CORRIDOR ?? path.join(REPO, 'tools/corridor'),

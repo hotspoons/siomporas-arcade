@@ -233,7 +233,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     T('run_list', 'Every bake and publish, newest first, with state and duration.', {}, [], () => get('/api/runs')),
     T('run_get', 'One run.', { id: str('') }, ['id'], (a) => get(`/api/runs/${a.id}`)),
     T('run_log', 'A run’s log.', { id: str('') }, ['id'], (a) => get(`/api/runs/${a.id}/log`)),
-    T('run_bake', 'Bake a world: OSM, terrain, imagery, lidar, and a tile pyramid. LOD is the bake — there is no monolithic one. HOURS, and it occupies the runner. Check run_list before starting another.', { slug: str('') }, ['slug'], (a) => post('/api/runs/bake', { slug: a.slug })),
+    T('run_bake', 'Bake a world: OSM, terrain, imagery, lidar, and a tile pyramid. LOD is the bake — there is no monolithic one. HOURS, and it occupies the runner. Check run_list before starting another. A world more than 10 km across is baked SHARDED (plan → ≤ 10 km blocks in parallel → finalize) by default; `sharded` forces it on or off for this bake.', { slug: str(''), sharded: bool('true forces a sharded bake, false a single Job; omit for the default (sharded above 10 km across)') }, ['slug'], (a) => post('/api/runs/bake', a.sharded === undefined ? { slug: a.slug } : { slug: a.slug, sharded: !!a.sharded })),
     T('run_publish', 'Publish a baked world to the bucket the viewer reads.', { slug: str('') }, ['slug'], (a) => post('/api/runs/publish', { slug: a.slug })),
     T('run_cancel', 'Stop a running bake or publish.', { id: str('') }, ['id'], (a) => post(`/api/runs/${a.id}/cancel`, {})),
 

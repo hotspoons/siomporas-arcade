@@ -25,7 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from corridor import BakeFault, osm  # noqa: E402
 from corridor.geo import Frame  # noqa: E402
 
-SEED = Path(__file__).resolve().parents[2] / "worldeditor" / "geofabrik-seed.json"
+# A copy of tools/worldeditor/geofabrik-seed.json, beside the tests: the corridor image's CI mounts
+# only tools/corridor/tests into the image, so a path into tools/worldeditor is not there (CI,
+# 2026-10-10: seven ERRORs, all "No such file"). `SeedCopyTest` holds the copy to the original
+# wherever both exist, so the two cannot drift.
+SEED = Path(__file__).resolve().parent / "fixtures" / "geofabrik-seed.json"
+ORIGINAL_SEED = Path(__file__).resolve().parents[2] / "worldeditor" / "geofabrik-seed.json"
 MD = "http://overpass/api/interpreter"
 NA = "http://overpass-na/api/interpreter"
 EU = "http://overpass-eu/api/interpreter"
@@ -167,3 +172,11 @@ class RuntimeErrorIsNotAnAnswer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeedCopyTest(unittest.TestCase):
+    def test_the_fixture_is_the_world_editors_seed(self):
+        if not ORIGINAL_SEED.exists():
+            self.skipTest("tools/worldeditor is not here (the image's CI): nothing to compare against")
+        self.assertEqual(json.loads(SEED.read_text()), json.loads(ORIGINAL_SEED.read_text()),
+                         "tests/fixtures/geofabrik-seed.json has drifted from tools/worldeditor/geofabrik-seed.json — copy it again")

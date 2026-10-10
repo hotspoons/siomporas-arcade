@@ -4,16 +4,22 @@
 here", and a dc-metro shard swapped 0.6 m aerial photography for 10 m Sentinel-2 with nothing
 failing. An outage is not an answer: the probe now raises, and the retry helpers ride out a few
 minutes of 5xx before they give up.
+
+Plain unittest: the corridor image's CI runs `python -m unittest discover`, with no pytest in it.
 """
 from __future__ import annotations
 
 import io
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
-import pytest
 from PIL import Image
 
-from corridor import BakeFault, horizon, naip
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from corridor import BakeFault, horizon, naip  # noqa: E402
 
 
 class _Resp:
@@ -38,53 +44,50 @@ class _Frame:
 BBOX = (300000.0, 4300000.0, 301000.0, 4301000.0)
 
 
-def test_coloured_image_is_coverage_and_black_is_none(monkeypatch):
-    monkeypatch.setattr(naip, "_get_with_retry", lambda *a, **k: _Resp(content=_jpeg(True)))
-    assert naip.covered(_Frame(), BBOX) is True
-    monkeypatch.setattr(naip, "_get_with_retry", lambda *a, **k: _Resp(content=_jpeg(False)))
-    assert naip.covered(_Frame(), BBOX) is False
+class ProbeTest(unittest.TestCase):
+    def test_coloured_image_is_coverage_and_black_is_none(self):
+        with mock.patch.object(naip, "_get_with_retry", lambda *a, **k: _Resp(content=_jpeg(True))):
+            self.assertIs(naip.covered(_Frame(), BBOX), True)
+        with mock.patch.object(naip, "_get_with_retry", lambda *a, **k: _Resp(content=_jpeg(False))):
+            self.assertIs(naip.covered(_Frame(), BBOX), False)
+
+    def test_an_outage_is_not_an_answer(self):
+        def down(*a, **k):
+            raise RuntimeError("https://imagery.nationalmap.gov/...: HTTP 504")
+
+        with mock.patch.object(naip, "_get_with_retry", down):
+            with self.assertRaisesRegex(BakeFault, "could not reach"):
+                naip.covered(_Frame(), BBOX)
+
+    def test_an_error_document_is_not_an_answer(self):
+        with mock.patch.object(naip, "_get_with_retry", lambda *a, **k: _Resp(ctype="application/json", text='{"error":{"code":500}}')):
+            with self.assertRaisesRegex(BakeFault, "instead of an image"):
+                naip.covered(_Frame(), BBOX)
 
 
-def test_an_outage_is_not_an_answer(monkeypatch):
-    def down(*a, **k):
-        raise RuntimeError("https://imagery.nationalmap.gov/...: HTTP 504")
+class RetryTest(unittest.TestCase):
+    def test_retries_ride_out_a_few_minutes_of_5xx(self):
+        for mod in (naip, horizon):
+            with self.subTest(mod=mod.__name__):
+                slept: list[float] = []
+                answers = iter([_Resp(504)] * 6 + [_Resp(200, content=b"ok")])
+                session = mock.Mock()
+                session.get.side_effect = lambda *a, **k: next(answers)
+                with mock.patch("time.sleep", lambda s: slept.append(s)), mock.patch.object(mod, "session", session):
+                    r = mod._get_with_retry("http://x", {}, timeout=1)
+                self.assertEqual(r.status_code, 200)
+                # 10, 20, 40, 60, 60, 60 s: an outage of nearly four minutes passes without failing the bake
+                self.assertEqual(slept, [10, 20, 40, 60, 60, 60])
 
-    monkeypatch.setattr(naip, "_get_with_retry", down)
-    with pytest.raises(BakeFault, match="could not reach"):
-        naip.covered(_Frame(), BBOX)
-
-
-def test_an_error_document_is_not_an_answer(monkeypatch):
-    monkeypatch.setattr(naip, "_get_with_retry", lambda *a, **k: _Resp(ctype="application/json", text='{"error":{"code":500}}'))
-    with pytest.raises(BakeFault, match="instead of an image"):
-        naip.covered(_Frame(), BBOX)
-
-
-@pytest.mark.parametrize("mod", [naip, horizon])
-def test_retries_ride_out_a_few_minutes_of_5xx(monkeypatch, mod):
-    slept: list[float] = []
-    monkeypatch.setattr("time.sleep", lambda s: slept.append(s))
-    answers = iter([_Resp(504)] * 6 + [_Resp(200, content=b"ok")])
-
-    class S:
-        def get(self, *a, **k):
-            return next(answers)
-
-    monkeypatch.setattr(mod, "session", S())
-    r = mod._get_with_retry("http://x", {}, timeout=1)
-    assert r.status_code == 200
-    # 10, 20, 40, 60, 60, 60 s: an outage of nearly four minutes passes without failing the bake
-    assert slept == [10, 20, 40, 60, 60, 60]
+    def test_retries_give_up_loudly(self):
+        for mod in (naip, horizon):
+            with self.subTest(mod=mod.__name__):
+                session = mock.Mock()
+                session.get.return_value = _Resp(504)
+                with mock.patch("time.sleep", lambda s: None), mock.patch.object(mod, "session", session):
+                    with self.assertRaisesRegex(RuntimeError, "HTTP 504"):
+                        mod._get_with_retry("http://x", {}, timeout=1)
 
 
-@pytest.mark.parametrize("mod", [naip, horizon])
-def test_retries_give_up_loudly(monkeypatch, mod):
-    monkeypatch.setattr("time.sleep", lambda s: None)
-
-    class S:
-        def get(self, *a, **k):
-            return _Resp(504)
-
-    monkeypatch.setattr(mod, "session", S())
-    with pytest.raises(RuntimeError, match="HTTP 504"):
-        mod._get_with_retry("http://x", {}, timeout=1)
+if __name__ == "__main__":
+    unittest.main()

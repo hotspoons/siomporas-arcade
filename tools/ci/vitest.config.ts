@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config'
 
-// The checks CI used to run as their own steps — the services' node:test suites and the linter —
-// as a vitest project, so `npx vitest run` before a push runs them too (Rich, 2026-10-10: "add them
-// so they are caught locally or disable the linter").
+// The checks CI used to run as their own steps — the repo's node:test suites and the linter — as a
+// vitest project, so `npx vitest run` before a push runs them too (Rich, 2026-10-10: "add them so
+// they are caught locally or disable the linter").
 export default defineConfig({
   test: {
     name: 'checks',

@@ -5,7 +5,7 @@
 # .devcontainer/build-blender.sh. Kept close to the original so changes
 # there are easy to bring across; the deltas are marked ARCADE below.
 #
-# What needs it: tools/rigging/rig_character.py, which turns a
+# What needs it: tools/sf2-probe/rigging/rig_character.py, which turns a
 # reconstructed mesh into a Rigify-rigged .glb. That wants Blender >= 5.1,
 # and Debian ships 4.3 - see the ARCADE note by the /usr/local/bin symlink.
 #
@@ -96,7 +96,7 @@ verify_path() {
         echo "\`blender\` on PATH is ${ver} (${found})"
     else
         echo "WARNING: built ${BLENDER_VERSION}, but \`blender\` on PATH is ${ver:-nothing} (${found:-not found})." >&2
-        echo "         Something earlier in PATH is shadowing it; tools/rigging needs the pinned one." >&2
+        echo "         Something earlier in PATH is shadowing it; tools/sf2-probe/rigging needs the pinned one." >&2
     fi
 }
 

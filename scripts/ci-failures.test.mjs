@@ -41,7 +41,7 @@ test('python unittest: the ERROR header through its traceback', () => {
 
 test('tsc and vitest shapes are recognised', () => {
   assert.equal(failures('src/a.ts(3,5): error TS2322: Type x is not assignable').length, 1)
-  assert.equal(failures(' FAIL  |corridor| test/a.test.ts > it adds\nAssertionError: expected 1 to be 2').length, 1)
+  assert.equal(failures(' FAIL  |coast| test/a.test.ts > it adds\nAssertionError: expected 1 to be 2').length, 1)
 })
 
 test('an unrecognised failure still reports the tail of the log', () => {

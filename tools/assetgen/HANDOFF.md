@@ -15,7 +15,7 @@ first — it is the approach. This is what exists and what is known.*
 | **card.mjs** | here | keyed cut-out → a `.glb` the game loads, for single-yaw kinds |
 | **finish.mjs** | here | reconstruction → 1.2 MB: meshopt simplify, unlit, WebP + Draco |
 | **TRELLIS.2** | `tools/recon-service` | one keyed view → textured `.glb`, ~7 s warm. **Not deployed anywhere** |
-| **blrig rigging** | `tools/rigging` | mesh → Rigify rig. Characters only; nothing here needs it |
+| **blrig rigging** | `tools/sf2-probe/rigging` | mesh → Rigify rig. Characters only; nothing here needs it |
 
 ```
 spec ──► proportion.mjs ──► flux.2-dev ──► keyed cut-out ──► TRELLIS.2 ──► .glb ──► game

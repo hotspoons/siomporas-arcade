@@ -64,7 +64,7 @@ async function main() {
   }
   const shot = dataUrl(body.result)
   if (shot) {
-    const file = `/tmp/corridor-shot.${shot.ext}`
+    const file = `/tmp/arcade-shot.${shot.ext}`
     writeFileSync(file, shot.bytes)
     console.log(JSON.stringify({ screenshot: file, bytes: shot.bytes.length }))
     return

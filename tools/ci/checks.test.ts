@@ -1,6 +1,6 @@
-// The services' own suites (node:test) and the linter, run by vitest so they fail on the laptop
-// before they fail in CI. Each node:test FILE is its own vitest test: a red run names the file and
-// carries its failing TAP block, not three thousand lines of everyone else's output.
+// The repo's own node:test suites and the linter, run by vitest so they fail on the laptop before
+// they fail in CI. Each node:test FILE is its own vitest test: a red run names the file and carries
+// its failing TAP block, not three thousand lines of everyone else's output.
 import { spawn } from 'node:child_process'
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { failures } from '../../scripts/ci-failures.mjs'
 
 const root = new URL('../..', import.meta.url).pathname
-const suites = ['tools/worldeditor', 'tools/assetsvc', 'scripts'].flatMap((dir) =>
+const suites = ['scripts'].flatMap((dir) =>
   readdirSync(join(root, dir))
     .filter((f) => f.endsWith('.test.mjs'))
     .sort()
@@ -31,9 +31,9 @@ const report = (out: string) => {
   return blocks.length ? blocks.join('\n\n') : out.split('\n').slice(-60).join('\n')
 }
 
-describe.concurrent('service tests (node --test)', () => {
+describe.concurrent('repo tests (node --test)', () => {
   it('found the suites', () => {
-    expect(suites.length).toBeGreaterThan(10)
+    expect(suites.length).toBeGreaterThan(0)
   })
   for (const file of suites) {
     it(file, async () => {

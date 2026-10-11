@@ -368,7 +368,7 @@ def write_joints(meta, mesh_obj, path, mesh_path, kind):
     doc = {
         "format": "apex-metarig-joints/1",
         "source": {"mesh": os.path.basename(mesh_path) if mesh_path else None,
-                   "metarig": kind, "written": "by tools/rigging/rig_character.py"},
+                   "metarig": kind, "written": "by tools/sf2-probe/rigging/rig_character.py"},
         "axis": "y-up, matching the exported glb; +y is up and the figure stands on y=0",
         "units": "metres",
         "height": round(height, 4),

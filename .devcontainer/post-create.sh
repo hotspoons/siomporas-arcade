@@ -42,25 +42,6 @@ EOF
     fi
 fi
 
-# helm: the world editor and the asset service on gh200-1 are Helm releases (tools/*/chart, values in
-# deploy/gh200-1/), and a rollout is `helm upgrade` — without it, re-pinning an image means asking
-# someone with a laptop. The release tarball from get.helm.sh, checked against its published sha256.
-if ! command -v helm >/dev/null 2>&1; then
-    case "$(uname -m)" in aarch64|arm64) HELM_ARCH=arm64 ;; *) HELM_ARCH=amd64 ;; esac
-    (set -e
-     HELM_VERSION="$(curl -fsSL https://get.helm.sh/helm-latest-version)"
-     HELM_TGZ="helm-$HELM_VERSION-linux-$HELM_ARCH.tar.gz"
-     cd "$(mktemp -d)"
-     curl -fsSLO "https://get.helm.sh/$HELM_TGZ"
-     echo "$(curl -fsSL "https://get.helm.sh/$HELM_TGZ.sha256sum" | awk '{print $1}')  $HELM_TGZ" | sha256sum -c -
-     tar -xzf "$HELM_TGZ"
-     sudo mv "linux-$HELM_ARCH/helm" /usr/local/bin/helm) \
-        || echo "WARN: helm install failed — deploy/gh200-1 rollouts will not work"
-fi
-if command -v helm >/dev/null 2>&1; then
-    helm completion bash | sudo tee /etc/bash_completion.d/helm >/dev/null
-fi
-
 # ll: the stock Debian .bashrc ships it commented out, and ~/.bashrc lives in the container layer,
 # so every rebuild loses it again. The guard anchors at line start — `#alias ll=` is already in
 # there and would otherwise make this look done.
@@ -80,20 +61,6 @@ if ! command -v mame >/dev/null 2>&1 && [ ! -x /usr/games/mame ]; then
     (sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends mame) \
         || echo "WARN: mame install failed — tools/sf2-probe will not run"
 fi
-
-# tools/corridor: the geo pipeline behind the real-road driving game. Python in a venv (this is a
-# Node image; nothing else here wants Python packages) plus GDAL's CLI for warping DEMs. PDAL is
-# not in Debian trixie on arm64, so the point-cloud reader is laspy+lazrs and the Entwine octree
-# walk is done in corridor/lidar.py by hand. Idempotent: pip is a no-op once satisfied.
-if ! command -v gdalwarp >/dev/null 2>&1 || ! python3 -c 'import venv' 2>/dev/null; then
-    (sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gdal-bin python3-venv python3-pip) \
-        || echo "WARN: gdal/venv install failed — tools/corridor will not run"
-fi
-if [ ! -x tools/corridor/.venv/bin/python ]; then
-    python3 -m venv tools/corridor/.venv || echo "WARN: could not create tools/corridor/.venv"
-fi
-[ -x tools/corridor/.venv/bin/pip ] && (tools/corridor/.venv/bin/pip install -q -r tools/corridor/requirements.txt \
-    || echo "WARN: corridor requirements failed — re-run: tools/corridor/.venv/bin/pip install -r tools/corridor/requirements.txt")
 
 # cloudflared for `just tunnel` (anonymous quick tunnels; no account needed).
 if ! command -v cloudflared >/dev/null 2>&1; then
@@ -120,7 +87,7 @@ export PATH="$HOME/.opencode/bin:$PATH"
 EOF
 fi
 
-# Blender, pinned by .devcontainer/blender.env. tools/rigging/rig_character.py needs >= 5.1 and
+# Blender, pinned by .devcontainer/blender.env. tools/sf2-probe/rigging/rig_character.py needs >= 5.1 and
 # Debian ships 4.3, so this either fetches the official binary (x86_64) or builds from source
 # against Blender's own precompiled libraries (arm64, which blender.org does not ship).
 #
@@ -154,7 +121,7 @@ if [ -f /workspaces/apex-conduit/.devcontainer/blender.env ]; then
             echo "[arcade] Blender ${BLENDER_VERSION} is still building (found: ${_bl:-none})."
             echo "[arcade] Watch it:  tail -f ~/.cache/blender-build.log"
         else
-            echo "[arcade] Blender ${BLENDER_VERSION} is not installed (found: ${_bl:-none}); tools/rigging needs it."
+            echo "[arcade] Blender ${BLENDER_VERSION} is not installed (found: ${_bl:-none}); tools/sf2-probe/rigging needs it."
             echo "[arcade] Check ~/.cache/blender-build.log, then: just blender"
         fi
     fi

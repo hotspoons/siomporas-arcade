@@ -22,9 +22,7 @@ tooling that never leaves this machine.
 |---|---|---|
 | [three.js](https://threejs.org) | MIT | the renderer, and most of the engine's maths |
 | [postprocessing](https://github.com/pmndrs/postprocessing) | Zlib | bloom, SMAA and the effect composer behind the modern style |
-| [ez-tree](https://github.com/dgreenheck/ez-tree) | MIT | corridor's procedural near trees |
-| [Heroicons](https://heroicons.com) | MIT | corridor's interface icons. The package itself is dev-only; `scripts/heroicons.mjs` inlines the path data of the ~35 icons used into `apps/corridor/src/ui/icons.ts`, so what ships is that generated file, not the 1,300-icon package |
-| [Engine Simulator](https://github.com/ange-yaghi/engine-sim) — with [piranha](https://github.com/ange-yaghi/piranha) and [simple-2d-constraint-solver](https://github.com/ange-yaghi/simple-2d-constraint-solver) | MIT | the engine you hear in corridor. Compiled to WebAssembly and shipped as `packages/enginesim/wasm/enginesim.wasm` — see below |
+| [Engine Simulator](https://github.com/ange-yaghi/engine-sim) — with [piranha](https://github.com/ange-yaghi/piranha) and [simple-2d-constraint-solver](https://github.com/ange-yaghi/simple-2d-constraint-solver) | MIT | the engine sound `@apex/enginesim` produces. Compiled to WebAssembly and shipped as `packages/enginesim/wasm/enginesim.wasm` — see below |
 
 | Build-time only | Licence | Reached via |
 |---|---|---|
@@ -42,12 +40,12 @@ redistribute it, and minified CSS is output, not a derivative work.
 dev-only dependency of the local Workers emulator — it is never linked into
 anything, never redistributed, and never present in a deployed bundle.
 
-The deployed Worker contains our own code, three.js, postprocessing, ez-tree,
-the inlined Heroicons path data, and the engine simulator's WebAssembly module.
+The deployed Worker contains our own code, three.js, postprocessing, and the
+engine simulator's WebAssembly module.
 
 ### The engine simulator
 
-Corridor's engine sound is a real combustion simulation rather than a sample
+The `@apex/enginesim` package's engine sound is a real combustion simulation rather than a sample
 set: [Engine Simulator](https://github.com/ange-yaghi/engine-sim) by
 **AngeTheGreat (Ange Yaghi), MIT, Copyright 2022**, compiled to WebAssembly and
 driven from an audio worklet. `packages/enginesim/README.md` explains how and
@@ -78,26 +76,6 @@ Our own code in `packages/enginesim` — the C API in `native/`, the worklet, th
 gearbox, the bench — is Apache-2.0 like the rest of this repository. We do not
 modify upstream's sources: the build fetches them and links against them.
 
-### Water
-
-Corridor's water shader is our own code, but three of its ideas are ported from
-[tuxalin/water-shader](https://github.com/tuxalin/water-shader), **MIT,
-Copyright (c) 2017 tuxalin**:
-
-- the summed **Gerstner wave** normal (from GPU Gems 1 ch. 1, the same source
-  tuxalin cites), which replaces the earlier scrolling value noise with waves
-  that travel along a wind — or, for a stream, along the channel itself;
-- **wavelength-dependent colour extinction** through the water column, so depth
-  darkens and blues the surface per channel instead of flattening it to one
-  albedo;
-- **shore foam** placed by water depth behind an animated noisy edge.
-
-No file, texture or shader source from that repository is used verbatim. The
-waves are evaluated analytically in `apps/corridor/src/world/waterShader.ts`,
-driven by a per-vertex `(depth, flow direction)` attribute corridor bakes at
-build time in `water.ts`, so a stream's ripples travel along its channel. The
-MIT notice travels in that file's header and in [NOTICE](NOTICE).
-
 ## Models and textures
 
 Turbo Radrun draws no hand-made sprite. It loads low-poly models at startup and
@@ -125,21 +103,6 @@ CC0 waives the attribution requirement. [Kenney](https://kenney.nl) asks for
 credit anyway and has earned it — these kits are the reason the game had
 roadside scenery on day one. [ambientCG](https://ambientcg.com) likewise.
 
-## Sounds
-
-The corridor game's effects — `apps/corridor/public/sounds/` — are cut by
-`tools/sounds/build.py` from recordings that are all CC0 (public domain
-dedication); the cuts are CC0 too. None of them requires attribution and it is
-given anyway. The per-file provenance is generated into
-`apps/corridor/public/sounds/CREDITS.md` from `tools/sounds/sources.json`.
-
-| source | author | licence |
-| --- | --- | --- |
-| [Impact Sounds](https://kenney.nl/assets/impact-sounds), [Sci-fi Sounds](https://kenney.nl/assets/sci-fi-sounds) | Kenney | CC0 1.0 |
-| [tire squeal #0500](https://bigsoundbank.com/tire-squeal-s0500.html), screeching tires #2368–2371, explosions #1023/#1806–1808, shots #0397/#0437/#0438/#0532 | Joseph Sardin, BigSoundBank | CC0 1.0 (marked per file) |
-| [Gunshot sounds](https://opengameart.org/content/gunshot-sounds) | Tabasco | CC0 1.0 |
-| [Impacts and guns SFX](https://opengameart.org/content/impactsgunsfx) | Eldritch Grim | CC0 1.0 |
-
 ## Fonts
 
 Each app bundles latin `woff2` subsets pulled from Google Fonts by
@@ -157,8 +120,6 @@ for a font, or for anything else.
 | [Audiowide](https://fonts.google.com/specimen/Audiowide) | OFL 1.1 | Brian J. Bonislawsky, Astigmatic | Apex Conduit |
 | [Orbitron](https://fonts.google.com/specimen/Orbitron) | OFL 1.1 | Matt McInerney, The League of Moveable Type | Apex Conduit |
 | [Rajdhani](https://fonts.google.com/specimen/Rajdhani) | OFL 1.1 | Indian Type Foundry | Apex Conduit |
-| [IBM Plex Sans](https://fonts.google.com/specimen/IBM+Plex+Sans) | OFL 1.1 | IBM / Mike Abbink, Bold Monday | corridor |
-| [IBM Plex Mono](https://fonts.google.com/specimen/IBM+Plex+Mono) | OFL 1.1 | IBM / Mike Abbink, Bold Monday | corridor |
 
 The OFL's one real condition is that the licence text travel with the font, and
 it does — `LICENSES.txt` sits in the same directory as the `woff2` files and is
@@ -169,8 +130,8 @@ served with them. No font is sold by itself or renamed.
 - **All game code**, the engine, the shell and the track editor.
 - **Every sound in the arcade games.** Engines, tyres, impacts, lasers and the
   radio there are synthesised in WebAudio at runtime by each game's
-  `src/audio/AudioWorld.ts`. The corridor game's engine is synthesised too
-  (engine-sim, above); its effects are recordings — see **Sounds**.
+  `src/audio/AudioWorld.ts`; `@apex/enginesim` produces the combustion engine
+  sound (engine-sim, above).
 - **Every texture the games actually draw** — road surfaces, skies, tunnels and
   the CRT treatment are procedural, written as shaders.
 - **The cabinet artwork** in `apps/arcade/public/cabinets/`, generated to the

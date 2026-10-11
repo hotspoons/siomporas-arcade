@@ -26,9 +26,6 @@
       "path": "./apps/fighter"
     },
     {
-      "path": "./apps/corridor"
-    },
-    {
       "path": "./tsconfig.node.json"
     }
   ]

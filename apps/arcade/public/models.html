@@ -328,7 +328,7 @@
 <footer>
   Deep-link a model with <code>?src=</code>. Edits, selection and camera are kept in this browser and
   come back on reload — <code>?fresh=1</code> starts clean. Rig corrections export as JSON for
-  <code>tools/rigging/rig_character.py</code>; see its README for the loop.
+  <code>tools/sf2-probe/rigging/rig_character.py</code>; see its README for the loop.
 </footer>
 
 <script type="importmap">
@@ -476,7 +476,7 @@ let current = null, spinning = true, homeDist = 3;
 // Rigify fits a metarig by SCALING a human template to the mesh height; it does not snap knees
 // and elbows to where they actually are. For a stylised character they land wrong, and no amount
 // of re-running fixes it. So: nudge the joints here by eye, export the offsets, and feed that file
-// back into tools/rigging/rig_character.py so the next rig starts from corrected positions.
+// back into tools/sf2-probe/rigging/rig_character.py so the next rig starts from corrected positions.
 //
 // `pose` is scratch — a way to see whether a joint is in the right place, never exported.
 // `offset` is the product: a per-bone translation in the bone's own parent space, in metres.
@@ -1816,7 +1816,7 @@ function exportOffsets() {
     skeleton: { bones: skeleton.bones.length, root: skeleton.bones[0] ? skeleton.bones[0].name : null },
     note: 'Joint offsets only, on DEF- deform bones. Apply to the matching metarig bone before '
         + 'rigify_generate — DEF-upper_armL corresponds to metarig upper_arm.L. '
-        + 'See tools/rigging/rig_character.py. To edit the metarig itself instead — which is what '
+        + 'See tools/sf2-probe/rigging/rig_character.py. To edit the metarig itself instead — which is what '
         + 'the rig is actually generated from — export a apex-metarig-joints/1 file with '
         + 'rig_character.py --export-joints and import it here.',
     joints,

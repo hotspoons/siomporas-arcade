@@ -44,7 +44,7 @@ from scipy import ndimage
 from shapely.geometry import LineString, Polygon
 
 from . import write_atomic
-from .geo import Frame
+from .geo import Frame, snap_bbox
 
 BASE = "https://usgs-lidar-public.s3.us-west-2.amazonaws.com/{ds}/"
 # Newest and best first. A dataset is used when its bounds contain the corridor.
@@ -94,11 +94,11 @@ def _get_json(url: str, cache: Path) -> dict:
     return doc
 
 
-def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: Path, jobs: int = 16, clip: Polygon | None = None) -> tuple[dict, dict]:
+def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: Path, jobs: int = 16, clip: Polygon | None = None, road_band: Polygon | None = None) -> tuple[dict, dict]:
     """The whole corridor's points in memory, for the single-image paths. See point_batches."""
     meta: dict = {}
     # no DEM check per batch here: both callers run check_units on the whole cloud afterwards
-    parts = [p for _, p in point_batches(frame, bbox, cache, clip, meta, None, jobs) if p]
+    parts = [p for _, p in point_batches(frame, bbox, cache, clip, meta, None, jobs, road_band=road_band) if p]
     if not parts:
         raise RuntimeError("the lidar sources intersect the bbox but hold no points in it")
     pts = _join(parts)
@@ -115,8 +115,13 @@ def dem_beside(site_dir: Path) -> Path | None:
     return None
 
 
-def point_batches(frame: Frame, bbox, cache: Path, clip: Polygon | None, meta: dict, dem: Path | None = None, jobs: int = 16):
-    """Point batches in the site frame, clipped to the streets, from the best source there is.
+def point_batches(frame: Frame, bbox, cache: Path, clip: Polygon | None, meta: dict, dem: Path | None = None, jobs: int = 16, road_band: Polygon | None = None):
+    """Point batches in the site frame, clipped to `clip`, from the best source there is.
+
+    `clip` is the area read: the streets' outline for a corridor bake, the whole region for a world
+    (network_tiles.lidar_tiled). `road_band`, when given, is the streets inside it, and it is what the
+    SOURCE is chosen over -- which surveys, in what order, how deep -- so the roads are made of the
+    same points whether or not the fields beside them are read too (lidar_sources.nodes_over).
 
     EPT first (lidar_sources: USGS's staged sets, then NOAA's), when together they cover enough of
     the streets; the TNM delivery tiles otherwise, or when CORRIDOR_LIDAR_SOURCE=tnm. Yields
@@ -128,11 +133,11 @@ def point_batches(frame: Frame, bbox, cache: Path, clip: Polygon | None, meta: d
 
     choice = ls.source_choice()
     if choice != "tnm":
-        cands, share = ls.candidates(frame, bbox, clip, cache)
+        cands, share = ls.candidates(frame, bbox, road_band if road_band is not None else clip, cache)
         if cands and (share is None or share >= ls.MIN_EPT_COVERAGE or choice == "ept"):
             zf: dict[str, float] = {}
             emitted = False
-            for label, part in ls.stream_ept(frame, bbox, clip, cache, cands, meta, jobs):
+            for label, part in ls.stream_ept(frame, bbox, clip, cache, cands, meta, jobs, road_band=road_band):
                 src = label.split(" ", 1)[0]
                 if src not in zf:
                     zf[src] = check_units(part, dem) if dem is not None and (part["cls"] == 2).any() else 1.0
@@ -148,11 +153,11 @@ def point_batches(frame: Frame, bbox, cache: Path, clip: Polygon | None, meta: d
             print(f"  lidar   EPT covers only {share:.0%} of the streets; the TNM tiles instead", flush=True)
         elif choice == "ept":
             raise RuntimeError("no lidar at all for this corridor as EPT (CORRIDOR_LIDAR_SOURCE=ept)")
-    proj, tiles = tnm_pick(frame, bbox, clip)
+    proj, tiles = tnm_pick(frame, bbox, clip, road_band=road_band)
     paths = tnm_download(proj, tiles, cache, int(os.environ.get("CORRIDOR_TNM_JOBS", "16")))
     meta.update({"dataset": f"TNM:{proj}", "source": "tnm", "tiles_laz": len(paths)})
     for i, pth in enumerate(paths, 1):
-        yield f"tile {i}/{len(paths)} {pth.name}", _read_laz_tile(pth, frame, bbox, clip)
+        yield f"tile {i}/{len(paths)} {pth.name}", _read_laz_tile(pth, frame, bbox, clip, road_band)
 
 
 TNM = "https://tnmaccess.nationalmap.gov/api/v1/products"
@@ -203,7 +208,7 @@ def _laz_crs(reader, path: Path, frame: Frame, bbox):
     return None
 
 
-def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) -> dict | None:
+def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None, road_band: Polygon | None = None) -> dict | None:
     """One delivery tile: read, re-project from ITS declared CRS to the site frame, clip.
 
     IN CHUNKS (LAZ_CHUNK), because the whole tile does not have to be in memory at once and on a
@@ -227,6 +232,12 @@ def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) 
     xmin, ymin, xmax, ymax = bbox
 
     keep: dict[str, list] = {k: [] for k in ("x", "y", "z", "cls", "rn", "nr", "i")}
+    if road_band is not None:
+        # every point flagged in or out of the streets, as the EPT readers do (lidar_sources.clip_flags)
+        keep["road_band"] = []
+        shapely.prepare(road_band)
+    if clip is not None:
+        shapely.prepare(clip)
     with reader as r:
         for chunk in r.chunk_iterator(LAZ_CHUNK):
             x, y = tr.transform(np.asarray(chunk.x), np.asarray(chunk.y))
@@ -234,15 +245,16 @@ def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) 
             m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
             if not m.any():
                 continue
-            if clip is not None:
-                # the corridor is a strip on a diagonal; its bbox is mostly air. Clip per chunk so
-                # the concatenated cloud is the strip, not the box (memory: 300 M points vs 40 M
-                # on Clarksburg)
-                idx = np.flatnonzero(m)
-                inside = shapely.contains_xy(clip, x[idx], y[idx])
-                m[idx[~inside]] = False
-                if not m.any():
-                    continue
+            # the corridor is a strip on a diagonal; its bbox is mostly air. Clip per chunk so the
+            # concatenated cloud is the strip, not the box (memory: 300 M points vs 40 M on
+            # Clarksburg)
+            from .lidar_sources import clip_flags
+
+            foc = clip_flags(m, x, y, clip, road_band)
+            if not m.any():
+                continue
+            if foc is not None:
+                keep["road_band"].append(foc[m])
             z = np.asarray(chunk.z)[m]
             keep["x"].append(x[m])
             keep["y"].append(y[m])
@@ -259,7 +271,7 @@ def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) 
     return {k: (v[0] if len(v) == 1 else np.concatenate(v)) for k, v in keep.items()}
 
 
-def tnm_pick(frame: Frame, bbox, clip: Polygon | None = None) -> tuple[str, list[dict]]:
+def tnm_pick(frame: Frame, bbox, clip: Polygon | None = None, road_band: Polygon | None = None) -> tuple[str, list[dict]]:
     """The TNM project to use and ITS tiles that touch the streets.
 
     ONE project (mixing vintages inside a corridor makes seams no game wants) — but the one that
@@ -269,11 +281,13 @@ def tnm_pick(frame: Frame, bbox, clip: Polygon | None = None) -> tuple[str, list
     of its own making (Rich, terrain-and-data agent, 2026-09-21).
 
     BY THE STREETS, not the bbox. A tile is a whole download, so one no street comes near is
-    minutes of rockyweb for points the clip then throws away.
+    minutes of rockyweb for points the clip then throws away. For a world (`road_band` = the streets,
+    `clip` = the region) the PROJECT is still chosen over the streets' extent, and its tiles are
+    every one that touches the region.
     """
     from . import lidar_sources as ls
 
-    w, s, e, n = frame.bbox_wgs(*bbox)
+    w, s, e, n = frame.bbox_wgs(*(snap_bbox(road_band.bounds) if road_band is not None and not road_band.is_empty else bbox))
     r = session.get(TNM, params={"datasets": "Lidar Point Cloud (LPC)", "bbox": f"{w},{s},{e},{n}", "outputFormat": "JSON", "max": 800}, timeout=120)
     r.raise_for_status()
     items = r.json().get("items", [])

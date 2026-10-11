@@ -171,6 +171,33 @@ def lidar_area(primary_line, assigned_lines: list, block: list[float], margin_m:
     return unary_union([g for g in parts if not g.is_empty])
 
 
+def world_lidar_area(plan: dict, index: int, world, streets):
+    """What a shard reads the point cloud over: the 1 km tiles it OWNS (plan["tiles"]), inside the
+    world, plus its streets (`lidar_area`).
+
+    WHY THE WHOLE BLOCK (Rich, 2026-10-10: "remove the strip logic and have full world trees").
+    Reading only the streets left the lidar CHM at 0 between them -- all of Rockville on
+    dc-metro-take-2 had no trees -- and the global-canopy fallback that replaced those zeros is a
+    different model, so the world showed a strip: lidar canopy along every road, Meta/WRI between.
+
+    THE OWNED TILES, NOT THE BLOCK PLUS ITS MARGIN. The finalizer keeps the owner's copy of every
+    tile (`merge_lidar`), so a tile read in full by its neighbour as well is bytes and minutes for
+    nothing. The streets come along as they always did: a chain's tail and the primary's margin are
+    context for the profiles, and the tiles they touch are written partly, exactly as before.
+    """
+    from shapely.geometry import box as _box
+    from shapely.ops import unary_union
+
+    x0, y0, _ = tile_grid(tuple(plan["bbox"]), float(plan.get("tile_m", TILE_M)))
+    t = float(plan.get("tile_m", TILE_M))
+    owned = [_box(x0 + tx * t, y0 + ty * t, x0 + (tx + 1) * t, y0 + (ty + 1) * t) for tx, ty in (plan.get("tiles") or {}).get(str(index), [])]
+    mine = unary_union(owned) if owned else None
+    if mine is not None and world is not None:
+        mine = mine.intersection(world)
+    parts = [g for g in (mine, streets) if g is not None and not g.is_empty]
+    return unary_union(parts) if parts else streets
+
+
 def profile_owner(line, s: list[float], blocks: list[dict]) -> list[int]:
     """The block owning each station of the primary's profile: the one its point lies in.
 

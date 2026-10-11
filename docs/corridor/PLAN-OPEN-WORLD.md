@@ -111,6 +111,21 @@ rather than a point cloud.
 Until that lands, a world bake gives ground and vegetation across the whole rectangle and its
 canopy still stops at the corridor — so the trees still do.
 
+**Superseded 2026-10-10: the point cloud covers the world now.** The global canopy did land, as a
+fill wherever the lidar DTM has no ground, and it left a visible strip: lidar canopy along every
+road, a different model (2–3 m shorter on dc-metro) between them. Rich: "remove the strip logic and
+have full world trees". So a tiled network bake reads and rasterises the point cloud over its
+whole region (a shard: the 1 km tiles it owns), and the memory that made the first attempt fatal
+is streamed: batches into 1 km tile accumulators, only the near-road points kept, a bounded reader
+queue, a chunked `corridor.laz` write. The STREETS are still the *road band*: the survey, its depth,
+the near-road cloud and the per-batch class-17 test are all decided over them, so profiles,
+structures and decks are made of the same points as before. Measured on dc-metro-take-2 shard 5:
+96 km² read for 65 km² of streets, 1.08 B points for 0.71 B, 7.9 GB for 5.8 GB, peak RSS 14.6 GiB
+for 15.4; near-road cloud, primary profile and every structure identical; lidar canopy > 2 m on
+57 % of the ground away from the roads, where it was 0.1 %. The global model remains the fill for
+ground no survey covers. A site can still ask for the streets alone with `"lidar_area": "streets"`
+(one long highway through open country, where the bbox is a hundred times the road).
+
 ## 5. What does NOT change
 
 **Detail still concentrates on the streets**, which is what Rich said and what the engine is

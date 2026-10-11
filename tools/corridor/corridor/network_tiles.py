@@ -1,7 +1,7 @@
-"""The tiled path for a big network (cadre §6): rasters clipped to the union corridor and cut into
-1 km tiles, so an 18 km region never has to exist as one array.
+"""The tiled path for a big network (cadre §6): rasters over the world region, cut into 1 km tiles,
+so an 18 km region never has to exist as one array.
 
-    lidar/tiles/<x>_<y>.{dtm,dsm,chm,deck_z,deck_n,building_n}.tif   1 m, one per corridor tile
+    lidar/tiles/<x>_<y>.{dtm,dsm,chm,deck_z,deck_n,building_n}.tif   1 m, one per tile of the area
     lidar/{dtm,dsm,chm}.vrt                                            gdalbuildvrt over the tiles
     lidar/corridor.laz                                                 the NEAR-ROAD points only
                                                                        (within BAND_M of any chain)
@@ -13,14 +13,15 @@
     web/tiles/0/<x>_<y>.dem.png|chm.png|naip.jpg + layers.tiles        main's 011/012 schema
 
 Tile (x, y) covers origin + [x·1000, (x+1)·1000) × [y·1000, (y+1)·1000) in site metres, where
-`origin` is the corridor bbox's lower-left snapped to 1 km. Only tiles whose square intersects
-the union corridor exist.
+`origin` is the area's lower-left snapped to 1 km (a shard: the world's). Only tiles whose square
+intersects the area read exist -- the whole region for a network bake since 2026-10-10, the
+streets for one that asks for them (network.world_lidar_area).
 
 WHY TILE-WISE POINTS. Bacon Ridge's 2.6 km² corridor held 13.6 M points; the Crofton region's
-30.7 km² would hold ~150 M — 4-5 GB as numpy arrays, on a box other agents share. So each TNM LAZ
-delivery tile is read, clipped to the corridor, scattered into the 1 km output tiles' min/max/count
-arrays, and dropped. The only points kept are the ones within BAND_M of a road, which is what the
-profile's structure test needs (decks within 14 m, spans within 10 m).
+30.7 km² would hold ~150 M — 4-5 GB as numpy arrays, on a box other agents share. So each batch
+(an EPT node group, a TNM LAZ delivery tile) is read, clipped to the area, scattered into the 1 km
+output tiles' min/max/count arrays, and dropped. The only points kept are the ones within BAND_M
+of a road, which is what the profile's structure test needs (decks within 14 m, spans within 10 m).
 
 WHY A LAZY RASTER. lidar.profile, cuts.measure and friends index `dtm[r, c]` on a numpy array.
 `LazyRaster` opens the VRT and answers the same indexing by reading only the rows/cols asked for,
@@ -63,7 +64,9 @@ _TILE_KINDS = ("dtm", "dsm", "chm", "deck_z", "deck_n", "building_n")
 _LIDAR_MARKER = "lidar.done.json"
 # 2: tiles are named on the grid the caller gives (a shard: the WORLD's), so a version-1 shard
 # directory, named on its own bbox, must not be reused
-_LIDAR_MARKER_VERSION = 2
+# 3: the area read is recorded (`area_sig`): a world reads its whole region, and a stage read over
+# the streets alone must not be reused as one
+_LIDAR_MARKER_VERSION = 3
 
 
 def _fill_naip_blank(rgb: np.ndarray) -> float:
@@ -170,33 +173,52 @@ class NoLidarHere(RuntimeError):
     """
 
 
-def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, cache: Path, origin: tuple[float, float] | None = None) -> dict:
+def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, cache: Path, origin: tuple[float, float] | None = None, road_band=None) -> dict:
     """Points → per-tile rasters + near-road corridor.laz. Returns what the manifest records.
 
-    `origin` anchors the 1 km tile names (see `tile_index`); a shard passes the world's grid."""
+    `origin` anchors the 1 km tile names (see `tile_index`); a shard passes the world's grid.
+
+    `corridor` is the area the point cloud is READ and RASTERISED over. `road_band`, when given, is
+    the streets' outline inside it (each chain buffered by the lidar half-width) and keeps everything
+    road-local exactly as a streets-only read made it: the survey and the depth are chosen over it
+    (lidar.point_batches), and the near-road cloud is the points within BAND_M of a chain that also
+    lie inside it (the readers flag every point, lidar_sources.clip_flags). See
+    network.world_lidar_area for why a world reads its whole region.
+    """
     ldir.mkdir(exist_ok=True)
     tdir = ldir / "tiles"
     tdir.mkdir(exist_ok=True)
-    done = _resume_lidar(frame, bbox, chains, ldir)
+    done = _resume_lidar(frame, bbox, chains, ldir, corridor)
     if done is not None:
         return done
     (x0, y0), tiles = tile_index(bbox, corridor, origin)
     n = int(TILE_M)
+    # ALLOCATED ON THE FIRST POINT, not up front: a tile of the region the survey does not reach
+    # (water, the edge of coverage) costs nothing. 20 MB a tile when it does.
+    wanted = set(tiles)
     acc: dict[tuple[int, int], dict[str, np.ndarray]] = {}
-    for t in tiles:
-        acc[t] = {"dtm": np.full(n * n, np.inf, np.float32), "dsm": np.full(n * n, -np.inf, np.float32), "veg": np.full(n * n, -np.inf, np.float32), "deck": np.full(n * n, -np.inf, np.float32), "deck_n": np.zeros(n * n, np.uint16), "bld_n": np.zeros(n * n, np.uint16)}
+
+    def _acc(t):
+        a = acc.get(t)
+        if a is None and t in wanted:
+            a = acc[t] = {"dtm": np.full(n * n, np.inf, np.float32), "dsm": np.full(n * n, -np.inf, np.float32), "veg": np.full(n * n, -np.inf, np.float32), "deck": np.full(n * n, -np.inf, np.float32), "deck_n": np.zeros(n * n, np.uint16), "bld_n": np.zeros(n * n, np.uint16)}
+        return a
     # the near-road band, at 2 m over the bbox, valued by chain index (+1) so points know their road
     bw = int(np.ceil((bbox[2] - bbox[0]) / 2.0))
     bh = int(np.ceil((bbox[3] - bbox[1]) / 2.0))
     btr = from_origin(bbox[0], bbox[3], 2.0, 2.0)
     band = rasterize([(c["line"].buffer(BAND_M), i + 1) for i, c in enumerate(chains)], out_shape=(bh, bw), transform=btr, fill=0, dtype=np.int32)
+    if road_band is not None:
+        import shapely
+
+        shapely.prepare(road_band)
     near_parts: list[dict] = []
     counts = np.zeros(32, np.int64)
     total = 0
     demoted = 0
     meta: dict = {}
     # EPT (USGS, then NOAA) when it covers these streets, the TNM tiles otherwise — lidar.point_batches
-    batches = lidar.point_batches(frame, bbox, cache, corridor, meta, lidar.dem_beside(ldir.parent))
+    batches = lidar.point_batches(frame, bbox, cache, corridor, meta, lidar.dem_beside(ldir.parent), road_band=road_band)
     # a single TNM LAZ tile is 300+ MB and can take minutes, so a per-batch count alone would still
     # go quiet; the heartbeat prints "reading points, Ns in" if no batch lands within the interval
     hb = progress.Progress("lidar", None)
@@ -215,7 +237,18 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
             hb.tick(note=f"{label}: outside the corridor")
             continue
         cls = part["cls"]
-        share17 = float((cls == 17).sum()) / max(1, len(cls))
+        # in or out of the streets, per point: the readers say (clip_flags); a source that did not
+        # is tested here, in this thread
+        foc = part.pop("road_band", None)
+        if road_band is not None and foc is None:
+            foc = shapely.contains_xy(road_band, part["x"], part["y"])
+        # A VENDOR THAT MISUSES CLASS 17 is judged on the streets' points of the batch when there
+        # is a road band: they are exactly the points a streets-only read judged (stream_ept cuts
+        # its batches by them), so the near-road classes -- and the decks made of them -- stay put.
+        # Judged on the whole batch, the fields dilute the share: on dc-metro-take-2 shard 5 that
+        # turned 210,816 near-road returns from 1 back into 17.
+        judged = cls if foc is None else cls[foc]
+        share17 = float((judged == 17).sum()) / max(1, len(judged))
         if share17 > 0.03:
             part["cls"] = np.where((cls == 17) | (cls == 18), 1, cls).astype(np.uint8)
             demoted += 1
@@ -232,7 +265,7 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         key = tx * 100000 + ty
         for k in np.unique(key[ok]):
             t = (int(k // 100000), int(k % 100000))
-            a = acc.get(t)
+            a = _acc(t)
             if a is None:
                 continue
             m = ok & (key == k)
@@ -256,9 +289,11 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         bc = np.clip(((x - bbox[0]) / 2.0).astype(np.int64), 0, bw - 1)
         road = band[br, bc]
         keep = road > 0
+        if foc is not None:
+            keep &= foc
         if keep.any():
             near_parts.append({k2: v[keep] for k2, v in part.items()} | {"road": road[keep].astype(np.int16)})
-        print(f"  lidar   {label}: {len(cls):,} pts in corridor, {int(keep.sum()):,} near a road", flush=True)
+        print(f"  lidar   {label}: {len(cls):,} pts in the area, {int(keep.sum()):,} near a road", flush=True)
         hb.tick(note=f"{label}: {total / 1e6:.0f}M pts in corridor")
         del part
     hb.close()
@@ -301,6 +336,7 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
     # the VRTs exist. Holding them through the near-road cloud below was half the peak that killed
     # bake 495 at 48 GiB (the other half was the concatenate, see the assembly). Drop them first.
     del acc
+    _trim()
     # the near-road cloud
     #
     # Assemble ONE copy, freeing each batch as its points are copied out. `np.concatenate` built a
@@ -324,26 +360,79 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
             near_parts[i] = None
         pa.close()
         del near_parts
+        _trim()
     if pts is not None:
-        import laspy
-        import pyproj
-
-        las = laspy.create(point_format=6, file_version="1.4")
-        las.header.offsets = [float(np.floor(pts["x"].min())), float(np.floor(pts["y"].min())), 0.0]
-        las.header.scales = [0.01, 0.01, 0.01]
-        las.x, las.y, las.z = pts["x"], pts["y"], pts["z"]
-        las.classification = pts["cls"]
-        las.return_number, las.number_of_returns, las.intensity = pts["rn"], pts["nr"], pts["i"]
-        las.header.add_crs(pyproj.CRS.from_user_input(crs))
-        las.write(ldir / "corridor.laz")
+        _write_near_laz(ldir / "corridor.laz", pts, crs)
     classes = {lidar.CLASS_NAMES.get(i, str(i)): int(c) for i, c in enumerate(counts) if c}
     zf = meta.pop("z_factor", 1.0)
-    result = {**meta, "points_in_corridor": int(total), "near_road_points": int(len(pts["x"])) if pts else 0, "classes": classes, "classification": {"tiles_demoted_17_18": demoted, "class17_trusted": demoted == 0}, "z_factor": zf, "tiles": {"size_m": TILE_M, "origin": [x0, y0], "list": written}, "rasters": ["tiles/*.dtm.tif", "tiles/*.dsm.tif", "tiles/*.chm.tif", "dtm.vrt", "dsm.vrt", "chm.vrt"]}
-    _mark_lidar_done(frame, bbox, chains, ldir, result, written, pts)
+    area = {"area_km2": round(float(corridor.area) / 1e6, 2)} | ({"road_band_km2": round(float(road_band.area) / 1e6, 2)} if road_band is not None else {})
+    result = {**meta, **area, "points_in_corridor": int(total), "near_road_points": int(len(pts["x"])) if pts else 0, "classes": classes, "classification": {"tiles_demoted_17_18": demoted, "class17_trusted": demoted == 0}, "z_factor": zf, "tiles": {"size_m": TILE_M, "origin": [x0, y0], "list": written}, "rasters": ["tiles/*.dtm.tif", "tiles/*.dsm.tif", "tiles/*.chm.tif", "dtm.vrt", "dsm.vrt", "chm.vrt"]}
+    _mark_lidar_done(frame, bbox, chains, ldir, result, written, pts, corridor)
     return {**result, "pts": pts}
 
 
-def _mark_lidar_done(frame: Frame, bbox, chains: list[dict], ldir: Path, result: dict, written: list, pts: dict | None) -> None:
+#: Points per chunk when corridor.laz is written.
+NEAR_LAZ_CHUNK = 5_000_000
+
+
+def _write_near_laz(path: Path, pts: dict, crs: str, chunk: int = NEAR_LAZ_CHUNK) -> None:
+    """The near-road cloud to `path`, a chunk at a time, replaced into place when complete.
+
+    `laspy.create` + `las.write` built the whole point record (30 bytes a point) beside the cloud,
+    plus a float64 temporary per coordinate: on dc-metro-take-2 shard 5 (136.6 M near-road points)
+    that write WAS the stage's peak, ~9 GiB over the cloud itself. A chunked writer holds one chunk.
+    The points, header offsets and scales are the ones the one-shot write produced.
+    """
+    import laspy
+    import pyproj
+
+    hdr = laspy.LasHeader(point_format=6, version="1.4")
+    hdr.offsets = [float(np.floor(pts["x"].min())), float(np.floor(pts["y"].min())), 0.0]
+    hdr.scales = [0.01, 0.01, 0.01]
+    hdr.add_crs(pyproj.CRS.from_user_input(crs))
+    tmp = path.with_name(path.stem + ".part.laz")  # laspy compresses by the extension
+    n = len(pts["x"])
+    try:
+        with laspy.open(tmp, mode="w", header=hdr, do_compress=True) as w:
+            for i in range(0, n, chunk):
+                j = min(n, i + chunk)
+                rec = laspy.ScaleAwarePointRecord.zeros(j - i, header=w.header)
+                rec.x, rec.y, rec.z = pts["x"][i:j], pts["y"][i:j], pts["z"][i:j]
+                rec.classification = pts["cls"][i:j]
+                rec.return_number, rec.number_of_returns, rec.intensity = pts["rn"][i:j], pts["nr"][i:j], pts["i"][i:j]
+                w.write_points(rec)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _trim() -> None:
+    """Hand freed heap back to the kernel (glibc's malloc_trim), so RSS is what is live.
+
+    Tens of thousands of 4-40 MB batch arrays are freed during the point pass, and glibc keeps
+    what it freed inside its arenas: on shard 5 the RSS stayed at the streaming high-water mark
+    after the tile accumulators were dropped, and the near-road write stacked on top of it.
+    A no-op anywhere that is not glibc.
+    """
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+def _area_signature(area) -> str:
+    """The area a lidar stage read, as a short digest: a stage read over the streets is not one
+    read over the whole region, whatever their bboxes say."""
+    import hashlib
+
+    if area is None:
+        return ""
+    return hashlib.sha1(repr((round(float(area.area), 0), tuple(round(float(v), 1) for v in area.bounds))).encode()).hexdigest()
+
+
+def _mark_lidar_done(frame: Frame, bbox, chains: list[dict], ldir: Path, result: dict, written: list, pts: dict | None, area=None) -> None:
     """Record that the lidar stage finished, atomically, so a later run can reuse it.
 
     The VRTs and the near-road cloud are the durable output but nothing said so: bake 495 wrote all
@@ -367,6 +456,7 @@ def _mark_lidar_done(frame: Frame, bbox, chains: list[dict], ldir: Path, result:
         "tiles": [[int(a), int(b)] for a, b in written],
         "chains": len(chains),
         "chains_sig": _chains_signature(chains),
+        "area_sig": _area_signature(area),
         "near_road_points": int(result["near_road_points"]),
         "laz_bytes": int(laz.stat().st_size) if pts is not None and laz.exists() else 0,
         "meta": result,
@@ -393,7 +483,7 @@ def _chains_signature(chains: list[dict]) -> str:
     return h.hexdigest()
 
 
-def _resume_lidar(frame: Frame, bbox, chains: list[dict], ldir: Path) -> dict | None:
+def _resume_lidar(frame: Frame, bbox, chains: list[dict], ldir: Path, area=None) -> dict | None:
     """The finished lidar stage read back from disk, or None when it must be rebuilt.
 
     Reuse is only claimed for the SAME corridor: the marker records the frame, the snapped bbox and
@@ -413,6 +503,8 @@ def _resume_lidar(frame: Frame, bbox, chains: list[dict], ldir: Path) -> dict | 
         if saved.get("crs") != frame.crs or int(saved.get("chains", -1)) != len(chains):
             return None
         if saved.get("chains_sig") != _chains_signature(chains):
+            return None
+        if saved.get("area_sig", "") != _area_signature(area):
             return None
         if [round(float(v), 2) for v in saved.get("bbox", [])] != [round(float(v), 2) for v in bbox]:
             return None
@@ -535,22 +627,39 @@ def _tile_grid(site_dir: Path):
     the site was marked `world`, and the world editor does not mark them, so a bake with no point
     cloud — every bake outside the United States — would have produced no tiles, silently. The test
     is now simply "the lidar did not give us a grid", which is the thing that actually matters.
+
+    ...and WITH a point cloud the grid is still the bbox's (2026-10-10, full-world lidar). The
+    lidar's list holds only the tiles it read AND found ground in, which on a corridor bake was a
+    band along the roads, and the export, the overview and the canopy of everything between the
+    streets followed it. Now the list is the union: every tile of the site's bbox, on the lidar's
+    origin when it has one (both are whole kilometres, so the shift is an integer), plus any lidar
+    tile past the bbox (a chain's tail outside it).
     """
     man = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
     tinfo = (man.get("lidar") or {}).get("tiles") or {}
     x0, y0 = tinfo.get("origin", [None, None])
     tiles = [tuple(t) for t in tinfo.get("list", [])]
-    if x0 is None or not tiles:
-        site_cfg = json.loads((site_dir / "site.json").read_text()) if (site_dir / "site.json").exists() else {}
-        bx = site_cfg.get("bbox_utm")
-        if bx:
-            x0 = math.floor(bx[0] / TILE_M) * TILE_M
-            y0 = math.floor(bx[1] / TILE_M) * TILE_M
-            nx = int(math.ceil((bx[2] - x0) / TILE_M))
-            ny = int(math.ceil((bx[3] - y0) / TILE_M))
-            tiles = [(tx, ty) for ty in range(ny) for tx in range(nx)]
-            print(f"  tiles   no point cloud: {nx}x{ny} = {len(tiles)} tiles from the site's own bbox", flush=True)
-    return x0, y0, tiles
+    site_cfg = json.loads((site_dir / "site.json").read_text()) if (site_dir / "site.json").exists() else {}
+    bx = site_cfg.get("bbox_utm")
+    if not bx:
+        return x0, y0, tiles
+    have_lidar = x0 is not None and bool(tiles)
+    if not have_lidar:
+        x0 = math.floor(bx[0] / TILE_M) * TILE_M
+        y0 = math.floor(bx[1] / TILE_M) * TILE_M
+        tiles = []
+    tx0 = int(math.floor((bx[0] - x0) / TILE_M))
+    ty0 = int(math.floor((bx[1] - y0) / TILE_M))
+    tx1 = int(math.ceil((bx[2] - x0) / TILE_M))
+    ty1 = int(math.ceil((bx[3] - y0) / TILE_M))
+    grid = [(tx, ty) for ty in range(max(0, ty0), ty1) for tx in range(max(0, tx0), tx1)]
+    seen = set(tiles)
+    extra = [t for t in grid if t not in seen]
+    if not have_lidar:
+        print(f"  tiles   no point cloud: {len(grid)} tiles from the site's own bbox", flush=True)
+    elif extra:
+        print(f"  tiles   {len(tiles)} from the point cloud and {len(extra)} more of the site's bbox it has no ground in", flush=True)
+    return x0, y0, tiles + extra
 
 
 #: Set in the parent before forking so every worker inherits `frame` (its pyproj Transformer cache

@@ -1591,6 +1591,19 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     if chm_path.exists() and (use_global or ("dem" in layers and not tiled)):
         c, g = _read_at(chm_path, 2.0, bbox)  # boundless: 0 outside the lidar corridor
         c = np.nan_to_num(c, nan=0.0)
+        # ...and outside it the global canopy, where the site has one: the same rule as the tiles,
+        # the pyramid and the overview (cells the lidar DTM has no ground in). Without it a small
+        # world baked on this single-image path had trees only in a band along its roads.
+        if not use_global and world_chm.exists():
+            dtm_l = site_dir / "lidar" / "dtm.tif"
+            zl = _read_at(dtm_l, 2.0, bbox)[0] if dtm_l.exists() else None
+            nolidar = np.ones(c.shape, bool) if zl is None or zl.shape != c.shape else (~np.isfinite(zl) | (zl <= -9998))
+            if nolidar.any():
+                gc = _read_at(world_chm, 2.0, bbox)[0]
+                if gc.shape == c.shape:
+                    gc[gc <= -9998] = 0.0
+                    gc = np.clip(np.nan_to_num(gc, nan=0.0), 0.0, 60.0)
+                    c[nolidar] = gc[nolidar]
         # The canopy model is "unclassified points above ground", and on a working interstate that
         # includes every truck the flight caught: a tractor-trailer is a 4 m "tree" on the pavement.
         # Zero the canopy over both carriageways (paved width + 2 m) so nothing grows on the road.

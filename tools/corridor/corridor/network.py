@@ -24,8 +24,9 @@ in the region whose `name` or `ref` is in `roads`, chains each identity into car
     crossings.json   for the primary (osm.crossings); a branch meeting it is a `merge`/`grade`
 
 Rasters, lidar, profile and export for a network are in `network_bake` below, called from
-__main__.fetch_site when `site["kind"] == "network"`; every raster is clipped to the corridor and
-the web layers go out as 1 km tiles (export_tiles). The single-road modules are reused where a
+__main__.fetch_site when `site["kind"] == "network"`; the rasters cover the world region (the drawn
+boundary, or the bbox -- see `world_lidar_area` for the point cloud) and the web layers go out as
+1 km tiles (export_tiles). The single-road modules are reused where a
 function takes a line: profile per chain, cuts/rock/water per chain.
 """
 from __future__ import annotations
@@ -399,9 +400,11 @@ def write_vectors(site: dict, frame: Frame, R: dict, out: Path, half_width: floa
     # network's convex hull because a hull gives a world ragged diagonal edges for nothing, and
     # measured on crofton-triangle the bbox is only 1.29x the hull.
     #
-    # Opt-in per site. On a dense suburban network the corridor already covers half the bbox and
-    # this costs about 2x; on one highway through open country it would cost far more, and there
-    # the corridor idea is still right. See docs/corridor/PLAN-OPEN-WORLD.md.
+    # `world` is still what adds the margin and widens the OSM query to the region's hull. The
+    # REGION itself is the bbox for every network now, not the corridor (Rich, 2026-10-10: "remove
+    # the strip logic and have full world trees"): the world editor never sets `world`, so its
+    # radius-drawn worlds (dc-metro-take-2) had their imagery and their point cloud cut to a band
+    # along the roads. See docs/corridor/PLAN-OPEN-WORLD.md.
     #
     world = bool(site.get("world"))
     margin = float(site.get("world_margin_m", 300.0))
@@ -412,7 +415,7 @@ def write_vectors(site: dict, frame: Frame, R: dict, out: Path, half_width: floa
         region = sel
     else:
         bbox = snap_bbox(corridor.buffer(margin).bounds if world else corridor.bounds)
-        region = shp_box(*bbox) if world else corridor
+        region = shp_box(*bbox)
     ident = {"ref": prim["ref"]} if prim["ref"] else {"name": prim["ident"]}
     site_json = {**site, "frame": {"epsg": frame.epsg, "origin": frame.origin}, "bbox_utm": bbox, "corridor": mapping(corridor), "region": mapping(region), "world": world, "ident": ident}
     (out / "site.json").write_text(json.dumps(site_json))
@@ -540,6 +543,27 @@ def place_junctions(frame: Frame, junctions: list[dict], line_utm, what: str = "
     return out
 
 
+def lidar_reads_region(site: dict) -> bool:
+    """Whether a network bake reads the point cloud over its whole region (the default) or only
+    over its streets (`"lidar_area": "streets"` in the site file, for a single long highway through
+    open country, where the region's bbox is a hundred times the road)."""
+    return str(site.get("lidar_area", "region")).strip().lower() != "streets"
+
+
+def world_lidar_area(site: dict, region, streets):
+    """The area a tiled network bake reads and rasterises the point cloud over: the world region
+    and the streets together (a chain's tail can leave a drawn boundary, and its profile still
+    needs ground), or the streets alone when the site asks for that (`lidar_reads_region`).
+
+    The streets stay the ROAD BAND whichever it is (`road_band` in network_tiles.lidar_tiled): the
+    survey, its depth and the near-road cloud are chosen over them, so the profiles and structures
+    are the same.
+    """
+    if not lidar_reads_region(site) or region is None or region.is_empty:
+        return streets
+    return unary_union([region, streets])
+
+
 def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set[str], data: Path, cache: Path) -> None:
     """A network site through the single-image pipeline: the union corridor's bbox is the raster
     extent (fine for a neighbourhood; the 18 km Crofton region goes through the tiled path). Every
@@ -568,19 +592,18 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     world = V["world"]
     bbox = V["bbox"]
     #
-    # THE IMAGERY AND THE VEGETATION COVER THE WORLD. THE POINT CLOUD DOES NOT, AND SHOULD NOT.
+    # THE STREETS ARE `lidar_corridor`; THE POINT CLOUD IS READ OVER THE WORLD (world_lidar_area).
     #
-    # It did, briefly, and the bake died twice in the lidar stage with no traceback: 2.45x the
-    # ground meant 2.45x the points, on a machine with four gigabytes free. But the memory is the
-    # symptom, not the argument. Everything the point cloud is actually FOR is road-local -- the
-    # DTM under the carriageway, bridge-deck clearances, the structures, the along-track profile
-    # with its cut-and-fill. None of that means anything in the middle of a field.
+    # Everything road-local -- the DTM under the carriageway, bridge-deck clearances, structures,
+    # the along-track profile -- is still decided by the streets: the survey and its depth are
+    # chosen over them and the near-road cloud is the points inside them. The rasters (DTM, DSM,
+    # CHM, deck and building counts) cover the whole region, so the canopy no longer stops at a
+    # band along the roads with the global model painted between.
     #
-    # What the world needs from lidar is the CANOPY, and there is a better source for that which
-    # covers the whole planet already: the Meta/WRI global 1 m canopy model in `canopy.py`, which
-    # its own docstring calls "a candidate replacement for the US lidar CHM too". Wiring it in for
-    # a world bake is the remaining step for trees away from roads; until then a world gets
-    # imagery and vegetation everywhere and its canopy still stops at the corridor.
+    # The streets-only read of 2026-09 died twice on a four-gigabyte machine at 2.45x the ground;
+    # what made that fatal (every point held, the accumulators allocated up front, an unbounded
+    # reader queue) is streamed now: points go into 1 km tile accumulators batch by batch, and only
+    # the near-road ones are kept. dc-metro-take-2 shard 5, full block: see the commit message.
     lidar_corridor = unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in R["chains"]])
     print(f"  osm     {V['features']} features, {len(V['crossings'])} crossings on the primary; bbox {(bbox[2] - bbox[0]) / 1000:.1f} × {(bbox[3] - bbox[1]) / 1000:.1f} km, corridor {corridor.area / 1e6:.1f} km²" + (f", WORLD {region.area / 1e6:.1f} km² ({region.area / max(corridor.area, 1):.2f}x)" if world else ""), flush=True)
     prim = R["primary"]
@@ -592,7 +615,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     manifest["tiled"] = tiled
     if tiled:
         why = "editor bake" if asked else "bbox over 6 km"
-        print(f"  tiled   {why}: rasters clipped to the corridor and cut into 1 km tiles", flush=True)
+        print(f"  tiled   {why}: rasters over the region, cut into 1 km tiles", flush=True)
     manifest["spine"] = {"ident": V["ident"], "nearest_way": prim["ways"][0]["id"], "snap_distance_m": round(float(prim["line"].distance(Point(*frame.origin))), 1), "photo_s": round(V["photo_s"], 1), "length_m": prim["length_m"], "trimmed": [False, False], "network": True, "roads": R["found"], "roads_missing": R["missing"], "chains": len(R["chains"])}
     manifest["osm"] = {"features": V["features"], "crossings": len(V["crossings"])}
 
@@ -667,9 +690,10 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
         from . import network_tiles
 
         ldir = out / "lidar"
-        lbbox = snap_bbox(lidar_corridor.bounds)
+        larea = world_lidar_area(site, region, lidar_corridor)
+        lbbox = snap_bbox(larea.bounds)
         try:
-            meta = network_tiles.lidar_tiled(frame, lbbox, lidar_corridor, R["chains"], ldir, cache)
+            meta = network_tiles.lidar_tiled(frame, lbbox, larea, R["chains"], ldir, cache, road_band=lidar_corridor)
         except network_tiles.NoLidarHere as exc:
             no_lidar = str(exc)
             meta = None
@@ -721,7 +745,11 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             branches.append(branch_rec(c, bp))
         print(f"  branch  {len(branches)} branches profiled from the DEM, {failed} failed; no structures (a surface model has no bridge decks)", flush=True)
     elif "lidar" not in skip:
-        # the single-image path: the whole corridor's points in memory, as for a single road
+        # the single-image path: the whole corridor's points in memory, as for a single road.
+        # STILL THE STREETS ONLY, on purpose: this path holds every point at once (lidar.rasters),
+        # so the region's points would be the region's memory. Only a hand-written site under 6 km
+        # with no `tiled` gets here -- the editor marks every bake tiled -- and its canopy past the
+        # band comes from the global model (fetched below for `world` sites).
         ldir = out / "lidar"
         ldir.mkdir(exist_ok=True)
         lbbox = snap_bbox(lidar_corridor.bounds)
@@ -818,7 +846,11 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     # or when the point cloud did not give us a canopy of our own.
     #
     have_lidar_chm = (out / "lidar" / "chm.tif").exists() or (out / "lidar" / "chm.vrt").exists()
-    if (world or no_lidar or not have_lidar_chm) and "canopy" not in skip:
+    # ...and for every TILED bake: its lidar now covers the region, but a survey's edge, a river or
+    # the far side of a state line can still leave ground with no lidar at all, and that is what
+    # the global model fills (export_tiles, pyramid, overview). The editor never sets `world`, so
+    # gating on it alone meant its bakes with lidar never fetched the fallback.
+    if (world or tiled or no_lidar or not have_lidar_chm) and "canopy" not in skip:
         from . import canopy
 
         try:
@@ -906,6 +938,9 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
     corridor = unary_union([c["line"].buffer(half_width, cap_style="flat") for c in shard_chains])
     # the PRIMARY only over this block and its margin; the assigned chains whole (shards.lidar_area)
     lidar_corridor = shardlib.lidar_area(prim["line"], [c["line"] for c in shard_chains if c is not prim], block, margin, lidar_half_width)
+    # and the point cloud over the tiles this block owns, in the world (shards.world_lidar_area)
+    sel = selection_polygon(site, frame)
+    larea = shardlib.world_lidar_area(plan, index, sel if sel is not None else shp_box(*plan["bbox"]), lidar_corridor) if lidar_reads_region(site) else lidar_corridor
 
     if "dem" not in skip:
         dem.fetch_dem(frame, bbox, sdir / "dem_1m.tif", cache)
@@ -936,11 +971,11 @@ def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: flo
         from . import network_tiles
 
         ldir = sdir / "lidar"
-        lbbox = snap_bbox(lidar_corridor.bounds)
+        lbbox = snap_bbox(larea.bounds)
         try:
             # tiles named on the WORLD's grid, so the finalizer's merge by file name is by place
             gx, gy, _ = shardlib.tile_grid(tuple(plan["bbox"]))
-            meta = network_tiles.lidar_tiled(frame, lbbox, lidar_corridor, shard_chains, ldir, cache, origin=(gx, gy))
+            meta = network_tiles.lidar_tiled(frame, lbbox, larea, shard_chains, ldir, cache, origin=(gx, gy), road_band=lidar_corridor)
         except network_tiles.NoLidarHere as exc:
             no_lidar = str(exc)
             meta = None

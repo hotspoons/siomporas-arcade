@@ -3,8 +3,7 @@
 siomporas-arcade is a collection of games inspired by the 80s and 90s, in TypeScript and
 three.js, served as one browser arcade. The games are `apps/arcade` (the shell and lobby that
 mounts them), `apps/conduit` (Apex Conduit), `apps/stuntin` (Stuntin'), `apps/coast` (Turbo
-Radrun), `apps/fighter` (Concrete Crown, unlisted) and `apps/drivin-redirect` (an old address
-kept alive). Each app has its own README, MILESTONE, DECISIONS and HANDOFF.
+Radrun) and `apps/fighter` (Concrete Crown, unlisted). Each app has its own README, MILESTONE, DECISIONS and HANDOFF.
 
 The shared runtime packages are `packages/engine` (`@apex/engine`), `packages/enginesim`
 (`@apex/enginesim`) and `packages/stunt-pieces` (`@apex/stunt-pieces`). They are consumed as

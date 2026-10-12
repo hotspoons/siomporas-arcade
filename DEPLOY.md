@@ -8,7 +8,6 @@ One site, one Worker, one address. Every game is a path beneath it:
 | ↳ Turbo Radrun | `apps/coast` | — | https://arcade.siomporas.com/radrun |
 | ↳ Stuntin’ | `apps/stuntin` | — | https://arcade.siomporas.com/stuntin |
 | ↳ Apex Conduit | `apps/conduit` | — | https://arcade.siomporas.com/apex |
-| An old address | `apps/drivin-redirect` | `drivin` | https://drivin.siomporas.com → /stuntin |
 
 Only `apps/arcade` is deployable. The three game directories are libraries now: they have no
 `wrangler.jsonc` and no `deploy` script, and the arcade imports each one as a lazily-loaded chunk.
@@ -30,10 +29,10 @@ addresses running and getting staler**, because a Worker keeps serving its last 
 
 Decide one of two things:
 
-1. **Redirect them into the arcade.** Copy `apps/drivin-redirect` three times, keeping each Worker's
-   existing `name` (`turbo-radrun`, `stuntin`, `apex-conduit`) so it takes over the custom domain it
-   already holds, point each `TO` at the matching path, and add three `build: skip` rows to the
-   deploy matrix. Old links keep working. This is what `drivin.siomporas.com` already does.
+1. **Redirect them into the arcade.** Publish a Worker with no assets that 301s to the matching
+   path, keeping each old Worker's `name` (`turbo-radrun`, `stuntin`, `apex-conduit`) so it takes
+   over the custom domain it already holds — a custom domain belongs to one Worker, so under a new
+   name Cloudflare refuses it the domain and leaves the old game running. Old links keep working.
 2. **Delete them.** Cloudflare dashboard → Workers & Pages → delete each Worker, which releases its
    custom domain. Old links stop working.
 
@@ -107,14 +106,9 @@ Drivin’ became Stuntin’, which is the worked example — though it happened 
 Worker and a subdomain of its own, so half of it is now about a path instead. See *Changing a game's
 name or its path* below for where a name lives today.
 
-Two things not to move. Players' saved data is keyed by the old name in their browsers —
+One thing not to move: players' saved data is keyed by the old name in their browsers —
 `apex-drivin.tracks.v1` and friends — so those keys stay put and say why; rename them and every track
-anyone has built disappears. And the old *address* keeps working: `apps/drivin-redirect` is a Worker
-with no assets and no build that holds `drivin.siomporas.com` and 301s into the arcade. It is a
-matrix entry like any other, marked `build: skip`, and it keeps the *old* Worker name on purpose: a
-custom domain belongs to one Worker, so publishing the redirect as `drivin` replaces the game that
-used to be there. Under a new name Cloudflare would refuse it the domain and leave the old game
-running at the old address for ever. That is the pattern to copy for the other three subdomains.
+anyone has built disappears.
 
 ## Changing a game's name or its path
 
